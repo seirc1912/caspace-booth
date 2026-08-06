@@ -9,11 +9,15 @@ export interface OrderMetadata {
   status: OrderStatus
   device: string
   browser: string
+  phoneNumber: string
+  roomId: string
 }
 
 export interface CreateOrderInput {
   template: PrintTemplate
   slots: Array<FilledSlot | null>
+  phoneNumber: string
+  roomId: string
 }
 
 export interface OrderArtifacts {

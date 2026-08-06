@@ -11,7 +11,7 @@ interface PhotoManagerProps {
   onReplace: (photoId: string, file: File) => void
 }
 
-const acceptedTypes = 'image/jpeg,image/png,image/heic,image/heif,.jpg,.jpeg,.png,.heic,.heif'
+const acceptedTypes = 'image/*'
 
 export function PhotoManager({ photos, maximum, onAdd, onDelete, onMove, onReplace }: PhotoManagerProps) {
   const addInput = useRef<HTMLInputElement>(null)

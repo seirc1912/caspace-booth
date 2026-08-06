@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { TemplateCanvas } from '../../../components/editor/TemplateCanvas'
 import { printSizes } from '../../../data/printSizes'
@@ -17,6 +17,7 @@ import { reorderLayer } from '../model/layerManager'
 import { layoutPresets } from '../model/layoutPresets'
 import type { LayoutPresetId } from '../model/layoutPresets'
 import { useAdminTemplates } from '../store/AdminTemplateContext'
+import { useRooms } from '../store/RoomContext'
 import type { AdminAsset } from '../store/AssetLibraryContext'
 import type { AdminTemplateInfo, AdminTemplateRecord } from '../types'
 import { downloadTemplatePackage } from '../utils/templateDownloads'
@@ -37,7 +38,7 @@ function asPrintTemplate(document: TemplateDocument, source?: PrintTemplate): Pr
 
 function blankRecord(): AdminTemplateRecord {
   const id = uid()
-  return { id, status: 'draft', info: { category: 'Custom', description: '', printSize: '4 × 6 in', dpi: 300, orientation: 'portrait' }, template: asPrintTemplate(createTemplateDocument(id, 'Untitled Template')), coverUrl: null, updatedAt: new Date().toISOString() }
+  return { id, roomId: 'room-default', status: 'draft', info: { category: 'Custom', description: '', printSize: '4 × 6 in', dpi: 300, orientation: 'portrait' }, template: asPrintTemplate(createTemplateDocument(id, 'Untitled Template')), coverUrl: null, updatedAt: new Date().toISOString() }
 }
 
 function createElement(type: TemplateElement['type']): TemplateElement {
@@ -47,17 +48,20 @@ function createElement(type: TemplateElement['type']): TemplateElement {
 
 export function AdminTemplateEditorPage({ templateId }: { templateId: string | null }) {
   const store = useAdminTemplates()
+  const { rooms } = useRooms()
   const { navigate } = usePathname()
   const initial = useMemo(() => templateId ? store.templates.find((item) => item.id === templateId) ?? blankRecord() : blankRecord(), [store.templates, templateId])
   const history = useTemplateHistory(structuredClone(initial.template))
   const [info, setInfo] = useState<AdminTemplateInfo>(initial.info)
+  const [roomId, setRoomId] = useState(initial.roomId)
   const [coverUrl, setCoverUrl] = useState(initial.coverUrl)
   const [backgroundUrl, setBackgroundUrl] = useState(initial.template.backgroundUrl)
   const [thumbnailUrl, setThumbnailUrl] = useState(initial.template.thumbnailUrl)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
-  const [zoom, setZoom] = useState(0.75)
+  const [zoom, setZoom] = useState(0.5)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [previewPhotos, setPreviewPhotos] = useState(false)
+  const clipboard = useRef<TemplateSlot | TemplateElement | null>(null)
   const guides = history.document.settings ?? defaultGuides
   const template = { ...asPrintTemplate(history.document, initial.template), backgroundUrl, thumbnailUrl }
   const selectedSlot = template.slots.find((slot) => selectedIds.includes(slot.id))
@@ -108,6 +112,31 @@ export function AdminTemplateEditorPage({ templateId }: { templateId: string | n
     setSelectedIds([copy.id])
   }
   const duplicateSelected = () => selectedIds.forEach(duplicateLayer)
+  const changeLayer = (id: string, changes: Partial<TemplateSlot & TemplateElement>) => {
+    if (history.document.slots.some((item) => item.id === id)) changeSlot(id, changes)
+    else changeElementById(id, changes)
+  }
+  const contextAction = (action: 'duplicate' | 'delete' | 'forward' | 'backward' | 'copy' | 'paste', id: string | null) => {
+    const source = id ? history.document.slots.find((item) => item.id === id) ?? history.document.elements.find((item) => item.id === id) : null
+    if (action === 'paste' && clipboard.current) {
+      const copy = { ...structuredClone(clipboard.current), id: uid(), x: clipboard.current.x + 20, y: clipboard.current.y + 20, zIndex: clipboard.current.zIndex + 1 }
+      if ('borderRadius' in copy) history.commit({ ...history.document, slots: [...history.document.slots, copy] })
+      else history.commit({ ...history.document, elements: [...history.document.elements, copy] })
+      setSelectedIds([copy.id]); return
+    }
+    if (!id || !source) return
+    if (action === 'duplicate') duplicateLayer(id)
+    else if (action === 'delete') deleteLayer(id)
+    else if (action === 'copy') clipboard.current = structuredClone(source)
+    else if (action === 'forward') changeLayer(id, { zIndex: source.zIndex + 1 })
+    else if (action === 'backward') changeLayer(id, { zIndex: Math.max(0, source.zIndex - 1) })
+  }
+  const enterEditMode = (id: string) => {
+    const element = history.document.elements.find((item) => item.id === id)
+    if (element?.type === 'text') { const content = window.prompt('Edit text', element.content ?? ''); if (content !== null) changeElementById(id, { content }) }
+    const slot = history.document.slots.find((item) => item.id === id)
+    if (slot) changeSlot(id, { cropMode: slot.cropMode === 'contain' ? 'cover' : 'contain' })
+  }
   const reorder = (sourceId: string, targetId: string) => history.commit(reorderLayer(history.document, sourceId, targetId))
   const useLibraryAsset = (asset: AdminAsset) => {
     if (asset.type === 'background') setBackgroundUrl(asset.dataUrl)
@@ -139,19 +168,36 @@ export function AdminTemplateEditorPage({ templateId }: { templateId: string | n
     setSelectedIds([])
   }
   const save = (status = initial.status) => {
-    store.save({ ...initial, status, info, coverUrl, updatedAt: new Date().toISOString(), template: { ...template, settings: guides, backgroundUrl, thumbnailUrl } })
+    store.save({ ...initial, roomId, status, info, coverUrl, updatedAt: new Date().toISOString(), template: { ...template, settings: guides, backgroundUrl, thumbnailUrl } })
     navigate('/admin/templates')
   }
 
+  useEffect(() => {
+    const keydown = (event: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes((event.target as HTMLElement).tagName)) return
+      if (event.key === 'Escape') { setSelectedIds([]); return }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && selectedIds.length) { event.preventDefault(); selectedIds.forEach(deleteLayer); return }
+      if (!selectedIds.length || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+      event.preventDefault(); const amount = event.shiftKey ? 10 : 1
+      const dx = event.key === 'ArrowLeft' ? -amount : event.key === 'ArrowRight' ? amount : 0
+      const dy = event.key === 'ArrowUp' ? -amount : event.key === 'ArrowDown' ? amount : 0
+      const selected = new Set(selectedIds)
+      history.commit({ ...history.document, slots: history.document.slots.map((item) => selected.has(item.id) && !item.locked ? { ...item, x: item.x + dx, y: item.y + dy } : item), elements: history.document.elements.map((item) => selected.has(item.id) && !item.locked ? { ...item, x: item.x + dx, y: item.y + dy } : item) })
+    }
+    window.addEventListener('keydown', keydown)
+    return () => window.removeEventListener('keydown', keydown)
+  })
+
   return <div className="min-w-0">
     <header className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><button className="text-sm font-semibold text-stone-500" onClick={() => navigate('/admin/templates')} type="button">Back to templates</button><h1 className="mt-1 text-2xl font-bold">{template.name}</h1></div><div className="flex flex-wrap gap-2"><button className="min-h-11 rounded-xl border border-stone-200 bg-white px-4 text-sm font-semibold" onClick={() => downloadTemplatePackage({ ...initial, info, coverUrl, template })} type="button">Generate package</button><button className="min-h-11 rounded-xl bg-emerald-600 px-4 text-sm font-semibold text-white" onClick={() => save('published')} type="button">Publish</button><button className="min-h-11 rounded-xl bg-stone-950 px-4 text-sm font-semibold text-white" onClick={() => save('draft')} type="button">Save draft</button></div></header>
-    <nav aria-label="Template editor tools" className="mb-3 flex flex-wrap gap-1 rounded-xl bg-white p-2 shadow-sm"><button className="tool-button" disabled={!history.canUndo} onClick={history.undo} type="button">Undo</button><button className="tool-button" disabled={!history.canRedo} onClick={history.redo} type="button">Redo</button><span className="mx-1 w-px bg-stone-200" /><button className="tool-button font-semibold" onClick={() => commitBuilder({ type: 'add-slot' })} type="button">+ Photo slot</button>{(['text', 'image', 'shape', 'sticker', 'logo', 'overlay', 'qrCode', 'dynamicVariable'] as const).map((type) => <button className="tool-button capitalize" key={type} onClick={() => addElement(type)} type="button">{type === 'qrCode' ? 'QR' : type === 'dynamicVariable' ? 'Variable' : type}</button>)}<span className="mx-1 w-px bg-stone-200" /><button className="tool-button" disabled={!selectedIds.length} onClick={duplicateSelected} type="button">Duplicate</button><button className="tool-button text-rose-600" disabled={!selectedIds.length} onClick={removeSelected} type="button">Delete</button><span className="mx-1 w-px bg-stone-200" /><button className="tool-button" onClick={() => setZoom((value) => Math.max(0.25, value - 0.1))} type="button">Zoom out</button><span className="grid min-h-10 place-items-center px-2 text-xs font-bold">{Math.round(zoom * 100)}%</span><button className="tool-button" onClick={() => setZoom((value) => Math.min(2, value + 0.1))} type="button">Zoom in</button><button className={`tool-button ${previewPhotos ? 'bg-violet-100 text-violet-700' : ''}`} onClick={() => setPreviewPhotos((value) => !value)} type="button">Live preview</button></nav>
+    <nav aria-label="Template editor tools" className="mb-3 flex flex-wrap gap-1 rounded-xl bg-white p-2 shadow-sm"><button className="tool-button" disabled={!history.canUndo} onClick={history.undo} type="button">Undo</button><button className="tool-button" disabled={!history.canRedo} onClick={history.redo} type="button">Redo</button><span className="mx-1 w-px bg-stone-200" /><button className="tool-button font-semibold" onClick={() => commitBuilder({ type: 'add-slot' })} type="button">+ Photo slot</button>{(['text', 'image', 'shape', 'sticker', 'logo', 'overlay', 'qrCode', 'dynamicVariable'] as const).map((type) => <button className="tool-button capitalize" key={type} onClick={() => addElement(type)} type="button">{type === 'qrCode' ? 'QR' : type === 'dynamicVariable' ? 'Variable' : type}</button>)}<span className="mx-1 w-px bg-stone-200" /><button className="tool-button" disabled={!selectedIds.length} onClick={duplicateSelected} type="button">Duplicate</button><button className="tool-button text-rose-600" disabled={!selectedIds.length} onClick={removeSelected} type="button">Delete</button><span className="mx-1 w-px bg-stone-200" /><button className="tool-button" onClick={() => setZoom((value) => Math.max(0.2, value - 0.1))} type="button">Zoom out</button><span className="grid min-h-10 place-items-center px-2 text-xs font-bold">{Math.round(zoom * 100)}%</span><button className="tool-button" onClick={() => setZoom((value) => Math.min(8, value + 0.1))} type="button">Zoom in</button><button className={`tool-button ${previewPhotos ? 'bg-violet-100 text-violet-700' : ''}`} onClick={() => setPreviewPhotos((value) => !value)} type="button">Live preview</button></nav>
     <div className="grid gap-4 xl:grid-cols-[18rem_minmax(0,1fr)_19rem]">
       <div className="grid content-start gap-4"><StudioToolPanel onAddElement={addElement} onAddPhotoSlot={() => commitBuilder({ type: 'add-slot' })} onUseAsset={useLibraryAsset} /><PresetLayoutPicker onApply={applyPreset} /></div>
-      <div>{previewPhotos ? <div className="grid h-[65dvh] min-h-[32rem] place-items-center overflow-auto rounded-2xl bg-stone-200 p-12"><div className="w-full max-w-xl" style={{ transform: `scale(${zoom})` }}><TemplateCanvas activeSlot={null} onActiveSlotChange={() => undefined} onAdd={() => undefined} onRemove={() => undefined} onReplace={() => undefined} onTransform={() => undefined} readonly slots={previewSlots} template={template} /></div></div> : <StudioCanvas guides={guides} onClearSelection={() => setSelectedIds([])} onElementChange={changeElementById} onMove={(id, x, y) => changeSlot(id, { x, y })} onResize={(id, width, height) => changeSlot(id, { width, height })} onSelect={select} pan={pan} selectedSlotIds={selectedIds} template={template} zoom={zoom} />}<div className="mt-2 flex justify-center gap-2"><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan((value) => ({ ...value, x: value.x - 30 }))} type="button">Pan left</button><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan({ x: 0, y: 0 })} type="button">Center</button><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan((value) => ({ ...value, x: value.x + 30 }))} type="button">Pan right</button></div></div>
+      <div>{previewPhotos ? <div className="grid h-[65dvh] min-h-[32rem] place-items-center overflow-auto rounded-2xl bg-stone-200 p-12"><div className="w-full max-w-xl" style={{ transform: `scale(${zoom})` }}><TemplateCanvas activeSlot={null} onActiveSlotChange={() => undefined} onAdd={() => undefined} onRemove={() => undefined} onReplace={() => undefined} onTransform={() => undefined} readonly slots={previewSlots} template={template} /></div></div> : <StudioCanvas guides={guides} onClearSelection={() => setSelectedIds([])} onContextAction={contextAction} onDoubleClick={enterEditMode} onElementChange={changeElementById} onSelect={select} onSlotChange={changeSlot} onViewportChange={(nextZoom, nextPan) => { setZoom(nextZoom); setPan(nextPan) }} pan={pan} selectedSlotIds={selectedIds} template={template} zoom={zoom} />}<div className="mt-2 flex justify-center gap-2"><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan((value) => ({ ...value, x: value.x - 30 }))} type="button">Pan left</button><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan({ x: 0, y: 0 })} type="button">Center</button><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan((value) => ({ ...value, x: value.x + 30 }))} type="button">Pan right</button></div></div>
       <aside className="grid content-start gap-4">
         <section className="panel"><h2 className="text-sm font-bold">Template</h2><div className="mt-3 grid gap-3"><label className="field">Name<input className={inputClass} onChange={(event) => history.commit({ ...history.document, name: event.target.value })} value={template.name} /></label><label className="field">Category<input className={inputClass} onChange={(event) => setInfo((value) => ({ ...value, category: event.target.value }))} value={info.category} /></label><label className="field">Print size<select className={inputClass} onChange={(event) => setInfo((value) => ({ ...value, printSize: event.target.value }))} value={info.printSize}>{printSizes.map((size) => <option key={size.id}>{size.label}</option>)}</select></label><label className="field">Orientation<select className={inputClass} onChange={(event) => setInfo((value) => ({ ...value, orientation: event.target.value as AdminTemplateInfo['orientation'] }))} value={info.orientation}><option value="portrait">Portrait</option><option value="landscape">Landscape</option><option value="square">Square</option></select></label><div className="grid grid-cols-2 gap-2"><NumberField label="Width" value={template.canvas.width} onChange={(width) => history.commit({ ...history.document, canvas: { ...history.document.canvas, width } })} /><NumberField label="Height" value={template.canvas.height} onChange={(height) => history.commit({ ...history.document, canvas: { ...history.document.canvas, height } })} /></div><NumberField label="DPI" value={info.dpi} onChange={(dpi) => setInfo((value) => ({ ...value, dpi }))} /></div></section>
         <section className="panel"><h2 className="text-sm font-bold">Template assets</h2>{(['cover', 'thumbnail', 'background'] as const).map((assetName) => <label className="mt-2 flex min-h-10 cursor-pointer items-center justify-between rounded-lg bg-stone-100 px-3 text-xs font-semibold capitalize" key={assetName}>{assetName}<input accept="image/*" className="sr-only" onChange={uploadTemplateAsset(assetName)} type="file" /></label>)}</section>
+        <section className="panel"><h2 className="text-sm font-bold">Room</h2><label className="field mt-3 block">Assigned room<select className={inputClass} onChange={(event) => setRoomId(event.target.value)} value={roomId}>{rooms.filter((room) => room.isActive).map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label></section>
         <GuideControls onChange={(settings) => history.commit({ ...history.document, settings })} settings={guides} />
         {selectedSlot ? <SlotInspector onChange={(changes) => changeSlot(selectedSlot.id, changes)} slot={selectedSlot} /> : null}
         {selectedElement ? <ElementInspector element={selectedElement} onAsset={uploadLayerAsset} onChange={changeElement} /> : null}

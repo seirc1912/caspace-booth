@@ -10,6 +10,7 @@ const uid = () => globalThis.crypto.randomUUID()
 function initialTemplates(): AdminTemplateRecord[] {
   return printTemplates.map((template) => ({
     id: template.id,
+    roomId: 'room-default',
     status: 'published',
     info: {
       category: 'Photo Booth', description: `${template.name} print template`, printSize: '4 × 6 in', dpi: 300,
@@ -24,7 +25,8 @@ function initialTemplates(): AdminTemplateRecord[] {
 function loadTemplates() {
   try {
     const value = localStorage.getItem(storageKey)
-    return value ? JSON.parse(value) as AdminTemplateRecord[] : initialTemplates()
+    if (!value) return initialTemplates()
+    return (JSON.parse(value) as Array<AdminTemplateRecord & { roomId?: string }>).map((record) => ({ ...record, roomId: record.roomId ?? 'room-default' }))
   } catch {
     return initialTemplates()
   }

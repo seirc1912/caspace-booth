@@ -23,10 +23,10 @@ const deviceName = () => /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ?
 const browserName = () => navigator.userAgent
 
 export class MockOrderService implements OrderService {
-  async create({ template, slots }: CreateOrderInput): Promise<PrintOrder> {
+  async create({ template, slots, phoneNumber, roomId }: CreateOrderInput): Promise<PrintOrder> {
     if (!slots.length || slots.some((slot) => !slot)) throw new Error('Fill every photo slot before submitting the order')
     const orderId = nextOrderId()
-    const metadata: OrderMetadata = { orderId, templateId: template.id, createdAt: new Date().toISOString(), status: 'Pending', device: deviceName(), browser: browserName() }
+    const metadata: OrderMetadata = { orderId, templateId: template.id, phoneNumber, roomId, createdAt: new Date().toISOString(), status: 'Pending', device: deviceName(), browser: browserName() }
     const history = JSON.parse(localStorage.getItem('selfbooth.mock-orders') ?? '[]') as OrderMetadata[]
     localStorage.setItem('selfbooth.mock-orders', JSON.stringify([...history.slice(-49), metadata]))
     const rendered = await renderComposition(template, slots)
@@ -38,7 +38,7 @@ export class MockOrderService implements OrderService {
   }
 
   async downloadPreview({ template, slots }: CreateOrderInput) {
-    const { preview } = await renderComposition(template, slots)
-    download(preview, 'preview.jpg')
+    const { print } = await renderComposition(template, slots)
+    download(print, 'caspace-print.png')
   }
 }

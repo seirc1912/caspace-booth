@@ -22,6 +22,7 @@ export function TemplateSurface({ className = '', renderSlot, template }: Templa
       {template.slots.map((slot, index) => slot.visible === false ? null : (
         <div
           className="absolute"
+          data-studio-render={slot.id}
           key={slot.id}
           style={{
             left: `${slot.x / template.canvas.width * 100}%`,

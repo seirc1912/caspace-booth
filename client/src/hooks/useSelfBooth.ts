@@ -1,10 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { printTemplates } from '../data/templates'
 import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
+import { readCustomerTemplates, readRooms } from '../services/catalog/RoomCatalogService'
 
 const initialTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 const maximumPhotos = 20
-const supportedPhoto = (file: File) => file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/heic' || file.type === 'image/heif' || /\.(jpe?g|png|heic|heif)$/i.test(file.name)
+const journeyStorageKey = 'selfbooth.customer-journey.v1'
+const supportedPhoto = (file: File) => file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|heic|heif)$/i.test(file.name)
 const toPhoto = (file: File): PhotoAsset => ({ id: `phone-${globalThis.crypto.randomUUID()}`, src: URL.createObjectURL(file), alt: file.name, source: 'phone' })
 
 function toSlot(photo: PhotoAsset): FilledSlot {
@@ -12,8 +13,12 @@ function toSlot(photo: PhotoAsset): FilledSlot {
 }
 
 export function useSelfBooth() {
+  const [catalog] = useState(() => ({ rooms: readRooms().filter((room) => room.isActive), templates: readCustomerTemplates() }))
+  const storedJourney = useMemo(() => { try { return JSON.parse(sessionStorage.getItem(journeyStorageKey) ?? '{}') as { phoneNumber?: string; selectedRoomId?: string; selectedTemplateId?: string } } catch { return {} } }, [])
   const [view, setView] = useState<AppView>('templates')
-  const [selectedTemplateId, setSelectedTemplateId] = useState(printTemplates[0].id)
+  const [phoneNumber, setPhoneNumberState] = useState(storedJourney.phoneNumber ?? '')
+  const [selectedRoomId, setSelectedRoomIdState] = useState(storedJourney.selectedRoomId ?? '')
+  const [selectedTemplateId, setSelectedTemplateIdState] = useState(storedJourney.selectedTemplateId ?? '')
   const [slots, setSlots] = useState<Array<FilledSlot | null>>([])
   const [currentSlot, setCurrentSlot] = useState<number | null>(null)
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([])
@@ -21,9 +26,15 @@ export function useSelfBooth() {
   const lastRandomOrder = useRef('')
 
   const template = useMemo(
-    () => printTemplates.find((item) => item.id === selectedTemplateId) ?? printTemplates[0],
-    [selectedTemplateId],
+    () => catalog.templates.find((item) => item.id === selectedTemplateId) ?? catalog.templates[0],
+    [catalog.templates, selectedTemplateId],
   )
+  const room = useMemo(() => catalog.rooms.find((item) => item.id === selectedRoomId) ?? null, [catalog.rooms, selectedRoomId])
+  const roomTemplates = useMemo(() => catalog.templates.filter((item) => item.roomId === selectedRoomId), [catalog.templates, selectedRoomId])
+  const persistJourney = (next: { phoneNumber: string; selectedRoomId: string; selectedTemplateId: string }) => sessionStorage.setItem(journeyStorageKey, JSON.stringify(next))
+  const setPhoneNumber = (value: string) => { setPhoneNumberState(value); persistJourney({ phoneNumber: value, selectedRoomId, selectedTemplateId }) }
+  const selectRoom = (id: string) => { setSelectedRoomIdState(id); setSelectedTemplateIdState(''); setSlots([]); persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: '' }) }
+  const selectTemplate = (id: string) => { setSelectedTemplateIdState(id); setSlots([]); persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id }) }
 
   const openEditor = useCallback(() => {
     setSlots(template.slots.map(() => null))
@@ -34,13 +45,12 @@ export function useSelfBooth() {
 
   const fillEmpty = useCallback((photos: PhotoAsset[]) => {
     setSlots((current) => {
-      let photoIndex = 0
-      return current.map((slot) => {
-        if (slot || !photos[photoIndex]) return slot
-        return toSlot(photos[photoIndex++])
-      })
+      const next = [...current]
+      const emptyIndices = template.slots.map((slot, index) => ({ index, x: slot.x, y: slot.y })).filter(({ index }) => !next[index]).sort((left, right) => left.y - right.y || left.x - right.x).map(({ index }) => index)
+      emptyIndices.forEach((slotIndex, photoIndex) => { const photo = photos[photoIndex]; if (photo) next[slotIndex] = toSlot(photo) })
+      return next
     })
-  }, [])
+  }, [template.slots])
 
   const replaceSlot = useCallback((index: number, photo: PhotoAsset) => {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? toSlot(photo) : slot)))
@@ -140,9 +150,16 @@ export function useSelfBooth() {
     view,
     setView,
     template,
-    templates: printTemplates,
+    rooms: catalog.rooms,
+    room,
+    roomTemplates,
+    templates: catalog.templates,
+    phoneNumber,
+    setPhoneNumber,
+    selectedRoomId,
+    selectRoom,
     selectedTemplateId,
-    selectTemplate: setSelectedTemplateId,
+    selectTemplate,
     slots,
     currentSlot,
     setCurrentSlot,

@@ -69,7 +69,7 @@ export function ComposerPage({ template, slots, currentSlot, selectedPhotoIds, o
     <PageShell className="pb-24">
       <header className="mb-5 flex items-center justify-between">
         <button className="grid size-11 place-items-center rounded-full bg-white shadow-sm hover:bg-stone-100" onClick={onBack} type="button"><Icon name="back" /><span className="sr-only">Choose another template</span></button>
-        <div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Step 2 of 3</p><h1 className="font-bold">Add your photos</h1></div>
+        <div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Step 4 of 6</p><h1 className="font-bold">Add your photos</h1></div>
         <span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span>
       </header>
       <div className="mx-auto grid w-full max-w-4xl items-start gap-6 md:grid-cols-[minmax(18rem,24rem)_1fr]">
@@ -82,8 +82,8 @@ export function ComposerPage({ template, slots, currentSlot, selectedPhotoIds, o
         </aside>
       </div>
       <div className="mx-auto mt-6 w-full max-w-4xl"><PhotoManager maximum={maximumPhotos} onAdd={onAddPhotos} onDelete={onDeletePhoto} onMove={onMovePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} /></div>
-      <EditorToolbar canContinue={slots.every(Boolean)} onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null) }} onNext={onNext} onRandomFill={onRandomFill} onShuffle={onShuffle} />
-      <SourceSheet open={sourceOpen && !galleryOpen} onCancel={() => setSourceOpen(false)} onPhonePhotos={(photos) => { onAddPhotoAssets(photos); placePhotos(photos) }} onSelfBoothPhotos={openGallery} />
+      <EditorToolbar canContinue={slots.every(Boolean)} onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null) }} onNext={onNext} onShuffle={onShuffle} />
+      <SourceSheet hasPhoto={currentSlot !== null && Boolean(slots[currentSlot])} open={sourceOpen && !galleryOpen} onCancel={() => setSourceOpen(false)} onPhonePhotos={(photos) => { onAddPhotoAssets(photos); placePhotos(photos) }} onRemove={() => { if (currentSlot !== null) onRemove(currentSlot); setSourceOpen(false); onCurrentSlotChange(null) }} onSelfBoothPhotos={openGallery} />
       {galleryOpen ? (
         <PhotoGallery
           onAutoFill={() => placePhotos(selectedPhotos)}
