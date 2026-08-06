@@ -1,9 +1,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
-import { samplePhotos } from '../data/samplePhotos'
 import { printTemplates } from '../data/templates'
 import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
 
-const initialTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0 }
+const initialTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
+const maximumPhotos = 20
+const supportedPhoto = (file: File) => file.type === 'image/jpeg' || file.type === 'image/png' || file.type === 'image/heic' || file.type === 'image/heif' || /\.(jpe?g|png|heic|heif)$/i.test(file.name)
+const toPhoto = (file: File): PhotoAsset => ({ id: `phone-${globalThis.crypto.randomUUID()}`, src: URL.createObjectURL(file), alt: file.name, source: 'phone' })
 
 function toSlot(photo: PhotoAsset): FilledSlot {
   return { photo, transform: { ...initialTransform } }
@@ -15,6 +17,7 @@ export function useSelfBooth() {
   const [slots, setSlots] = useState<Array<FilledSlot | null>>([])
   const [currentSlot, setCurrentSlot] = useState<number | null>(null)
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([])
+  const [uploadedPhotos, setUploadedPhotos] = useState<PhotoAsset[]>([])
   const lastRandomOrder = useRef('')
 
   const template = useMemo(
@@ -56,7 +59,8 @@ export function useSelfBooth() {
   }, [])
 
   const randomFill = useCallback(() => {
-    const shuffled = [...samplePhotos]
+    if (!uploadedPhotos.length) return
+    const shuffled = [...uploadedPhotos]
     for (let index = shuffled.length - 1; index > 0; index -= 1) {
       const target = Math.floor(Math.random() * (index + 1))
       ;[shuffled[index], shuffled[target]] = [shuffled[target], shuffled[index]]
@@ -68,7 +72,45 @@ export function useSelfBooth() {
     }
     lastRandomOrder.current = visibleOrder.map((photo) => photo.id).join()
     setSlots(visibleOrder.map(toSlot))
-  }, [template.slots.length])
+  }, [template.slots.length, uploadedPhotos])
+
+  const addUploadedPhotos = useCallback((files: File[]) => {
+    setUploadedPhotos((current) => [...current, ...files.filter(supportedPhoto).slice(0, maximumPhotos - current.length).map(toPhoto)])
+  }, [])
+  const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
+    setUploadedPhotos((current) => [...current, ...photos.slice(0, maximumPhotos - current.length)])
+  }, [])
+
+  const deleteUploadedPhoto = useCallback((photoId: string) => {
+    setUploadedPhotos((current) => {
+      const photo = current.find((item) => item.id === photoId)
+      if (photo) URL.revokeObjectURL(photo.src)
+      return current.filter((item) => item.id !== photoId)
+    })
+    setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? null : slot))
+  }, [])
+
+  const replaceUploadedPhoto = useCallback((photoId: string, file: File) => {
+    if (!supportedPhoto(file)) return
+    const replacement = toPhoto(file)
+    setUploadedPhotos((current) => current.map((photo) => {
+      if (photo.id !== photoId) return photo
+      URL.revokeObjectURL(photo.src)
+      return replacement
+    }))
+    setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? { ...slot, photo: replacement } : slot))
+  }, [])
+
+  const moveUploadedPhoto = useCallback((photoId: string, direction: -1 | 1) => {
+    setUploadedPhotos((current) => {
+      const index = current.findIndex((photo) => photo.id === photoId)
+      const target = index + direction
+      if (index < 0 || target < 0 || target >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[target]] = [next[target]!, next[index]!]
+      return next
+    })
+  }, [])
 
   const shuffleSlots = useCallback(() => {
     setSlots((current) => {
@@ -105,6 +147,13 @@ export function useSelfBooth() {
     currentSlot,
     setCurrentSlot,
     selectedPhotoIds,
+    uploadedPhotos,
+    maximumPhotos,
+    addUploadedPhotos,
+    addUploadedAssets,
+    deleteUploadedPhoto,
+    replaceUploadedPhoto,
+    moveUploadedPhoto,
     toggleSelectedPhoto,
     clearSelectedPhotos: () => setSelectedPhotoIds([]),
     openEditor,

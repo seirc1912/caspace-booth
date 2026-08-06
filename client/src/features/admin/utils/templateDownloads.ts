@@ -16,4 +16,5 @@ export async function downloadTemplatePackage(record: AdminTemplateRecord) {
   download(new Blob([serializeTemplate(template)], { type: 'application/json' }), 'template.json')
   await asset(template.backgroundUrl, 'background.png', template.canvas.width, template.canvas.height, template.backgroundColor)
   await asset(template.thumbnailUrl, 'thumbnail.png', 600, 800, template.backgroundColor)
+  await asset(record.coverUrl, 'cover.png', 1200, 675, template.backgroundColor)
 }

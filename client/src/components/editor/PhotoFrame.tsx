@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import type { PointerEvent, WheelEvent } from 'react'
-import type { FilledSlot, ImageTransform } from '../../types/selfBooth'
+import type { FilledSlot, ImageTransform, PhotoSlotEditableRules } from '../../types/selfBooth'
 import { Icon } from '../ui/Icon'
 
 interface PhotoFrameProps {
@@ -12,9 +12,11 @@ interface PhotoFrameProps {
   onRemove: () => void
   onReplace: () => void
   onTransform: (transform: Partial<ImageTransform>) => void
+  rules?: PhotoSlotEditableRules
 }
 
-export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, onReplace, onTransform }: PhotoFrameProps) {
+export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, onReplace, onTransform, rules }: PhotoFrameProps) {
+  const permissions = rules ?? { canReplace: true, canMove: true, canZoom: true, canRotate: true }
   const pointerOrigin = useRef<{ x: number; y: number; slotX: number; slotY: number } | null>(null)
   const pointers = useRef(new Map<number, { x: number; y: number }>())
   const pinchOrigin = useRef<{ distance: number; zoom: number } | null>(null)
@@ -28,7 +30,7 @@ export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, o
   }
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (!slot) return
+    if (!slot || !permissions.canMove) return
     event.currentTarget.setPointerCapture(event.pointerId)
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
     pointerMoved.current = false
@@ -40,7 +42,7 @@ export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, o
   }
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (!slot || !pointers.current.has(event.pointerId)) return
+    if (!slot || !permissions.canMove || !pointers.current.has(event.pointerId)) return
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
 
     if (pointers.current.size >= 2 && pinchOrigin.current) {
@@ -62,7 +64,7 @@ export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, o
     })
   }
 
-  const reset = () => onTransform({ zoom: 1, rotation: 0, x: 0, y: 0 })
+  const reset = () => onTransform({ zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false })
 
   const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
     const wasSinglePointer = pointers.current.size === 1
@@ -82,7 +84,7 @@ export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, o
   }
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
-    if (!slot) return
+    if (!slot || !permissions.canZoom) return
     event.preventDefault()
     const zoom = slot.transform.zoom * Math.exp(-event.deltaY * 0.002)
     onTransform({ zoom: Math.min(3, Math.max(1, zoom)) })
@@ -106,15 +108,15 @@ export function PhotoFrame({ index, slot, active, onActivate, onAdd, onRemove, o
             className="pointer-events-none absolute inset-0 h-full w-full select-none object-cover transition-transform duration-100"
             draggable={false}
             src={slot.photo.src}
-            style={{ transform: `translate(${slot.transform.x * 100}%, ${slot.transform.y * 100}%) rotate(${slot.transform.rotation}deg) scale(${slot.transform.zoom})` }}
+            style={{ transform: `translate(${slot.transform.x * 100}%, ${slot.transform.y * 100}%) rotate(${slot.transform.rotation}deg) scale(${slot.transform.flipX ? -slot.transform.zoom : slot.transform.zoom}, ${slot.transform.flipY ? -slot.transform.zoom : slot.transform.zoom})` }}
           />
           <button aria-label={`Edit photo ${index + 1}`} className="absolute inset-0 cursor-grab active:cursor-grabbing" onClick={onActivate} type="button" />
           {active ? (
             <div className="absolute inset-x-2 bottom-2 flex items-center justify-center gap-1 rounded-xl bg-stone-950/85 p-1 text-white backdrop-blur" onPointerDown={(event) => event.stopPropagation()}>
-              <button aria-label="Zoom out" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={() => onTransform({ zoom: Math.max(1, slot.transform.zoom - 0.15) })} type="button"><Icon name="zoomOut" /></button>
-              <button aria-label="Zoom in" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={() => onTransform({ zoom: Math.min(3, slot.transform.zoom + 0.15) })} type="button"><Icon name="zoomIn" /></button>
-              <button aria-label="Rotate" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={() => onTransform({ rotation: slot.transform.rotation + 90 })} type="button"><Icon name="rotate" /></button>
-              <button aria-label="Replace image" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={onReplace} type="button"><Icon name="camera" /></button>
+              {permissions.canZoom ? <><button aria-label="Zoom out" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={() => onTransform({ zoom: Math.max(1, slot.transform.zoom - 0.15) })} type="button"><Icon name="zoomOut" /></button><button aria-label="Zoom in" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={() => onTransform({ zoom: Math.min(3, slot.transform.zoom + 0.15) })} type="button"><Icon name="zoomIn" /></button></> : null}
+              {permissions.canRotate ? <button aria-label="Rotate" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={() => onTransform({ rotation: slot.transform.rotation + 90 })} type="button"><Icon name="rotate" /></button> : null}
+              <button aria-label="Flip horizontally" className="grid size-9 place-items-center rounded-lg text-xs font-bold hover:bg-white/15" onClick={() => onTransform({ flipX: !slot.transform.flipX })} type="button">Flip</button>
+              {permissions.canReplace ? <button aria-label="Replace image" className="grid size-9 place-items-center rounded-lg hover:bg-white/15" onClick={onReplace} type="button"><Icon name="camera" /></button> : null}
               <button aria-label="Remove image" className="grid size-9 place-items-center rounded-lg text-rose-300 hover:bg-white/15" onClick={onRemove} type="button"><Icon name="trash" /></button>
             </div>
           ) : null}

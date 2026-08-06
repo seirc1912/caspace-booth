@@ -31,7 +31,7 @@ const clamp = (value: number, minimum: number, maximum: number) => Math.min(maxi
 const snap = (value: number, size: number) => Math.round(value / size) * size
 
 export function createTemplateDocument(id: string, name: string, width = 1200, height = 1800): TemplateDocument {
-  return { schemaVersion: 1, id, name, canvas: { width, height }, assets: { background: 'background.png', thumbnail: 'thumbnail.png' }, backgroundColor: '#ffffff', slots: [], variables: [], elements: [] }
+  return { schemaVersion: 1, id, name, canvas: { width, height }, assets: { background: 'background.png', thumbnail: 'thumbnail.png', cover: 'cover.png' }, backgroundColor: '#ffffff', slots: [], variables: [], elements: [], layers: [], settings: { snapToGrid: true, gridSize: 20, showSafeArea: false, showTrimLine: false, showBleedArea: false } }
 }
 
 export function createTemplateBuilderState(document: TemplateDocument): TemplateBuilderState {
@@ -61,7 +61,7 @@ export function templateBuilderReducer(state: TemplateBuilderState, action: Temp
     case 'reorder-element': return { ...state, document: { ...state.document, elements: state.document.elements.map((element) => element.id === action.elementId ? { ...element, zIndex: action.zIndex } : element) } }
     case 'add-slot': {
       const highestZ = Math.max(0, ...state.document.slots.map((slot) => slot.zIndex))
-      const slot = normalizeSlot(state, { id: createId(), x: 100, y: 100, width: 400, height: 500, rotation: 0, borderRadius: 0, lockAspectRatio: true, zIndex: highestZ + 1, ...action.slot })
+      const slot = normalizeSlot(state, { id: createId(), x: 100, y: 100, width: 400, height: 500, rotation: 0, borderRadius: 0, lockAspectRatio: true, zIndex: highestZ + 1, editableRules: { canReplace: true, canMove: true, canZoom: true, canRotate: true }, ...action.slot })
       return { ...state, document: { ...state.document, slots: [...state.document.slots, slot] }, selectedSlotId: slot.id }
     }
     case 'delete-slot': return { ...state, document: { ...state.document, slots: state.document.slots.filter((slot) => slot.id !== action.slotId) }, selectedSlotId: state.selectedSlotId === action.slotId ? null : state.selectedSlotId }

@@ -19,7 +19,7 @@ export function TemplateSelectionPage({ templates, selectedTemplateId, onContinu
         <BrandMark compact />
         <span className="rounded-full bg-white px-3 py-1.5 text-xs font-semibold text-stone-500 shadow-sm">Studio session</span>
       </div>
-      <StepHeader description="Pick a frame style for your photo strip. You can add your photos next." eyebrow="Step 1 of 2" title="Choose your print frame" />
+      <StepHeader description="Pick a frame style for your photo strip. You can add your photos next." eyebrow="Step 1 of 3" title="Choose your print frame" />
       <section aria-label="Print templates" className="grid grid-cols-2 gap-3 pb-28 sm:grid-cols-3 sm:gap-5 lg:grid-cols-6">
         {templates.map((template) => (
           <TemplateCard key={template.id} onSelect={() => onSelect(template.id)} selected={selectedTemplateId === template.id} template={template} />

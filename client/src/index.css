@@ -14,3 +14,33 @@ body {
   min-width: 320px;
   min-height: 100vh;
 }
+
+@utility tool-button {
+  min-height: 2.5rem;
+  border-radius: 0.5rem;
+  padding-inline: 0.75rem;
+  font-size: 0.875rem;
+  transition: background-color 150ms ease, color 150ms ease, opacity 150ms ease;
+
+  &:hover:not(:disabled) {
+    background: var(--color-stone-100);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
+  }
+}
+
+@utility panel {
+  border-radius: 1rem;
+  background: white;
+  padding: 1rem;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+@utility field {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-stone-600);
+}

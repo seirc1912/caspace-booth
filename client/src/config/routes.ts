@@ -1,5 +1,9 @@
 export const customerRoutes = Object.freeze({
   home: '/',
+  templates: '/templates',
+  editor: '/editor',
+  preview: '/preview',
+  success: '/success',
 })
 
 export const adminRoutes = Object.freeze({
