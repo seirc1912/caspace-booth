@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "birthday",
+  "name": "Birthday",
+  "canvas": { "width": 1200, "height": 1800 },
+  "assets": { "background": "background.png", "thumbnail": "thumbnail.png" },
+  "backgroundColor": "#ef6f86",
+  "slots": [
+    { "id": "birthday-1", "x": 100, "y": 100, "width": 1000, "height": 450, "rotation": -1, "borderRadius": 30, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "birthday-2", "x": 100, "y": 590, "width": 1000, "height": 450, "rotation": 1, "borderRadius": 30, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "birthday-3", "x": 100, "y": 1080, "width": 1000, "height": 450, "rotation": -1, "borderRadius": 30, "lockAspectRatio": true, "zIndex": 1 }
+  ],
+  "variables": [{ "id": "birthday-copy", "type": "customText", "value": "MAKE A WISH", "x": 100, "y": 1580, "width": 1000, "height": 90, "fontSize": 42, "color": "#ffffff", "align": "center", "zIndex": 2 }]
+}

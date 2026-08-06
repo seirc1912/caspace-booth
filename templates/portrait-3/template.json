@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "portrait-3",
+  "name": "Portrait 3",
+  "canvas": { "width": 1200, "height": 1800 },
+  "assets": { "background": "background.png", "thumbnail": "thumbnail.png" },
+  "backgroundColor": "#f0e9df",
+  "slots": [
+    { "id": "portrait-1", "x": 100, "y": 90, "width": 1000, "height": 470, "rotation": 0, "borderRadius": 22, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "portrait-2", "x": 100, "y": 585, "width": 1000, "height": 470, "rotation": 0, "borderRadius": 22, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "portrait-3", "x": 100, "y": 1080, "width": 1000, "height": 470, "rotation": 0, "borderRadius": 22, "lockAspectRatio": true, "zIndex": 1 }
+  ],
+  "variables": [{ "id": "portrait-site", "type": "website", "x": 100, "y": 1600, "width": 1000, "height": 80, "fontSize": 34, "color": "#292524", "align": "center", "zIndex": 2 }]
+}

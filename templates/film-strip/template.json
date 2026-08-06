@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "film-strip",
+  "name": "Film Strip",
+  "canvas": { "width": 900, "height": 1800 },
+  "assets": { "background": "background.png", "thumbnail": "thumbnail.png" },
+  "backgroundColor": "#292524",
+  "slots": [
+    { "id": "film-1", "x": 110, "y": 90, "width": 680, "height": 340, "rotation": 0, "borderRadius": 0, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "film-2", "x": 110, "y": 455, "width": 680, "height": 340, "rotation": 0, "borderRadius": 0, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "film-3", "x": 110, "y": 820, "width": 680, "height": 340, "rotation": 0, "borderRadius": 0, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "film-4", "x": 110, "y": 1185, "width": 680, "height": 340, "rotation": 0, "borderRadius": 0, "lockAspectRatio": true, "zIndex": 1 }
+  ],
+  "variables": [{ "id": "film-date", "type": "date", "x": 110, "y": 1580, "width": 680, "height": 70, "fontSize": 30, "color": "#ffffff", "align": "center", "zIndex": 2 }]
+}

@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "wedding",
+  "name": "Wedding",
+  "canvas": { "width": 1800, "height": 1200 },
+  "assets": { "background": "background.png", "thumbnail": "thumbnail.png" },
+  "backgroundColor": "#e8ddd0",
+  "slots": [
+    { "id": "wedding-top-left", "x": 80, "y": 80, "width": 780, "height": 460, "rotation": 0, "borderRadius": 28, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "wedding-bottom-left", "x": 80, "y": 570, "width": 780, "height": 460, "rotation": 0, "borderRadius": 28, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "wedding-top-right", "x": 940, "y": 80, "width": 780, "height": 460, "rotation": 0, "borderRadius": 28, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "wedding-bottom-right", "x": 940, "y": 570, "width": 780, "height": 460, "rotation": 0, "borderRadius": 28, "lockAspectRatio": true, "zIndex": 1 }
+  ],
+  "variables": [{ "id": "wedding-title", "type": "customText", "value": "OUR DAY", "x": 600, "y": 1060, "width": 600, "height": 70, "fontSize": 32, "color": "#292524", "align": "center", "zIndex": 2 }]
+}

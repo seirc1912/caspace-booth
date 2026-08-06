@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "classic-4",
+  "name": "Classic 4 Cut",
+  "canvas": { "width": 1200, "height": 1800 },
+  "assets": { "background": "background.png", "thumbnail": "thumbnail.png" },
+  "backgroundColor": "#171717",
+  "slots": [
+    { "id": "classic-1", "x": 90, "y": 80, "width": 1020, "height": 330, "rotation": 0, "borderRadius": 18, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "classic-2", "x": 90, "y": 435, "width": 1020, "height": 330, "rotation": 0, "borderRadius": 18, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "classic-3", "x": 90, "y": 790, "width": 1020, "height": 330, "rotation": 0, "borderRadius": 18, "lockAspectRatio": true, "zIndex": 1 },
+    { "id": "classic-4", "x": 90, "y": 1145, "width": 1020, "height": 330, "rotation": 0, "borderRadius": 18, "lockAspectRatio": true, "zIndex": 1 }
+  ],
+  "variables": [{ "id": "classic-brand", "type": "brandName", "x": 100, "y": 1540, "width": 1000, "height": 120, "fontSize": 52, "color": "#ffffff", "align": "center", "zIndex": 2 }]
+}
