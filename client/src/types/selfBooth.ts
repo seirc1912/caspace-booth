@@ -8,6 +8,7 @@ export interface TemplateCanvasSize {
 export interface TemplateAssets {
   background: string
   thumbnail: string
+  cover?: string
 }
 
 export interface TemplateSlot {
@@ -24,6 +25,23 @@ export interface TemplateSlot {
   opacity?: number
   visible?: boolean
   locked?: boolean
+  mask?: 'rectangle' | 'rounded' | 'circle'
+  cropMode?: 'cover' | 'contain'
+  editableRules?: PhotoSlotEditableRules
+}
+
+export interface PhotoSlotEditableRules {
+  canReplace: boolean
+  canMove: boolean
+  canZoom: boolean
+  canRotate: boolean
+}
+
+export interface ElementEditableRules {
+  canEdit: boolean
+  canMove: boolean
+  canResize: boolean
+  canRotate: boolean
 }
 
 export type TemplateVariableType = 'brandLogo' | 'brandName' | 'website' | 'date' | 'time' | 'qrCode' | 'customText'
@@ -42,7 +60,7 @@ export interface TemplateVariable {
   zIndex: number
 }
 
-export type TemplateElementType = 'text' | 'logo' | 'sticker' | 'shape' | 'qrCode' | 'dynamicVariable'
+export type TemplateElementType = 'text' | 'image' | 'logo' | 'sticker' | 'overlay' | 'shape' | 'qrCode' | 'dynamicVariable'
 
 export interface TemplateElement {
   id: string
@@ -69,7 +87,26 @@ export interface TemplateElement {
   textAlign?: 'left' | 'center' | 'right'
   color?: string
   letterSpacing?: number
+  shadowColor?: string
+  shadowBlur?: number
+  shadowX?: number
+  shadowY?: number
   variableType?: TemplateVariableType | 'sessionId'
+  editableRules?: ElementEditableRules
+}
+
+export interface TemplateGuideSettings {
+  snapToGrid: boolean
+  gridSize: number
+  showSafeArea: boolean
+  showTrimLine: boolean
+  showBleedArea: boolean
+}
+
+export interface TemplateLayerReference {
+  id: string
+  type: 'background' | 'photoSlot' | TemplateElementType | 'dynamicVariable'
+  zIndex: number
 }
 
 export interface TemplateDocument {
@@ -82,6 +119,8 @@ export interface TemplateDocument {
   slots: TemplateSlot[]
   variables: TemplateVariable[]
   elements: TemplateElement[]
+  layers?: TemplateLayerReference[]
+  settings?: TemplateGuideSettings
 }
 
 export interface PrintTemplate extends TemplateDocument {
@@ -102,6 +141,8 @@ export interface ImageTransform {
   rotation: number
   x: number
   y: number
+  flipX?: boolean
+  flipY?: boolean
 }
 
 export interface FilledSlot {

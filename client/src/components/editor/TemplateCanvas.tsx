@@ -25,7 +25,7 @@ export function TemplateCanvas({ template, slots, activeSlot, onActiveSlotChange
         return (
           <div className="h-full w-full overflow-hidden" style={{ borderRadius }}>
             {readonly && slot ? (
-              <img alt={slot.photo.alt} className="h-full w-full object-cover" src={slot.photo.src} style={{ transform: `translate(${slot.transform.x * 100}%, ${slot.transform.y * 100}%) rotate(${slot.transform.rotation}deg) scale(${slot.transform.zoom})` }} />
+              <img alt={slot.photo.alt} className="h-full w-full object-cover" src={slot.photo.src} style={{ transform: `translate(${slot.transform.x * 100}%, ${slot.transform.y * 100}%) rotate(${slot.transform.rotation}deg) scale(${slot.transform.flipX ? -slot.transform.zoom : slot.transform.zoom}, ${slot.transform.flipY ? -slot.transform.zoom : slot.transform.zoom})` }} />
             ) : (
               <PhotoFrame
                 active={activeSlot === index}
@@ -35,6 +35,7 @@ export function TemplateCanvas({ template, slots, activeSlot, onActiveSlotChange
                 onRemove={() => onRemove(index)}
                 onReplace={() => onReplace(index)}
                 onTransform={(transform) => onTransform(index, transform)}
+                rules={templateSlot.editableRules}
                 slot={slot}
               />
             )}

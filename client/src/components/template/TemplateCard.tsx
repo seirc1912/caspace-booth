@@ -3,11 +3,12 @@ import { TemplateThumbnail } from './TemplateThumbnail'
 
 interface TemplateCardProps {
   template: PrintTemplate
+  printSize?: string
   selected: boolean
   onSelect: () => void
 }
 
-export function TemplateCard({ template, selected, onSelect }: TemplateCardProps) {
+export function TemplateCard({ template, printSize, selected, onSelect }: TemplateCardProps) {
   return (
     <button
       aria-pressed={selected}
@@ -22,6 +23,7 @@ export function TemplateCard({ template, selected, onSelect }: TemplateCardProps
       <span className="block px-1 pb-1 pt-3">
         <span className="block font-semibold">{template.name}</span>
         <span className="mt-0.5 block text-sm text-stone-500">{template.slotCount} photo slots</span>
+        {printSize ? <span className="mt-1 block text-xs font-semibold text-stone-400">{printSize}</span> : null}
       </span>
     </button>
   )
