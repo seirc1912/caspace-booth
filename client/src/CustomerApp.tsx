@@ -35,11 +35,13 @@ export function CustomerApp() {
 
   useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError)
 
-  const startBoothSession = async (boothId: string) => {
-    const session = await startPhotoLibrarySession(boothId, booth.phoneNumber)
-    sessionStorage.setItem('selfbooth.photo-library-session', JSON.stringify(session))
-    booth.resetSessionPhotos(); booth.selectRoom(boothId); setCustomerSession(session)
+  const enterRoom = (boothId: string) => {
+    booth.resetSessionPhotos(); booth.selectRoom(boothId)
     setOrderDraft(null); setOrderItems({}); setFramePreviews({}); navigate('/editor')
+    void startPhotoLibrarySession(boothId, booth.phoneNumber).then((session) => {
+      sessionStorage.setItem('selfbooth.photo-library-session', JSON.stringify(session))
+      setCustomerSession(session)
+    }).catch((error) => booth.reportPhotoError(error instanceof Error ? error.message : 'Unable to start customer session'))
   }
 
   const downloadCurrentFrame = async () => {
@@ -91,7 +93,7 @@ export function CustomerApp() {
   useEffect(() => { if (pathname === '/editor' && booth.slots.length === 0) booth.openEditor() }, [booth, pathname])
 
   if (pathname === '/') return <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage onBack={() => navigate('/')} onSelect={(roomId) => { void startBoothSession(roomId).catch((error) => booth.reportPhotoError(error instanceof Error ? error.message : 'Unable to start customer session')) }} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
   if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
   if (pathname === '/editor' && booth.selectedTemplateId) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={booth.roomTemplates.length} frameIds={booth.roomTemplates.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAddPhotoAssets={booth.addUploadedAssets} onBack={() => navigate('/rooms')} onClear={booth.clearAll} onClearSelectedPhotos={booth.clearSelectedPhotos} onCurrentSlotChange={booth.setCurrentSlot} onDeletePhoto={booth.deleteUploadedPhoto} onDownload={downloadCurrentFrame} onFillEmpty={booth.fillEmpty} onMovePhoto={booth.moveUploadedPhoto} onNext={saveAndContinue} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRandomFill={booth.randomFill} onRemove={booth.removeSlot} onReplace={booth.replaceSlot} onSave={booth.completeCurrentFrame} onSelectFrame={booth.selectFrame} onShuffle={booth.shuffleSlots} onToggleSelectedPhoto={booth.toggleSelectedPhoto} onTransform={booth.updateTransform} onFitChange={booth.updateFit} selectedPhotoIds={booth.selectedPhotoIds} slots={booth.slots} template={booth.template} uploadedPhotos={booth.uploadedPhotos} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
   if (pathname === '/summary' && booth.room) return <RoomSummaryPage completedFrameIds={booth.completedFrameIds} frameSlots={booth.frameSlots} onEdit={(index) => { booth.selectFrame(index); navigate('/editor') }} onRemove={removeOrderItem} onSubmit={submitOrder} onSuccess={(id) => { sessionStorage.setItem('selfbooth.last-order-id', id); setOrderId(id); navigate('/success') }} previewUrls={framePreviews} roomName={booth.room.name} templates={booth.roomTemplates} />
