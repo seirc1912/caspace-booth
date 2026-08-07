@@ -138,7 +138,6 @@ export interface PhotoAsset {
   id: string
   src: string
   previewSrc?: string
-  sourceBlob?: Blob
   alt: string
   source: 'selfbooth' | 'phone'
 }

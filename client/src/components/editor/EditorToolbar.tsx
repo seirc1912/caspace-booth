@@ -4,26 +4,34 @@ interface EditorToolbarProps {
   canContinue: boolean
   onAutoFill: () => void
   onClear: () => void
-  onNext: () => void
-  onShuffle: () => void
   onDownload?: () => void
+  onNext: () => void
+  onSave: () => void
+  onShuffle: () => void
   nextLabel?: string
   downloading?: boolean
   onPrevious?: () => void
   previousDisabled?: boolean
+  saved?: boolean
 }
 
-const actionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl px-1 text-[11px] font-semibold text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-35 md:min-h-14 md:text-xs'
+const utilityActionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl px-1 text-[11px] font-semibold text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-35 md:min-h-14 md:text-xs'
+const primaryActionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl px-2 text-xs font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40 md:min-h-14 md:text-sm md:shadow-none'
 
-export function EditorToolbar({ canContinue, onAutoFill, onClear, onNext, onShuffle, onDownload, nextLabel = 'Order', downloading = false, onPrevious, previousDisabled = false }: EditorToolbarProps) {
-  return <nav aria-label="Editor actions" className="fixed inset-x-0 bottom-0 z-20 overflow-x-clip border-t border-stone-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:px-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-    <div className={`mx-auto grid max-w-3xl grid-cols-5 gap-1 pr-20 md:pr-0 ${onPrevious ? 'md:grid-cols-6' : onDownload ? 'md:grid-cols-5' : 'md:grid-cols-4'}`}>
-      {onPrevious ? <button aria-label="Previous" className={actionClass} disabled={previousDisabled || downloading} onClick={onPrevious} type="button"><Icon name="back" /><span className="hidden sm:inline">Previous</span></button> : null}
-      <button aria-label="Auto Fill" className={actionClass} onClick={onAutoFill} type="button"><Icon name="sparkles" /><span className="hidden sm:inline">Auto Fill</span></button>
-      <button aria-label="Shuffle" className={actionClass} onClick={onShuffle} type="button"><Icon name="shuffle" /><span className="hidden sm:inline">Shuffle</span></button>
-      <button aria-label="Clear All" className={actionClass} onClick={onClear} type="button"><Icon name="trash" /><span className="hidden sm:inline">Clear All</span></button>
-      {onDownload ? <button aria-label="Download" className={actionClass} disabled={!canContinue || downloading} onClick={onDownload} type="button"><Icon name="download" /><span className="hidden sm:inline">{downloading ? 'Exporting' : 'Download'}</span></button> : null}
-      <button aria-busy={downloading} aria-label={nextLabel} className="fixed bottom-[max(0.5rem,env(safe-area-inset-bottom))] right-2 min-h-12 min-w-[4.5rem] rounded-xl bg-[var(--brand-secondary)] px-3 text-sm font-bold text-white shadow-lg disabled:opacity-40 md:static md:min-h-14 md:min-w-0 md:px-2 md:shadow-none" disabled={!canContinue || downloading} onClick={onNext} type="button">{downloading ? 'Ordering…' : nextLabel}</button>
+export function EditorToolbar({ canContinue, onAutoFill, onClear, onDownload, onNext, onSave, onShuffle, nextLabel = 'Order', downloading = false, onPrevious, previousDisabled = false, saved = false }: EditorToolbarProps) {
+  return <nav aria-label="Editor actions" className="fixed inset-x-0 bottom-0 z-20 border-t border-stone-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:px-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <div className="mx-auto max-w-3xl md:flex md:items-stretch md:gap-2">
+      <div className="grid grid-cols-4 gap-1 md:flex-1">
+        {onPrevious ? <button aria-label="Previous" className={utilityActionClass} disabled={previousDisabled || downloading} onClick={onPrevious} type="button"><Icon name="back" /><span className="hidden sm:inline">Previous</span></button> : <span />}
+        <button aria-label="Auto Fill" className={utilityActionClass} disabled={downloading} onClick={onAutoFill} type="button"><Icon name="sparkles" /><span className="hidden sm:inline">Auto Fill</span></button>
+        <button aria-label="Shuffle" className={utilityActionClass} disabled={downloading} onClick={onShuffle} type="button"><Icon name="shuffle" /><span className="hidden sm:inline">Shuffle</span></button>
+        <button aria-label="Clear All" className={utilityActionClass} disabled={downloading} onClick={onClear} type="button"><Icon name="trash" /><span className="hidden sm:inline">Clear All</span></button>
+      </div>
+      <div className="mt-1 grid grid-cols-3 gap-1 md:mt-0 md:w-[22rem]">
+        <button aria-label="Save" className={`${primaryActionClass} bg-sky-600`} disabled={!canContinue || downloading} onClick={onSave} type="button">{saved ? 'Saved' : 'Save'}</button>
+        {onDownload ? <button aria-label="Download" className={`${primaryActionClass} bg-stone-950`} disabled={!canContinue || downloading} onClick={onDownload} type="button">{downloading ? 'Exporting' : 'Download'}</button> : <span />}
+        <button aria-busy={downloading} aria-label={nextLabel} className={`${primaryActionClass} bg-[var(--brand-secondary)]`} disabled={!canContinue || downloading} onClick={onNext} type="button">{downloading ? 'Ordering…' : nextLabel}</button>
+      </div>
     </div>
   </nav>
 }
