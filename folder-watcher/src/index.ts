@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, watch } from 'node:fs'
+import { existsSync } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve } from 'node:path'
 import { loadEnvFile } from 'node:process'
+import chokidar from 'chokidar'
 
 interface Config { boothId: string; watchFolder: string; supabaseUrl: string; serviceRoleKey?: string }
 interface QueueItem { path: string; attempts: number }
@@ -27,7 +28,7 @@ const queue: QueueItem[] = []
 let processing = false
 
 const delay = (milliseconds: number) => new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds))
-const isJpeg = (path: string) => ['.jpg', '.jpeg'].includes(extname(path).toLowerCase())
+const isSupportedImage = (path: string) => ['.jpg', '.jpeg', '.png'].includes(extname(path).toLowerCase())
 async function checked(response: Response) { if (!response.ok) throw new Error(`Supabase ${response.status}: ${await response.text()}`); return response }
 
 async function waitUntilStable(path: string) {
@@ -46,6 +47,7 @@ async function waitUntilStable(path: string) {
 }
 
 async function upload(item: QueueItem) {
+  console.log(`[upload] started: ${item.path}`)
   await waitUntilStable(item.path)
   const bytes = await readFile(item.path)
   const hash = createHash('sha256').update(bytes).digest('hex')
@@ -73,6 +75,7 @@ async function upload(item: QueueItem) {
   }
   uploaded.add(hash)
   console.log(`[uploaded] ${basename(item.path)} -> ${session.session_id}`)
+  console.log(`[upload] completed: ${item.path}`)
 }
 
 async function drain() {
@@ -83,6 +86,7 @@ async function drain() {
     try { await upload(item); queued.delete(item.path) }
     catch (error) {
       item.attempts += 1
+      console.error(`[upload] failed: ${item.path}`, error)
       console.error(`[retry ${item.attempts}] ${item.path}`, error)
       if (item.attempts < 8) { await delay(Math.min(30_000, 1000 * 2 ** item.attempts)); queue.push(item) }
       else queued.delete(item.path)
@@ -92,9 +96,36 @@ async function drain() {
 }
 
 function enqueue(path: string) {
-  if (!isJpeg(path) || queued.has(path)) return
-  queued.add(path); queue.push({ path, attempts: 0 }); void drain()
+  if (!isSupportedImage(path)) {
+    console.log(`[watcher] file rejected (unsupported extension): ${path}`)
+    return
+  }
+  if (queued.has(path)) {
+    console.log(`[watcher] file rejected (already queued): ${path}`)
+    return
+  }
+  console.log(`[watcher] file accepted: ${path}`)
+  queued.add(path)
+  queue.push({ path, attempts: 0 })
+  console.log(`[queue] queued: ${path}`)
+  void drain()
 }
 
-watch(config.watchFolder, (_event, filename) => { if (filename) enqueue(resolve(config.watchFolder, filename)) })
-console.log(`FolderWatcher ready: ${config.boothId} -> ${config.watchFolder}`)
+console.log(`[watcher] initializing: ${config.watchFolder}`)
+const watcher = chokidar.watch(config.watchFolder, { ignoreInitial: true })
+watcher.on('ready', () => {
+  console.log(`[watcher] initialized: ${config.watchFolder}`)
+  console.log(`FolderWatcher ready: ${config.boothId} -> ${config.watchFolder}`)
+})
+watcher.on('all', (event, path) => {
+  console.log(`[watcher] fs event received: ${event}`)
+  console.log(`[watcher] filename received: ${basename(path)}`)
+  const fullPath = resolve(path)
+  console.log(`[watcher] resolved full path: ${fullPath}`)
+  if (event !== 'add' && event !== 'change') {
+    console.log(`[watcher] file rejected (event ${event}): ${fullPath}`)
+    return
+  }
+  enqueue(fullPath)
+})
+watcher.on('error', (error) => console.error('[watcher] error:', error))
