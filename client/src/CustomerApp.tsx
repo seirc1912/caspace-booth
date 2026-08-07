@@ -9,9 +9,8 @@ import { renderComposition } from './features/orders/services/renderComposition'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
-import { useSessionPhotos } from './features/photos/useSessionPhotos'
-import type { CustomerSession } from './types/session'
-import { env } from './config/env'
+import { startPhotoLibrarySession, useSessionPhotos } from './features/photos/useSessionPhotos'
+import type { PhotoLibrarySession } from './features/photos/useSessionPhotos'
 import { ComposerPage } from './pages/ComposerPage'
 import { HomePage } from './pages/HomePage'
 import { NotFoundPage } from './pages/NotFoundPage'
@@ -28,20 +27,17 @@ export function CustomerApp() {
   const [framePreviews, setFramePreviews] = useState<Record<string, string>>({})
   const [orderDraft, setOrderDraft] = useState<PrintOrderDraft | null>(null)
   const [orderItems, setOrderItems] = useState<Record<string, PrintOrderItem>>({})
-  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(() => {
+  const [customerSession, setCustomerSession] = useState<PhotoLibrarySession | null>(() => {
     try {
-      const stored = JSON.parse(sessionStorage.getItem('selfbooth.customer-session') ?? 'null') as CustomerSession | null
-      return stored && Date.parse(stored.expiresAt) > Date.now() ? stored : null
+      return JSON.parse(sessionStorage.getItem('selfbooth.photo-library-session') ?? 'null') as PhotoLibrarySession | null
     } catch { return null }
   })
 
   useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError)
 
   const startBoothSession = async (boothId: string) => {
-    const response = await fetch(`${env.apiUrl}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boothId, phoneNumber: booth.phoneNumber }) })
-    if (!response.ok) throw new Error(await response.text())
-    const session = await response.json() as CustomerSession
-    sessionStorage.setItem('selfbooth.customer-session', JSON.stringify(session))
+    const session = await startPhotoLibrarySession(boothId, booth.phoneNumber)
+    sessionStorage.setItem('selfbooth.photo-library-session', JSON.stringify(session))
     booth.resetSessionPhotos(); booth.selectRoom(boothId); setCustomerSession(session)
     setOrderDraft(null); setOrderItems({}); setFramePreviews({}); navigate('/editor')
   }

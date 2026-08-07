@@ -1,6 +1,5 @@
 {
   "boothId": "booth-1",
   "watchFolder": "D:\\CaptureOne\\Export",
-  "serverUrl": "https://booth.caspace.vn",
-  "importKey": ""
+  "supabaseUrl": "https://your-project.supabase.co"
 }
