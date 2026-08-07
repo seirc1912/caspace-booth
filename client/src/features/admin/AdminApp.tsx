@@ -11,6 +11,7 @@ import { AssetLibraryProvider } from './store/AssetLibraryProvider'
 import { RoomProvider } from './store/RoomProvider'
 import { usePathname } from '../../hooks/usePathname'
 import { NotFoundPage } from '../../pages/NotFoundPage'
+import { getAdminToken } from '../../services/catalog/SupabaseCatalogService'
 
 function AdminRoutes() {
   const { pathname } = usePathname()
@@ -31,7 +32,7 @@ function AdminRoutes() {
 
 export default function AdminApp() {
   const { pathname, navigate } = usePathname()
-  const isAuthenticated = Boolean(sessionStorage.getItem('selfbooth.admin-session.v1'))
+  const isAuthenticated = Boolean(getAdminToken())
   if (!isAuthenticated || pathname === '/admin/login') return <AdminLoginPage onAuthenticated={() => navigate('/admin/dashboard', true)} />
   return <RoomProvider><AdminTemplateProvider><AssetLibraryProvider><AdminRoutes /></AssetLibraryProvider></AdminTemplateProvider></RoomProvider>
 }

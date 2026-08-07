@@ -5,6 +5,7 @@ export interface Room {
   description: string
   cover: string | null
   isActive: boolean
+  published: boolean
   sortOrder: number
 }
 
@@ -15,5 +16,6 @@ export const defaultRoom: Room = {
   description: 'Our signature self-photo booth collection.',
   cover: null,
   isActive: true,
+  published: true,
   sortOrder: 0,
 }

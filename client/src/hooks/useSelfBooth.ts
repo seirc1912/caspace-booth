@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
-import { readCustomerTemplates, readRooms } from '../services/catalog/RoomCatalogService'
+import { printTemplates } from '../data/templates'
+import { loadPublishedCatalog } from '../services/catalog/SupabaseCatalogService'
+import type { CustomerTemplate } from '../services/catalog/types'
+import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 
 const initialTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
@@ -27,7 +30,7 @@ async function loadPhotos(files: File[], concurrency = 2) {
 }
 
 export function useSelfBooth() {
-  const [catalog] = useState(() => ({ rooms: readRooms().filter((room) => room.isActive), templates: readCustomerTemplates() }))
+  const [catalog, setCatalog] = useState<{ rooms: Room[]; templates: CustomerTemplate[] }>({ rooms: [], templates: [] })
   const storedJourney = useMemo(() => { try { return JSON.parse(sessionStorage.getItem(journeyStorageKey) ?? '{}') as { phoneNumber?: string; selectedRoomId?: string; selectedTemplateId?: string } } catch { return {} } }, [])
   const [view, setView] = useState<AppView>('templates')
   const [phoneNumber, setPhoneNumberState] = useState(storedJourney.phoneNumber ?? '')
@@ -44,6 +47,11 @@ export function useSelfBooth() {
   const lastRandomOrder = useRef('')
   useEffect(() => { uploadedPhotosRef.current = uploadedPhotos }, [uploadedPhotos])
   useEffect(() => {
+    let active = true
+    void loadPublishedCatalog().then((next) => { if (active) setCatalog(next) }).catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load the published catalog.') })
+    return () => { active = false }
+  }, [])
+  useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
@@ -52,7 +60,7 @@ export function useSelfBooth() {
   }, [])
 
   const template = useMemo(
-    () => catalog.templates.find((item) => item.id === selectedTemplateId) ?? catalog.templates[0],
+    () => catalog.templates.find((item) => item.id === selectedTemplateId) ?? catalog.templates[0] ?? { ...printTemplates[0]!, roomId: '', printSize: '' },
     [catalog.templates, selectedTemplateId],
   )
   const room = useMemo(() => catalog.rooms.find((item) => item.id === selectedRoomId) ?? null, [catalog.rooms, selectedRoomId])

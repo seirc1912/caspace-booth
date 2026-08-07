@@ -1,44 +1,37 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { printTemplates } from '../../../data/templates'
 import type { AdminTemplateRecord, TemplateStatus } from '../types'
 import { AdminTemplateContext } from './AdminTemplateContext'
+import { deleteAdminTemplate, loadAdminTemplates, saveAdminTemplate } from '../../../services/catalog/SupabaseCatalogService'
+import { migrateLegacyCatalogOnce } from '../../../services/catalog/LegacyCatalogMigration'
 
-const storageKey = 'selfbooth.admin-template-studio.v1'
 const uid = () => globalThis.crypto.randomUUID()
 
-function initialTemplates(): AdminTemplateRecord[] {
-  return printTemplates.map((template) => ({
-    id: template.id,
-    roomId: 'room-default',
-    status: 'published',
-    info: {
-      category: 'Photo Booth', description: `${template.name} print template`, printSize: '4 × 6 in', dpi: 300,
-      orientation: template.canvas.width === template.canvas.height ? 'square' : template.canvas.width > template.canvas.height ? 'landscape' : 'portrait',
-    },
-    template,
-    coverUrl: template.thumbnailUrl,
-    updatedAt: new Date().toISOString(),
-  }))
-}
-
-function loadTemplates() {
-  try {
-    const value = localStorage.getItem(storageKey)
-    if (!value) return initialTemplates()
-    return (JSON.parse(value) as Array<AdminTemplateRecord & { roomId?: string }>).map((record) => ({ ...record, roomId: record.roomId ?? 'room-default' }))
-  } catch {
-    return initialTemplates()
-  }
-}
-
 export function AdminTemplateProvider({ children }: { children: ReactNode }) {
-  const [templates, setTemplates] = useState(loadTemplates)
-  useEffect(() => { localStorage.setItem(storageKey, JSON.stringify(templates)) }, [templates])
+  const [templates, setTemplates] = useState<AdminTemplateRecord[]>([])
+  const writeQueue = useRef(Promise.resolve())
+
+  const refresh = useCallback(async () => setTemplates(await loadAdminTemplates()), [])
+  const enqueue = useCallback((operation: () => Promise<unknown>) => {
+    writeQueue.current = writeQueue.current.then(operation).then(() => undefined).catch(async (error) => {
+      console.error(error)
+      await refresh()
+    })
+  }, [refresh])
+
+  useEffect(() => {
+    let active = true
+    void migrateLegacyCatalogOnce().then(loadAdminTemplates).then((catalog) => { if (active) setTemplates(catalog) }).catch(console.error)
+    return () => { active = false }
+  }, [])
 
   const value = useMemo(() => ({
     templates,
-    save: (record: AdminTemplateRecord) => setTemplates((current) => current.some((item) => item.id === record.id) ? current.map((item) => item.id === record.id ? record : item) : [...current, record]),
+    save: (record: AdminTemplateRecord) => {
+      const index = templates.findIndex((item) => item.id === record.id)
+      setTemplates((current) => index >= 0 ? current.map((item) => item.id === record.id ? record : item) : [...current, record])
+      enqueue(() => saveAdminTemplate(record, index >= 0 ? index : templates.length))
+    },
     duplicate: (id: string) => {
       const source = templates.find((item) => item.id === id)
       if (!source) return null
@@ -50,11 +43,31 @@ export function AdminTemplateProvider({ children }: { children: ReactNode }) {
       copy.template.name = `${source.template.name} Copy`
       copy.updatedAt = new Date().toISOString()
       setTemplates((current) => [...current, copy])
+      enqueue(() => saveAdminTemplate(copy, templates.length))
       return newId
     },
-    setStatus: (id: string, status: TemplateStatus) => setTemplates((current) => current.map((item) => item.id === id ? { ...item, status, updatedAt: new Date().toISOString() } : item)),
-    remove: (id: string) => setTemplates((current) => current.filter((item) => item.id !== id)),
-  }), [templates])
+    setStatus: (id: string, status: TemplateStatus) => {
+      const index = templates.findIndex((item) => item.id === id)
+      const template = templates[index]
+      if (!template) return
+      const updated = { ...template, status, updatedAt: new Date().toISOString() }
+      setTemplates((current) => current.map((item) => item.id === id ? updated : item))
+      enqueue(() => saveAdminTemplate(updated, index))
+    },
+    remove: (id: string) => {
+      setTemplates((current) => current.filter((item) => item.id !== id))
+      enqueue(() => deleteAdminTemplate(id))
+    },
+    reorder: (id: string, direction: -1 | 1) => {
+      const index = templates.findIndex((template) => template.id === id)
+      const swap = index + direction
+      if (index < 0 || swap < 0 || swap >= templates.length) return
+      const reordered = [...templates]
+      ;[reordered[index], reordered[swap]] = [reordered[swap]!, reordered[index]!]
+      setTemplates(reordered)
+      enqueue(async () => { for (const [displayOrder, template] of reordered.entries()) await saveAdminTemplate(template, displayOrder) })
+    },
+  }), [enqueue, templates])
 
   return <AdminTemplateContext.Provider value={value}>{children}</AdminTemplateContext.Provider>
 }
