@@ -15,6 +15,51 @@ const adminToken = () => {
 const safePhone = (phone: string) => phone.replace(/[^0-9+]/g, '').replace(/^\+/, 'plus-') || 'customer'
 const imageUrl = (path: string) => supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
 
+interface UploadDiagnostic {
+  operation: 'blob.arrayBuffer' | 'storage.upload'
+  blob: { instanceofBlob: boolean; size: number; type: string }
+  arrayBufferByteLength: number | null
+  bucket: string
+  path: string
+  metadata: { orderToken: string }
+  uploadOptions: { contentType: string; upsert: boolean; metadata: { orderToken: string } }
+  userAgent: string
+  error?: unknown
+}
+
+const serializable = (value: unknown, seen = new WeakSet<object>()): unknown => {
+  if (value === null || typeof value !== 'object') return value
+  if (seen.has(value)) return '[Circular]'
+  seen.add(value)
+  if (Array.isArray(value)) return value.map((item) => serializable(item, seen))
+  return Object.fromEntries(Object.getOwnPropertyNames(value).map((key) => [key, serializable((value as Record<string, unknown>)[key], seen)]))
+}
+
+const errorSnapshot = (reason: unknown) => {
+  if (!(reason instanceof Error)) return { value: reason }
+  const extended = reason as Error & {
+    originalError?: unknown; status?: unknown; statusCode?: unknown; responseBody?: unknown
+  }
+  return {
+    completeError: serializable(reason),
+    originalError: serializable(extended.originalError ?? null),
+    cause: serializable(reason.cause ?? null),
+    stack: reason.stack ?? null,
+    name: reason.name,
+    message: reason.message,
+    status: extended.status ?? null,
+    statusCode: extended.statusCode ?? null,
+    responseBody: extended.responseBody ?? null,
+  }
+}
+
+const diagnosticFailure = (diagnostic: UploadDiagnostic, reason: unknown) => {
+  const report = { ...diagnostic, error: errorSnapshot(reason) }
+  const formatted = `PRINT ORDER UPLOAD DIAGNOSTIC\n${JSON.stringify(report, null, 2)}`
+  console.error(formatted, reason)
+  return new Error(formatted, { cause: reason })
+}
+
 interface ItemRow { id: string; order_id: string; template_id: string; template_name?: string; storage_path: string; display_order: number; created_at: string }
 interface OrderRow { id: string; phone_number: string; room_id: string; room_name: string; total_images: number; status: PrintOrderStatus; submitted_at: string; created_at: string; updated_at: string }
 const toItem = (row: ItemRow): PrintOrderItem => ({ id: row.id, orderId: row.order_id, templateId: row.template_id, templateName: row.template_name, storagePath: row.storage_path, displayOrder: row.display_order, createdAt: row.created_at, imageUrl: imageUrl(row.storage_path) })
@@ -29,12 +74,28 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
 
   async addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number) {
     const path = `${safePhone(phoneNumber)}/${draft.id}/${String(displayOrder + 1).padStart(2, '0')}.png`
-    // storage-js wraps Blob bodies in multipart FormData. Safari can terminate that
-    // request with an opaque "Load failed" before Storage returns an HTTP response.
-    // Raw bytes use the same endpoint and metadata without the multipart transport.
-    const imageBytes = await image.arrayBuffer()
-    const upload = await supabase.storage.from(bucket).upload(path, imageBytes, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
-    if (upload.error) throw upload.error
+    const metadata = { orderToken: draft.editToken }
+    const uploadOptions = { contentType: 'image/png', upsert: true, metadata }
+    const diagnostic: UploadDiagnostic = {
+      operation: 'blob.arrayBuffer',
+      blob: { instanceofBlob: image instanceof Blob, size: image.size, type: image.type },
+      arrayBufferByteLength: null,
+      bucket,
+      path,
+      metadata,
+      uploadOptions,
+      userAgent: navigator.userAgent,
+    }
+    let imageBytes: ArrayBuffer
+    try { imageBytes = await image.arrayBuffer() }
+    catch (reason) { throw diagnosticFailure(diagnostic, reason) }
+    diagnostic.operation = 'storage.upload'
+    diagnostic.arrayBufferByteLength = imageBytes.byteLength
+    console.info('PRINT ORDER UPLOAD PREFLIGHT', diagnostic)
+    let upload
+    try { upload = await supabase.storage.from(bucket).upload(path, imageBytes, uploadOptions) }
+    catch (reason) { throw diagnosticFailure(diagnostic, reason) }
+    if (upload.error) throw diagnosticFailure(diagnostic, upload.error)
     const result = await supabase.rpc('customer_upsert_print_order_item', { p_order_id: draft.id, p_edit_token: draft.editToken, p_template_id: templateId, p_storage_path: path, p_display_order: displayOrder })
     if (result.error) { await supabase.storage.from(bucket).remove([path]); throw result.error }
     return toItem(unwrap(result.data as ItemRow | null, result.error))

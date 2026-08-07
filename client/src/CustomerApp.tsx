@@ -54,7 +54,7 @@ export function CustomerApp() {
         setOrderId(submitted.id)
         navigate('/success')
       }
-    } catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to add this image to the Print Order.') }
+    } catch (reason) { console.error('PRINT ORDER PIPELINE FAILURE', reason); booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to add this image to the Print Order.') }
     finally { setDownloading(false) }
   }
 
