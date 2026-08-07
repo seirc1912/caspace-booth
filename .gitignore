@@ -9,6 +9,7 @@ coverage/
 .env
 .env.*
 !.env.example
+folder-watcher/config.json
 
 # Logs
 *.log
@@ -25,4 +26,3 @@ photos/*
 !photos/.gitkeep
 exports/*
 !exports/.gitkeep
-

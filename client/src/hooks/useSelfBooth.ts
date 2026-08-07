@@ -171,8 +171,12 @@ export function useSelfBooth() {
     if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
   }, [uploadedPhotos.length])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
-    setUploadedPhotos((current) => [...current, ...photos.slice(0, maximumPhotos - current.length)])
+    setUploadedPhotos((current) => {
+      const known = new Set(current.map((photo) => photo.id))
+      return [...photos.filter((photo) => !known.has(photo.id)), ...current].slice(0, maximumPhotos)
+    })
   }, [])
+  const resetSessionPhotos = useCallback(() => { setUploadedPhotos([]); setFrameSlots({}); setCompletedFrameIds([]) }, [])
 
   const deleteUploadedPhoto = useCallback((photoId: string) => {
     setUploadedPhotos((current) => {
@@ -234,6 +238,8 @@ export function useSelfBooth() {
   const toggleSelectedPhoto = useCallback((id: string) => {
     setSelectedPhotoIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }, [])
+  const clearPhotoError = useCallback(() => setPhotoError(null), [])
+  const reportPhotoError = useCallback((message: string) => setPhotoError(message), [])
 
   return {
     view,
@@ -261,11 +267,12 @@ export function useSelfBooth() {
     selectedPhotoIds,
     uploadedPhotos,
     photoError,
-    clearPhotoError: () => setPhotoError(null),
-    reportPhotoError: (message: string) => setPhotoError(message),
+    clearPhotoError,
+    reportPhotoError,
     maximumPhotos,
     addUploadedPhotos,
     addUploadedAssets,
+    resetSessionPhotos,
     deleteUploadedPhoto,
     replaceUploadedPhoto,
     moveUploadedPhoto,
