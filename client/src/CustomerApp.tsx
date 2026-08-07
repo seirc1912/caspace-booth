@@ -60,13 +60,29 @@ export function CustomerApp() {
       downloadBlob(rendered.print, `frame-${String(booth.currentFrameIndex + 1).padStart(2, '0')}.png`)
       const draft = orderDraft ?? await printOrderRepository.createDraft(booth.phoneNumber, booth.room.id)
       if (!orderDraft) setOrderDraft(draft)
-      const item = await printOrderRepository.addItem(draft, booth.phoneNumber, booth.template.id, rendered.print, booth.currentFrameIndex)
-      setOrderItems((current) => ({ ...current, [booth.template.id]: item }))
-      const previewUrl = URL.createObjectURL(rendered.preview)
-      setFramePreviews((current) => { const previous = current[booth.template.id]; if (previous) URL.revokeObjectURL(previous); return { ...current, [booth.template.id]: previewUrl } })
-      booth.completeCurrentFrame()
-      if (booth.currentFrameIndex < booth.roomTemplates.length - 1) booth.selectFrame(booth.currentFrameIndex + 1)
-      else {
+      if (booth.currentFrameIndex < booth.roomTemplates.length - 1) {
+        const item = await printOrderRepository.addItem(draft, booth.phoneNumber, booth.template.id, rendered.print, booth.currentFrameIndex)
+        setOrderItems((current) => ({ ...current, [booth.template.id]: item }))
+        const previewUrl = URL.createObjectURL(rendered.preview)
+        setFramePreviews((current) => { const previous = current[booth.template.id]; if (previous) URL.revokeObjectURL(previous); return { ...current, [booth.template.id]: previewUrl } })
+        booth.completeCurrentFrame()
+        booth.selectFrame(booth.currentFrameIndex + 1)
+      } else {
+        const frames = booth.roomTemplates.map((template, index) => ({
+          template,
+          index,
+          slots: template.id === booth.template.id ? booth.slots : booth.frameSlots[template.id] ?? template.slots.map(() => null),
+        }))
+        if (frames.some((frame) => !frame.slots.length || frame.slots.some((slot) => !slot))) throw new Error('Complete every Template before submitting')
+
+        for (const frame of frames) {
+          const frameRender = frame.template.id === booth.template.id ? rendered : await renderComposition(frame.template, frame.slots, { branding })
+          const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, frameRender.print, frame.index)
+          setOrderItems((current) => ({ ...current, [frame.template.id]: item }))
+          const previewUrl = URL.createObjectURL(frameRender.preview)
+          setFramePreviews((current) => { const previous = current[frame.template.id]; if (previous) URL.revokeObjectURL(previous); return { ...current, [frame.template.id]: previewUrl } })
+        }
+        booth.completeCurrentFrame()
         const submitted = await printOrderRepository.submit(draft)
         sessionStorage.setItem('selfbooth.last-order-id', submitted.id)
         setOrderId(submitted.id)
