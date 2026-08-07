@@ -20,7 +20,7 @@ function gridSlots(count: number, columns: number, width: number, height: number
     y: height * margin + Math.floor(index / columns) * (slotHeight + height * gap),
     width: slotWidth, height: slotHeight, rotation: 0, borderRadius: 0,
     lockAspectRatio: true, opacity: 1, visible: true, locked: false,
-    mask: 'rectangle', cropMode: 'cover', zIndex: index + 1,
+    mask: 'rectangle', cropMode: 'cover', zIndex: index + 1, photoIndex: index, aspectRatio: 'free', borderWidth: 0, borderColor: '#000000', shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0 },
   }))
 }
 

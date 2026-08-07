@@ -1,0 +1,4 @@
+export function CanvasRulers({ width, height }: { width: number; height: number }) {
+  const ticks = Array.from({ length: 11 }, (_, index) => index)
+  return <div aria-hidden className="pointer-events-none absolute inset-0 z-[350] text-[9px] font-semibold text-stone-500"><div className="absolute -top-6 inset-x-0 h-5 border-b border-stone-400 bg-white/90">{ticks.map((tick) => <span className="absolute bottom-0 h-2 border-l border-stone-400" key={tick} style={{ left: `${tick * 10}%` }}><i className="absolute bottom-2 left-1 not-italic">{Math.round(width * tick / 10)}</i></span>)}</div><div className="absolute -left-8 inset-y-0 w-7 border-r border-stone-400 bg-white/90">{ticks.map((tick) => <span className="absolute right-0 w-2 border-t border-stone-400" key={tick} style={{ top: `${tick * 10}%` }}><i className="absolute right-2 top-0 -translate-y-1/2 not-italic [writing-mode:vertical-rl]">{Math.round(height * tick / 10)}</i></span>)}</div></div>
+}

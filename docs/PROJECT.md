@@ -48,9 +48,9 @@ Teams responsible for deployment, availability, storage, security, observability
 
 - Responsive customer template selection and preview.
 - Data-driven print layouts loaded from versioned template packages.
-- SelfBooth placeholder gallery and native phone image selection.
+- Persistent customer photo library with multi-upload, reusable assignment, usage indicators, preview, replacement, and deletion.
 - Ordered auto-fill, random fill, shuffle, replace, and clear actions.
-- Drag, pinch zoom, mouse-wheel zoom, rotation, and transform reset.
+- Contain-first image placement with explicit crop mode, drag, pinch zoom, mouse-wheel zoom, rotation, and transform reset.
 - Print preview with safe-area, bleed-area, and crop-mark guides.
 - Original-source server rendering to PNG, JPG, and PDF at 300 DPI.
 - HMAC-signed, expiring customer sessions and session-isolated exports.

@@ -58,11 +58,11 @@ Provide a premium, mobile-first editor for placing and adjusting photos inside t
 
 ### Features
 
-- Empty-slot source sheet.
-- SelfBooth gallery with single and multiple selection.
+- Persistent photo library dock with reusable tap and drag assignment.
+- Multi-upload, usage indicators, preview, replacement, and deletion.
 - Native browser phone-gallery input.
 - Ordered auto-fill, random fill, shuffle, and clear actions.
-- Drag, pinch zoom, wheel zoom, rotate, replace, remove, and reset.
+- Contain-first placement and explicit crop mode with drag, pinch zoom, wheel zoom, rotate, replace, remove, reset, Done, and Cancel.
 - Serializable, synchronization-ready editor state.
 
 ### Completion Checklist

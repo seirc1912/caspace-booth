@@ -61,7 +61,7 @@ export function templateBuilderReducer(state: TemplateBuilderState, action: Temp
     case 'reorder-element': return { ...state, document: { ...state.document, elements: state.document.elements.map((element) => element.id === action.elementId ? { ...element, zIndex: action.zIndex } : element) } }
     case 'add-slot': {
       const highestZ = Math.max(0, ...state.document.slots.map((slot) => slot.zIndex))
-      const slot = normalizeSlot(state, { id: createId(), x: 100, y: 100, width: 400, height: 500, rotation: 0, borderRadius: 0, lockAspectRatio: true, zIndex: highestZ + 1, editableRules: { canReplace: true, canMove: true, canZoom: true, canRotate: true }, ...action.slot })
+      const slot = normalizeSlot(state, { id: createId(), name: `Frame ${state.document.slots.length + 1}`, x: 100, y: 100, width: 600, height: 800, rotation: 0, borderRadius: 0, borderWidth: 0, borderColor: '#000000', shadow: { color: '#000000', blur: 0, offsetX: 0, offsetY: 0 }, aspectRatio: 'free', photoIndex: state.document.slots.length, lockAspectRatio: false, zIndex: highestZ + 1, editableRules: { canReplace: true, canMove: true, canZoom: true, canRotate: true }, ...action.slot })
       return { ...state, document: { ...state.document, slots: [...state.document.slots, slot] }, selectedSlotId: slot.id }
     }
     case 'delete-slot': return { ...state, document: { ...state.document, slots: state.document.slots.filter((slot) => slot.id !== action.slotId) }, selectedSlotId: state.selectedSlotId === action.slotId ? null : state.selectedSlotId }

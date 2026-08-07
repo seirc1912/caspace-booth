@@ -25,9 +25,14 @@ export interface TemplateSlot {
   opacity?: number
   visible?: boolean
   locked?: boolean
-  mask?: 'rectangle' | 'rounded' | 'circle'
+  mask?: 'rectangle' | 'rounded' | 'circle' | 'ellipse'
   cropMode?: 'cover' | 'contain'
   editableRules?: PhotoSlotEditableRules
+  photoIndex?: number
+  aspectRatio?: 'free' | '1:1' | '3:4' | '4:3' | '9:16'
+  borderWidth?: number
+  borderColor?: string
+  shadow?: { color: string; blur: number; offsetX: number; offsetY: number }
 }
 
 export interface PhotoSlotEditableRules {
@@ -132,6 +137,7 @@ export interface PrintTemplate extends TemplateDocument {
 export interface PhotoAsset {
   id: string
   src: string
+  previewSrc?: string
   alt: string
   source: 'selfbooth' | 'phone'
 }
@@ -148,4 +154,5 @@ export interface ImageTransform {
 export interface FilledSlot {
   photo: PhotoAsset
   transform: ImageTransform
+  fit?: 'contain' | 'cover'
 }

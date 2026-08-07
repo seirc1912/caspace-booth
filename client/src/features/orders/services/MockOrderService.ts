@@ -16,7 +16,7 @@ const download = (blob: Blob, filename: string) => {
   anchor.href = url
   anchor.download = filename
   anchor.click()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 const deviceName = () => /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ? 'Mobile' : 'Desktop'
