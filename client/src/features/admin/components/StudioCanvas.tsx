@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, MouseEvent, PointerEvent, WheelEvent } from 'react'
 import { TemplateSurface } from '../../../components/template/TemplateSurface'
 import { samplePhotos } from '../../../data/samplePhotos'
@@ -177,12 +177,43 @@ interface StudioCanvasProps {
 
 export function StudioCanvas({ template, cropSlotId, selectedSlotIds, zoom, pan, guides, onElementChange, onSlotChange, onSelect, onClearSelection, onDoubleClick, onContextAction, onViewportChange }: StudioCanvasProps) {
   const viewport = useRef<HTMLDivElement>(null)
+  const [viewportHeight, setViewportHeight] = useState(512)
   const panning = useRef<{ x: number; y: number; panX: number; panY: number; pointerId: number } | null>(null)
   const spacePressed = useRef(false)
   const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([])
   const [menu, setMenu] = useState<{ x: number; y: number; id: string | null } | null>(null)
   const [cropTransforms, setCropTransforms] = useState<Record<string, CropTransform>>({})
   const objects = useMemo(() => [...template.slots, ...template.elements], [template.elements, template.slots])
+
+  useLayoutEffect(() => {
+    const node = viewport.current
+    if (!node) return
+    let frame = 0
+    const measure = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        const availableViewport = window.visualViewport?.height ?? window.innerHeight
+        const top = Math.max(0, node.getBoundingClientRect().top)
+        const minimum = window.matchMedia('(min-width: 768px)').matches ? 512 : 352
+        setViewportHeight(Math.max(minimum, Math.min(832, Math.floor(availableViewport - top - 16))))
+      })
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(node.parentElement ?? node)
+    window.addEventListener('resize', measure)
+    window.addEventListener('orientationchange', measure)
+    window.visualViewport?.addEventListener('resize', measure)
+    window.visualViewport?.addEventListener('scroll', measure)
+    measure()
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', measure)
+      window.removeEventListener('orientationchange', measure)
+      window.visualViewport?.removeEventListener('resize', measure)
+      window.visualViewport?.removeEventListener('scroll', measure)
+    }
+  }, [])
 
   useEffect(() => {
     const down = (event: KeyboardEvent) => { if (event.code === 'Space' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((event.target as HTMLElement).tagName)) { event.preventDefault(); spacePressed.current = true } }
@@ -242,5 +273,5 @@ export function StudioCanvas({ template, cropSlotId, selectedSlotIds, zoom, pan,
   const contextMenu = useCallback((event: MouseEvent, id: string) => setMenu({ x: event.clientX, y: event.clientY, id }), [])
   const stageStyle: CSSProperties = { width: 'min(36rem, 48vw)', left: `calc(50% + ${pan.x}px)`, top: `calc(50% + ${pan.y}px)`, transform: `translate(-50%, -50%) scale(${zoom})`, transformOrigin: 'center' }
 
-  return <div className="relative h-[65dvh] min-h-[32rem] overflow-hidden rounded-2xl bg-stone-200 bg-[radial-gradient(#a8a29e_1px,transparent_1px)] [background-size:20px_20px]" onContextMenu={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, id: null }) } }} onPointerDown={(event) => { setMenu(null); startPan(event); if (event.target === event.currentTarget && !spacePressed.current) onClearSelection() }} onPointerMove={movePan} onPointerUp={stopPan} onWheel={wheel} ref={viewport} style={{ cursor: 'default', overscrollBehavior: 'none' }}><div className="absolute" style={stageStyle}><div className="relative"><TemplateSurface className="shadow-2xl" renderSlot={(slot) => cropSlotId === slot.id ? <CropSlotPreview onChange={(next) => setCropTransforms((current) => ({ ...current, [slot.id]: next }))} slot={slot} transform={cropTransforms[slot.id] ?? { x: 0, y: 0, zoom: 1, rotation: 0 }} /> : <PhotoSlotPlaceholder slot={slot} />} template={template} /><CanvasGuides settings={guides} /><CanvasRulers height={template.canvas.height} width={template.canvas.width} />{alignmentGuides.map((guide) => <div className={`pointer-events-none absolute z-[300] bg-[#0D99FF] shadow-[0_0_0_1px_rgba(255,255,255,.7)] ${guide.axis === 'x' ? 'inset-y-[-100vh] w-px' : 'inset-x-[-100vw] h-px'}`} key={`${guide.axis}-${guide.value}`} style={guide.axis === 'x' ? { left: `${guide.value / template.canvas.width * 100}%` } : { top: `${guide.value / template.canvas.height * 100}%` }} />)}{objects.filter((object) => object.visible !== false).map((object) => <ObjectControl canvas={template.canvas} cropMode={cropSlotId === object.id} geometry={object} id={object.id} key={object.id} locked={object.locked ?? false} name={object.name ?? 'Photo slot'} onCommit={commit} onContextMenu={contextMenu} onDoubleClick={onDoubleClick} onGuides={setAlignmentGuides} onPreview={preview} onSelect={onSelect} selected={selectedSlotIds.includes(object.id)} zoom={zoom} />)}</div></div>{menu ? <div className="fixed z-[1000] grid min-w-44 overflow-hidden rounded-xl border border-stone-200 bg-white p-1 text-sm shadow-2xl" onPointerDown={(event) => event.stopPropagation()} style={{ left: menu.x, top: menu.y }}>{(['duplicate', 'copy', 'paste', 'forward', 'backward', 'delete'] as const).map((action) => <button className={`rounded-lg px-3 py-2 text-left capitalize hover:bg-stone-100 ${action === 'delete' ? 'text-rose-600' : ''}`} disabled={!menu.id && action !== 'paste'} key={action} onClick={() => { onContextAction(action, menu.id); setMenu(null) }} type="button">{action === 'forward' ? 'Bring forward' : action === 'backward' ? 'Send backward' : action}</button>)}</div> : null}</div>
+  return <div className="relative overflow-hidden rounded-2xl bg-stone-200 bg-[radial-gradient(#a8a29e_1px,transparent_1px)] [background-size:20px_20px]" onContextMenu={(event) => { if (event.target === event.currentTarget) { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY, id: null }) } }} onPointerDown={(event) => { setMenu(null); startPan(event); if (event.target === event.currentTarget && !spacePressed.current) onClearSelection() }} onPointerMove={movePan} onPointerUp={stopPan} onWheel={wheel} ref={viewport} style={{ cursor: 'default', height: viewportHeight, overscrollBehavior: 'none' }}><div className="absolute" style={stageStyle}><div className="relative"><TemplateSurface className="shadow-2xl" renderSlot={(slot) => cropSlotId === slot.id ? <CropSlotPreview onChange={(next) => setCropTransforms((current) => ({ ...current, [slot.id]: next }))} slot={slot} transform={cropTransforms[slot.id] ?? { x: 0, y: 0, zoom: 1, rotation: 0 }} /> : <PhotoSlotPlaceholder slot={slot} />} template={template} /><CanvasGuides settings={guides} /><CanvasRulers height={template.canvas.height} width={template.canvas.width} />{alignmentGuides.map((guide) => <div className={`pointer-events-none absolute z-[300] bg-[#0D99FF] shadow-[0_0_0_1px_rgba(255,255,255,.7)] ${guide.axis === 'x' ? 'inset-y-[-100vh] w-px' : 'inset-x-[-100vw] h-px'}`} key={`${guide.axis}-${guide.value}`} style={guide.axis === 'x' ? { left: `${guide.value / template.canvas.width * 100}%` } : { top: `${guide.value / template.canvas.height * 100}%` }} />)}{objects.filter((object) => object.visible !== false).map((object) => <ObjectControl canvas={template.canvas} cropMode={cropSlotId === object.id} geometry={object} id={object.id} key={object.id} locked={object.locked ?? false} name={object.name ?? 'Photo slot'} onCommit={commit} onContextMenu={contextMenu} onDoubleClick={onDoubleClick} onGuides={setAlignmentGuides} onPreview={preview} onSelect={onSelect} selected={selectedSlotIds.includes(object.id)} zoom={zoom} />)}</div></div>{menu ? <div className="fixed z-[1000] grid min-w-44 overflow-hidden rounded-xl border border-stone-200 bg-white p-1 text-sm shadow-2xl" onPointerDown={(event) => event.stopPropagation()} style={{ left: menu.x, top: menu.y }}>{(['duplicate', 'copy', 'paste', 'forward', 'backward', 'delete'] as const).map((action) => <button className={`rounded-lg px-3 py-2 text-left capitalize hover:bg-stone-100 ${action === 'delete' ? 'text-rose-600' : ''}`} disabled={!menu.id && action !== 'paste'} key={action} onClick={() => { onContextAction(action, menu.id); setMenu(null) }} type="button">{action === 'forward' ? 'Bring forward' : action === 'backward' ? 'Send backward' : action}</button>)}</div> : null}</div>
 }
