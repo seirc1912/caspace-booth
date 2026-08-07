@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "workspaces": [
     "client",
-    "server"
+    "server",
+    "folder-watcher"
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
