@@ -31,7 +31,7 @@ export function loadPhotoFile(file: File): Promise<PhotoAsset> {
         const previewBlob = await new Promise<Blob>((resolveBlob, rejectBlob) => canvas.toBlob((blob) => blob ? resolveBlob(blob) : rejectBlob(new Error('Image preview could not be created')), preserveAlpha ? 'image/png' : 'image/jpeg', 0.9))
         context.clearRect(0, 0, canvas.width, canvas.height); canvas.width = 1; canvas.height = 1
         releaseImage()
-        resolve({ id: `phone-${photoId()}`, src, previewSrc: URL.createObjectURL(previewBlob), alt: file.name || 'Uploaded photo', source: 'phone' })
+        resolve({ id: `phone-${photoId()}`, src, previewSrc: URL.createObjectURL(previewBlob), sourceBlob: file, alt: file.name || 'Uploaded photo', source: 'phone' })
       } catch (reason) {
         releaseImage()
         URL.revokeObjectURL(src)
