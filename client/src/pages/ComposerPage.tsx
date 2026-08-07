@@ -1,12 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { FilledSlot, ImageTransform, PhotoAsset, PrintTemplate } from '../types/selfBooth'
 import { EditorToolbar } from '../components/editor/EditorToolbar'
 import { TemplateCanvas } from '../components/editor/TemplateCanvas'
 import { PageShell } from '../components/layout/PageShell'
-import { PhotoGallery } from '../components/photo/PhotoGallery'
-import { SourceSheet } from '../components/photo/SourceSheet'
+import { PhotoLibraryDock } from '../components/photo/PhotoLibraryDock'
 import { Icon } from '../components/ui/Icon'
-import { PhotoManager } from '../components/photo/PhotoManager'
+import { CropToolbar } from '../components/editor/CropToolbar'
 
 interface ComposerPageProps {
   template: PrintTemplate
@@ -24,77 +23,76 @@ interface ComposerPageProps {
   onRemove: (index: number) => void
   onReplace: (index: number, photo: PhotoAsset) => void
   onTransform: (index: number, transform: Partial<ImageTransform>) => void
+  onFitChange: (index: number, fit: 'contain' | 'cover') => void
   onToggleSelectedPhoto: (id: string) => void
   uploadedPhotos: PhotoAsset[]
-  maximumPhotos: number
   onAddPhotos: (files: File[]) => void
   onAddPhotoAssets: (photos: PhotoAsset[]) => void
   onDeletePhoto: (photoId: string) => void
   onMovePhoto: (photoId: string, direction: -1 | 1) => void
   onReplacePhoto: (photoId: string, file: File) => void
+  photoError: string | null
+  onClearPhotoError: () => void
+  onPhotoError: (message: string) => void
 }
 
-export function ComposerPage({ template, slots, currentSlot, selectedPhotoIds, onBack, onClear, onFillEmpty, onNext, onRandomFill, onShuffle, onCurrentSlotChange, onClearSelectedPhotos, onRemove, onReplace, onTransform, onToggleSelectedPhoto, uploadedPhotos, maximumPhotos, onAddPhotos, onAddPhotoAssets, onDeletePhoto, onMovePhoto, onReplacePhoto }: ComposerPageProps) {
-  const [sourceOpen, setSourceOpen] = useState(false)
-  const [galleryOpen, setGalleryOpen] = useState(false)
+interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover' }
+const resetTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 
-  const openSource = (index: number) => {
+export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError }: ComposerPageProps) {
+  const [crop, setCrop] = useState<CropSnapshot | null>(null)
+  const [activePhotoId, setActivePhotoId] = useState<string | null>(null)
+  const usage = useMemo(() => slots.reduce<Record<string, number>>((counts, slot) => {
+    if (slot) counts[slot.photo.id] = (counts[slot.photo.id] ?? 0) + 1
+    return counts
+  }, {}), [slots])
+
+  const assign = (photo: PhotoAsset, target: number) => {
+    if (target < 0 || target >= slots.length) return
+    onReplace(target, photo)
+    onCurrentSlotChange(target)
+  }
+  const selectFrame = (index: number) => {
+    const activePhoto = uploadedPhotos.find((photo) => photo.id === activePhotoId)
+    if (activePhoto) assign(activePhoto, index)
+    else onCurrentSlotChange(index)
+  }
+  const beginCrop = (index: number) => {
+    const slot = slots[index]
+    if (!slot) return
     onCurrentSlotChange(index)
-    setSourceOpen(true)
+    setCrop({ index, transform: { ...slot.transform }, fit: slot.fit ?? 'contain' })
+  }
+  const finishCrop = () => setCrop(null)
+  const cancelCrop = () => {
+    if (!crop) return
+    onTransform(crop.index, crop.transform)
+    onFitChange(crop.index, crop.fit)
+    setCrop(null)
+  }
+  const resetCrop = () => {
+    if (!crop) return
+    onTransform(crop.index, resetTransform)
+    onFitChange(crop.index, 'contain')
+  }
+  const dropPhoto = (index: number, photoId: string) => {
+    const photo = uploadedPhotos.find((item) => item.id === photoId)
+    if (photo) assign(photo, index)
+  }
+  const deletePhoto = (photoId: string) => {
+    if (activePhotoId === photoId) setActivePhotoId(null)
+    onDeletePhoto(photoId)
   }
 
-  const placePhotos = (photos: PhotoAsset[]) => {
-    if (currentSlot !== null && photos[0]) {
-      onReplace(currentSlot, photos[0])
-      onFillEmpty(photos.slice(1))
-    } else {
-      onFillEmpty(photos)
-    }
-    setSourceOpen(false)
-    setGalleryOpen(false)
-    onClearSelectedPhotos()
-  }
-
-  const selectedPhotos = selectedPhotoIds
-    .map((id) => uploadedPhotos.find((photo) => photo.id === id))
-    .filter((photo): photo is PhotoAsset => Boolean(photo))
-
-  const openGallery = () => {
-    setGalleryOpen(true)
-    setSourceOpen(false)
-    onClearSelectedPhotos()
-  }
-
-  return (
-    <PageShell className="pb-24">
-      <header className="mb-5 flex items-center justify-between">
-        <button className="grid size-11 place-items-center rounded-full bg-white shadow-sm hover:bg-stone-100" onClick={onBack} type="button"><Icon name="back" /><span className="sr-only">Choose another template</span></button>
-        <div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Step 4 of 6</p><h1 className="font-bold">Add your photos</h1></div>
-        <span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span>
-      </header>
-      <div className="mx-auto grid w-full max-w-4xl items-start gap-6 md:grid-cols-[minmax(18rem,24rem)_1fr]">
-        <TemplateCanvas activeSlot={currentSlot} onActiveSlotChange={onCurrentSlotChange} onAdd={openSource} onRemove={onRemove} onReplace={openSource} onTransform={onTransform} slots={slots} template={template} />
-        <aside className="hidden rounded-[1.75rem] bg-white p-6 shadow-sm md:block">
-          <p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p>
-          <h2 className="mt-1 text-2xl font-bold tracking-tight">Make it yours</h2>
-          <p className="mt-3 leading-7 text-stone-500">Tap any empty frame to choose booth photos or images from your phone. Drag to pan. Use the quick controls to zoom or rotate.</p>
-          <div className="mt-6 rounded-2xl bg-stone-100 p-4 text-sm text-stone-600"><strong className="text-stone-900">Quick reset</strong><br />Double tap a photo to return it to the original position.</div>
-        </aside>
-      </div>
-      <div className="mx-auto mt-6 w-full max-w-4xl"><PhotoManager maximum={maximumPhotos} onAdd={onAddPhotos} onDelete={onDeletePhoto} onMove={onMovePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} /></div>
-      <EditorToolbar canContinue={slots.every(Boolean)} onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null) }} onNext={onNext} onShuffle={onShuffle} />
-      <SourceSheet hasPhoto={currentSlot !== null && Boolean(slots[currentSlot])} open={sourceOpen && !galleryOpen} onCancel={() => setSourceOpen(false)} onPhonePhotos={(photos) => { onAddPhotoAssets(photos); placePhotos(photos) }} onRemove={() => { if (currentSlot !== null) onRemove(currentSlot); setSourceOpen(false); onCurrentSlotChange(null) }} onSelfBoothPhotos={openGallery} />
-      {galleryOpen ? (
-        <PhotoGallery
-          onAutoFill={() => placePhotos(selectedPhotos)}
-          onCancel={() => { setGalleryOpen(false); setSourceOpen(false); onClearSelectedPhotos() }}
-          onConfirm={() => placePhotos(selectedPhotos)}
-          onRandomFill={() => { onRandomFill(); setGalleryOpen(false); onClearSelectedPhotos() }}
-          onToggle={onToggleSelectedPhoto}
-          photos={uploadedPhotos}
-          selectedIds={selectedPhotoIds}
-        />
-      ) : null}
-    </PageShell>
-  )
+  return <PageShell className="pb-[15.5rem] md:pb-24">
+    <header className="mb-4 flex items-center justify-between"><button className="grid size-11 place-items-center rounded-full bg-white shadow-sm" onClick={onBack} type="button"><Icon name="back" /><span className="sr-only">Choose another template</span></button><div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Step 4 of 6</p><h1 className="font-bold">Compose your print</h1></div><span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span></header>
+    <div className="mx-auto grid w-full max-w-4xl items-start gap-5 md:grid-cols-[minmax(18rem,25rem)_1fr]">
+      <TemplateCanvas activeSlot={currentSlot} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onActiveSlotChange={selectFrame} onAdd={selectFrame} onBeginCrop={beginCrop} onDropPhoto={dropPhoto} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, resetTransform); onFitChange(index, 'contain') }} onReplace={(index) => onCurrentSlotChange(index)} onTransform={onTransform} slots={slots} template={template} />
+      <aside className="rounded-[1.75rem] bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Upload once. Create freely.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Select a library photo, then tap any frame. Reuse any photo as many times as you like. Cropping only starts when you choose Crop.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Desktop: drag thumbnails into frames. Mobile: tap photo, then tap frame.</div></aside>
+    </div>
+    <div className="mx-auto mt-5 w-full max-w-4xl"><PhotoLibraryDock activePhotoId={activePhotoId} onImageError={onPhotoError} onAdd={onAddPhotos} onSelect={(photo) => setActivePhotoId(photo.id)} onDelete={deletePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} usage={usage} /></div>
+    {crop ? <CropToolbar fit={slots[crop.index]?.fit ?? 'contain'} onCancel={cancelCrop} onDone={finishCrop} onFitChange={(fit) => onFitChange(crop.index, fit)} onReset={resetCrop} /> : null}
+    {photoError ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl" role="alert"><span>{photoError}</span><button className="min-h-10 shrink-0 rounded-xl bg-white/15 px-3 font-bold" onClick={onClearPhotoError} type="button">Dismiss</button></div> : null}
+    <EditorToolbar canContinue={slots.every(Boolean)} onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null) }} onNext={onNext} onShuffle={onShuffle} />
+  </PageShell>
 }

@@ -2,6 +2,7 @@ import { useRef } from 'react'
 import type { ChangeEvent } from 'react'
 import type { PhotoAsset } from '../../types/selfBooth'
 import { Icon } from '../ui/Icon'
+import { loadPhotoFile } from '../../features/photos/imageLoader'
 
 interface SourceSheetProps {
   open: boolean
@@ -10,21 +11,20 @@ interface SourceSheetProps {
   onRemove: () => void
   onPhonePhotos: (photos: PhotoAsset[]) => void
   onSelfBoothPhotos: () => void
+  onError?: (message: string) => void
 }
 
-export function SourceSheet({ open, hasPhoto, onCancel, onRemove, onPhonePhotos, onSelfBoothPhotos }: SourceSheetProps) {
+export function SourceSheet({ open, hasPhoto, onCancel, onRemove, onPhonePhotos, onSelfBoothPhotos, onError }: SourceSheetProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
   if (!open) return null
 
-  const handleFiles = (event: ChangeEvent<HTMLInputElement>) => {
-    const photos = Array.from(event.target.files ?? []).map((file) => ({
-      id: `phone-${globalThis.crypto.randomUUID()}`,
-      src: URL.createObjectURL(file),
-      alt: file.name,
-      source: 'phone' as const,
-    }))
+  const handleFiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const results = await Promise.allSettled(Array.from(event.target.files ?? []).map(loadPhotoFile))
+    const photos = results.filter((result): result is PromiseFulfilledResult<PhotoAsset> => result.status === 'fulfilled').map((result) => result.value)
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (photos.length) onPhonePhotos(photos)
+    if (failure) onError?.(failure.reason instanceof Error ? failure.reason.message : 'The image could not be loaded.')
     event.target.value = ''
   }
 

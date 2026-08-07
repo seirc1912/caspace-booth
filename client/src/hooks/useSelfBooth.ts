@@ -1,15 +1,29 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
 import { readCustomerTemplates, readRooms } from '../services/catalog/RoomCatalogService'
+import { loadPhotoFile } from '../features/photos/imageLoader'
 
 const initialTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
-const maximumPhotos = 20
+const maximumPhotos = Number.MAX_SAFE_INTEGER
 const journeyStorageKey = 'selfbooth.customer-journey.v1'
 const supportedPhoto = (file: File) => file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|heic|heif)$/i.test(file.name)
-const toPhoto = (file: File): PhotoAsset => ({ id: `phone-${globalThis.crypto.randomUUID()}`, src: URL.createObjectURL(file), alt: file.name, source: 'phone' })
 
 function toSlot(photo: PhotoAsset): FilledSlot {
-  return { photo, transform: { ...initialTransform } }
+  return { photo, transform: { ...initialTransform }, fit: 'contain' }
+}
+
+async function loadPhotos(files: File[], concurrency = 2) {
+  const results: PromiseSettledResult<PhotoAsset>[] = new Array(files.length)
+  let nextIndex = 0
+  const worker = async () => {
+    while (nextIndex < files.length) {
+      const index = nextIndex++
+      try { results[index] = { status: 'fulfilled', value: await loadPhotoFile(files[index]!) } }
+      catch (reason) { results[index] = { status: 'rejected', reason } }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, files.length) }, worker))
+  return results
 }
 
 export function useSelfBooth() {
@@ -23,7 +37,18 @@ export function useSelfBooth() {
   const [currentSlot, setCurrentSlot] = useState<number | null>(null)
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([])
   const [uploadedPhotos, setUploadedPhotos] = useState<PhotoAsset[]>([])
+  const uploadedPhotosRef = useRef<PhotoAsset[]>([])
+  const mountedRef = useRef(true)
+  const [photoError, setPhotoError] = useState<string | null>(null)
   const lastRandomOrder = useRef('')
+  useEffect(() => { uploadedPhotosRef.current = uploadedPhotos }, [uploadedPhotos])
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      uploadedPhotosRef.current.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
+    }
+  }, [])
 
   const template = useMemo(
     () => catalog.templates.find((item) => item.id === selectedTemplateId) ?? catalog.templates[0],
@@ -64,6 +89,10 @@ export function useSelfBooth() {
     )))
   }, [])
 
+  const updateFit = useCallback((index: number, fit: 'contain' | 'cover') => {
+    setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? { ...slot, fit } : slot))
+  }, [])
+
   const removeSlot = useCallback((index: number) => {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? null : slot)))
   }, [])
@@ -84,9 +113,16 @@ export function useSelfBooth() {
     setSlots(visibleOrder.map(toSlot))
   }, [template.slots.length, uploadedPhotos])
 
-  const addUploadedPhotos = useCallback((files: File[]) => {
-    setUploadedPhotos((current) => [...current, ...files.filter(supportedPhoto).slice(0, maximumPhotos - current.length).map(toPhoto)])
-  }, [])
+  const addUploadedPhotos = useCallback(async (files: File[]) => {
+    setPhotoError(null)
+    const candidates = files.filter(supportedPhoto).slice(0, maximumPhotos - uploadedPhotos.length)
+    const results = await loadPhotos(candidates)
+    const photos = results.filter((result): result is PromiseFulfilledResult<PhotoAsset> => result.status === 'fulfilled').map((result) => result.value)
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (!mountedRef.current) { photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) }); return }
+    if (photos.length) setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
+  }, [uploadedPhotos.length])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => [...current, ...photos.slice(0, maximumPhotos - current.length)])
   }, [])
@@ -94,21 +130,25 @@ export function useSelfBooth() {
   const deleteUploadedPhoto = useCallback((photoId: string) => {
     setUploadedPhotos((current) => {
       const photo = current.find((item) => item.id === photoId)
-      if (photo) URL.revokeObjectURL(photo.src)
+      if (photo) { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) }
       return current.filter((item) => item.id !== photoId)
     })
     setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? null : slot))
   }, [])
 
-  const replaceUploadedPhoto = useCallback((photoId: string, file: File) => {
+  const replaceUploadedPhoto = useCallback(async (photoId: string, file: File) => {
     if (!supportedPhoto(file)) return
-    const replacement = toPhoto(file)
+    setPhotoError(null)
+    let replacement: PhotoAsset
+    try { replacement = await loadPhotoFile(file) } catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'The image could not be loaded.'); return }
+    if (!mountedRef.current) { URL.revokeObjectURL(replacement.src); if (replacement.previewSrc) URL.revokeObjectURL(replacement.previewSrc); return }
     setUploadedPhotos((current) => current.map((photo) => {
       if (photo.id !== photoId) return photo
       URL.revokeObjectURL(photo.src)
+      if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc)
       return replacement
     }))
-    setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? { ...slot, photo: replacement } : slot))
+    setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? toSlot(replacement) : slot))
   }, [])
 
   const moveUploadedPhoto = useCallback((photoId: string, direction: -1 | 1) => {
@@ -165,6 +205,9 @@ export function useSelfBooth() {
     setCurrentSlot,
     selectedPhotoIds,
     uploadedPhotos,
+    photoError,
+    clearPhotoError: () => setPhotoError(null),
+    reportPhotoError: (message: string) => setPhotoError(message),
     maximumPhotos,
     addUploadedPhotos,
     addUploadedAssets,
@@ -177,6 +220,7 @@ export function useSelfBooth() {
     fillEmpty,
     replaceSlot,
     updateTransform,
+    updateFit,
     removeSlot,
     clearAll: () => setSlots((current) => current.map(() => null)),
     randomFill,

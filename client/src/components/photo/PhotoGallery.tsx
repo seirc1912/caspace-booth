@@ -25,7 +25,7 @@ export function PhotoGallery({ photos, selectedIds, onCancel, onConfirm, onAutoF
           const selectionIndex = selectedIds.indexOf(photo.id)
           return (
             <button aria-pressed={selectionIndex >= 0} className="relative aspect-square overflow-hidden rounded-xl bg-stone-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-950" key={photo.id} onClick={() => onToggle(photo.id)} type="button">
-              <img alt={photo.alt} className="h-full w-full object-cover" decoding="async" loading="lazy" src={photo.src} />
+              <img alt={photo.alt} className="h-full w-full object-cover" decoding="async" loading="lazy" src={photo.previewSrc ?? photo.src} />
               {selectionIndex >= 0 ? <span className="absolute inset-0 grid place-items-center bg-stone-950/15 ring-4 ring-inset ring-white"><span className="grid size-8 place-items-center rounded-full bg-stone-950 text-sm font-bold text-white">{selectionIndex + 1}</span></span> : null}
             </button>
           )
