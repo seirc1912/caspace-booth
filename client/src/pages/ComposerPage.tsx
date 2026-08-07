@@ -26,9 +26,11 @@ interface ComposerPageProps {
   onFitChange: (index: number, fit: 'contain' | 'cover') => void
   onToggleSelectedPhoto: (id: string) => void
   uploadedPhotos: PhotoAsset[]
+  onAddPhotos: (files: File[]) => void
   onAddPhotoAssets: (photos: PhotoAsset[]) => void
   onDeletePhoto: (photoId: string) => void
   onMovePhoto: (photoId: string, direction: -1 | 1) => void
+  onReplacePhoto: (photoId: string, file: File) => void
   photoError: string | null
   onClearPhotoError: () => void
   onPhotoError: (message: string) => void
@@ -45,7 +47,7 @@ interface ComposerPageProps {
 interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover' }
 const resetTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 
-export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onSave, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onDeletePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading, onPrevious }: ComposerPageProps) {
+export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onSave, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading, onPrevious }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null)
   const usage = useMemo(() => slots.reduce<Record<string, number>>((counts, slot) => {
@@ -97,7 +99,7 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
       <TemplateCanvas activeSlot={currentSlot} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onActiveSlotChange={selectFrame} onAdd={selectFrame} onBeginCrop={beginCrop} onDropPhoto={dropPhoto} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, resetTransform); onFitChange(index, 'contain') }} onReplace={(index) => onCurrentSlotChange(index)} onTransform={onTransform} slots={slots} template={template} />
       <aside className="rounded-[1.75rem] bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Upload once. Create freely.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Select a library photo, then tap any frame. Reuse any photo as many times as you like. Cropping only starts when you choose Crop.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Desktop: drag thumbnails into frames. Mobile: tap photo, then tap frame.</div></aside>
     </div>
-    <div className="mx-auto mt-5 w-full max-w-4xl"><PhotoLibraryDock activePhotoId={activePhotoId} onImageError={onPhotoError} onSelect={(photo) => setActivePhotoId(photo.id)} onDelete={deletePhoto} photos={uploadedPhotos} usage={usage} /></div>
+    <div className="mx-auto mt-5 w-full max-w-4xl"><PhotoLibraryDock activePhotoId={activePhotoId} onImageError={onPhotoError} onAdd={onAddPhotos} onSelect={(photo) => setActivePhotoId(photo.id)} onDelete={deletePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} usage={usage} /></div>
     {crop ? <CropToolbar fit={slots[crop.index]?.fit ?? 'contain'} onCancel={cancelCrop} onDone={finishCrop} onFitChange={(fit) => onFitChange(crop.index, fit)} onReset={resetCrop} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} zoom={slots[crop.index]?.transform.zoom ?? 1} /> : null}
     {photoError ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl" role="alert"><span>{photoError}</span><button className="min-h-10 shrink-0 rounded-xl bg-white/15 px-3 font-bold" onClick={onClearPhotoError} type="button">Dismiss</button></div> : null}
     <EditorToolbar canContinue={slots.every(Boolean)} downloading={downloading} nextLabel="Order" onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null) }} onDownload={onDownload} onNext={onNext} onPrevious={onPrevious} onSave={() => { onSave(); onCurrentSlotChange(null); setCrop(null) }} onShuffle={onShuffle} previousDisabled={frameIndex === 0} saved={completedFrameIds.includes(template.id)} />
