@@ -4,7 +4,8 @@ import { PageShell } from '../components/layout/PageShell'
 import { PrimaryButton } from '../components/ui/PrimaryButton'
 import { useBranding } from '../contexts/BrandingContext'
 import { downloadComposition } from '../features/orders/services/downloadComposition'
-import { orderService } from '../features/orders/services/orderServiceInstance'
+import { printOrderRepository } from '../features/orders/services/orderServiceInstance'
+import { renderComposition } from '../features/orders/services/renderComposition'
 import type { ImageExportFormat } from '../features/orders/services/renderComposition'
 import type { FilledSlot, PrintTemplate } from '../types/selfBooth'
 
@@ -26,11 +27,14 @@ export function OrderPreviewPage({ template, slots, phoneNumber, roomId, onBack,
   const [format, setFormat] = useState<ImageExportFormat>('png')
   const [exportResult, setExportResult] = useState<{ filename: string; bytes: number; width: number; height: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const input = { template, slots, phoneNumber, roomId }
-
   const submit = async () => {
     setSubmitting(true); setError(null)
-    try { const order = await orderService.create(input); onSuccess(order.metadata.orderId) }
+    try {
+      const draft = await printOrderRepository.createDraft(phoneNumber, roomId)
+      const rendered = await renderComposition(template, slots, { branding, createPreview: false })
+      await printOrderRepository.addItem(draft, phoneNumber, template.id, rendered.print, 0)
+      onSuccess((await printOrderRepository.submit(draft)).id)
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to submit order') }
     finally { setSubmitting(false) }
   }

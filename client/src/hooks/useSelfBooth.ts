@@ -111,6 +111,9 @@ export function useSelfBooth() {
     setCompletedFrameIds((current) => current.includes(selectedTemplateId) ? current : [...current, selectedTemplateId])
     return true
   }, [selectedTemplateId, slots])
+  const uncompleteFrame = useCallback((templateId: string) => {
+    setCompletedFrameIds((current) => current.filter((id) => id !== templateId))
+  }, [])
 
   const fillEmpty = useCallback((photos: PhotoAsset[]) => {
     setSlots((current) => {
@@ -251,6 +254,7 @@ export function useSelfBooth() {
     selectTemplate,
     selectFrame,
     completeCurrentFrame,
+    uncompleteFrame,
     slots,
     currentSlot,
     setCurrentSlot,

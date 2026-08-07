@@ -180,7 +180,9 @@ Production evolution should make export creation asynchronous, introduce idempot
 
 ## 10. Print Queue
 
-The print queue is not implemented. Its future responsibility is to accept a completed immutable export reference and coordinate printing independently of HTTP requests.
+The production print queue is persisted in Supabase. A customer Room session creates one draft `print_orders` record protected by an opaque edit token. Each completed Template is rendered once in the browser, downloaded to the customer device, uploaded as PNG to the `print-orders` Storage bucket, and registered as one `print_order_items` row. PostgreSQL stores only object metadata and paths.
+
+Drafts are hidden from Admin until the customer submits once. Submission locks item mutations and exposes the order as `Pending`. Admin reads the shared queue newest-first, previews or downloads stored images, creates ZIP downloads in the browser, advances the status through `Pending`, `Printing`, `Completed`, or `Cancelled`, and can delete an order with its objects. Repository interfaces isolate React pages from the Supabase adapter.
 
 Recommended state model:
 
