@@ -7,6 +7,7 @@ import chokidar from 'chokidar'
 
 interface Config { boothId: string; watchFolder: string; supabaseUrl: string; serviceRoleKey?: string }
 interface QueueItem { path: string; attempts: number }
+interface ActiveSession { session_id: string }
 
 const configPath = resolve(process.argv[2] ?? 'config.json')
 const environmentServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? ''
@@ -56,6 +57,19 @@ async function upload(item: QueueItem) {
   const storagePath = `${config.boothId}/${randomUUID()}-${safeName}`
   const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
   await checked(await fetch(`${projectUrl}/storage/v1/object/session-photos/${storagePath}`, { method: 'POST', headers: headers({ 'Content-Type': 'image/jpeg', 'x-upsert': 'false' }), body }))
+  try {
+    const sessionResponse = await checked(await fetch(`${projectUrl}/rest/v1/customer_sessions?booth_id=eq.${encodeURIComponent(config.boothId)}&status=eq.active&select=session_id&order=created_at.desc&limit=1`, { headers: headers() }))
+    const session = ((await sessionResponse.json()) as ActiveSession[])[0]
+    if (!session) throw new Error(`No active customer session for booth: ${config.boothId}`)
+
+    await checked(await fetch(`${projectUrl}/rest/v1/session_photos`, {
+      method: 'POST', headers: headers({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ id: randomUUID(), session_id: session.session_id, booth_id: config.boothId, storage_path: storagePath, source_name: basename(item.path), content_hash: hash }),
+    }))
+  } catch (error) {
+    await fetch(`${projectUrl}/storage/v1/object/session-photos/${storagePath}`, { method: 'DELETE', headers: headers() })
+    throw error
+  }
   uploaded.add(hash)
   console.log(`[uploaded] ${basename(item.path)} -> ${storagePath}`)
   console.log(`[upload] completed: ${item.path}`)
