@@ -48,7 +48,12 @@ export function CustomerApp() {
       setFramePreviews((current) => { const previous = current[booth.template.id]; if (previous) URL.revokeObjectURL(previous); return { ...current, [booth.template.id]: previewUrl } })
       booth.completeCurrentFrame()
       if (booth.currentFrameIndex < booth.roomTemplates.length - 1) booth.selectFrame(booth.currentFrameIndex + 1)
-      else navigate('/summary')
+      else {
+        const submitted = await printOrderRepository.submit(draft)
+        sessionStorage.setItem('selfbooth.last-order-id', submitted.id)
+        setOrderId(submitted.id)
+        navigate('/success')
+      }
     } catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to add this image to the Print Order.') }
     finally { setDownloading(false) }
   }
