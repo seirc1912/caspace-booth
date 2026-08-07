@@ -7,7 +7,7 @@ const projectUrl = import.meta.env.VITE_SUPABASE_URL?.trim() || 'https://jmxhlue
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || 'sb_publishable_iQy5i_H_MAEGASo-sP-fWQ_7RYXa6rY'
 const adminSessionKey = 'selfbooth.admin-session.v1'
 
-const supabase = createClient(projectUrl, publishableKey, { auth: { persistSession: false, autoRefreshToken: false } })
+export const supabase = createClient(projectUrl, publishableKey, { auth: { persistSession: false, autoRefreshToken: false } })
 
 interface RoomRow {
   id: string; name: string; slug: string; description: string; cover_image: string | null

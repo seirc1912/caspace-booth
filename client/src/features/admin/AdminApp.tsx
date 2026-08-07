@@ -6,6 +6,7 @@ import { AdminRoomsPage } from './pages/AdminRoomsPage'
 import { AdminCreateTemplatePage } from './pages/AdminCreateTemplatePage'
 import { AdminLoginPage } from './pages/AdminLoginPage'
 import { AdminPlaceholderPage } from './pages/AdminPlaceholderPage'
+import { AdminPrintQueuePage } from './pages/AdminPrintQueuePage'
 import { AdminTemplateProvider } from './store/AdminTemplateProvider'
 import { AssetLibraryProvider } from './store/AssetLibraryProvider'
 import { RoomProvider } from './store/RoomProvider'
@@ -22,6 +23,7 @@ function AdminRoutes() {
   else if (pathname === '/admin/templates') page = <AdminTemplatesPage />
   else if (pathname === '/admin/templates/new') page = <AdminCreateTemplatePage />
   else if (pathname === '/admin/sessions') page = <AdminPlaceholderPage title="Sessions" />
+  else if (pathname === '/admin/print-queue') page = <AdminPrintQueuePage />
   else if (pathname === '/admin/settings') page = <AdminPlaceholderPage title="Settings" />
   else {
     const match = pathname.match(/^\/admin\/templates\/([a-zA-Z0-9_-]+)(?:\/edit)?$/)
