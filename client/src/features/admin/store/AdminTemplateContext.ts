@@ -7,6 +7,7 @@ export interface AdminTemplateStoreValue {
   duplicate: (id: string) => string | null
   setStatus: (id: string, status: TemplateStatus) => void
   remove: (id: string) => void
+  reorder: (id: string, direction: -1 | 1) => void
 }
 
 export const AdminTemplateContext = createContext<AdminTemplateStoreValue | null>(null)
