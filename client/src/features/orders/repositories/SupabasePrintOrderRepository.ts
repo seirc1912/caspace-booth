@@ -29,10 +29,14 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
 
   async addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number) {
     const path = `${safePhone(phoneNumber)}/${draft.id}/${String(displayOrder + 1).padStart(2, '0')}.png`
-    const upload = await supabase.storage.from(bucket).upload(path, image, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
-    if (upload.error) throw new Error(upload.error.message)
+    // storage-js wraps Blob bodies in multipart FormData. Safari can terminate that
+    // request with an opaque "Load failed" before Storage returns an HTTP response.
+    // Raw bytes use the same endpoint and metadata without the multipart transport.
+    const imageBytes = await image.arrayBuffer()
+    const upload = await supabase.storage.from(bucket).upload(path, imageBytes, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
+    if (upload.error) throw upload.error
     const result = await supabase.rpc('customer_upsert_print_order_item', { p_order_id: draft.id, p_edit_token: draft.editToken, p_template_id: templateId, p_storage_path: path, p_display_order: displayOrder })
-    if (result.error) { await supabase.storage.from(bucket).remove([path]); throw new Error(result.error.message) }
+    if (result.error) { await supabase.storage.from(bucket).remove([path]); throw result.error }
     return toItem(unwrap(result.data as ItemRow | null, result.error))
   }
 
