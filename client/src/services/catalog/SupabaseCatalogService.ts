@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import type { Room } from '../../models/Room'
 import type { AdminTemplateRecord } from '../../features/admin/types'
 import type { CustomerTemplate } from './types'
+import { printTemplates } from '../../data/templates'
 
 const projectUrl = import.meta.env.VITE_SUPABASE_URL?.trim() || 'https://jmxhlueibhpltxrwqdpf.supabase.co'
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || 'sb_publishable_iQy5i_H_MAEGASo-sP-fWQ_7RYXa6rY'
@@ -35,9 +36,15 @@ const roomPayload = (room: Room) => ({
   enabled: room.isActive, published: room.published, display_order: room.sortOrder,
 })
 
+const isViteFilesystemAsset = (url: string | null | undefined) => typeof url === 'string' && url.startsWith('/@fs/')
+
 const toAdminTemplate = (row: TemplateRow): AdminTemplateRecord => {
   const record = row.editor_data as AdminTemplateRecord
-  return { ...record, id: row.id, roomId: row.room_id, status: record.status ?? (row.enabled ? 'published' : 'draft'), coverUrl: row.thumbnail, updatedAt: row.updated_at, template: { ...record.template, id: row.id, name: row.name } }
+  const bundled = printTemplates.find((template) => template.id === row.id)
+  const backgroundUrl = isViteFilesystemAsset(record.template.backgroundUrl) ? bundled?.backgroundUrl ?? null : record.template.backgroundUrl
+  const thumbnailUrl = isViteFilesystemAsset(record.template.thumbnailUrl) ? bundled?.thumbnailUrl ?? null : record.template.thumbnailUrl
+  const coverUrl = isViteFilesystemAsset(row.thumbnail) ? bundled?.thumbnailUrl ?? null : row.thumbnail
+  return { ...record, id: row.id, roomId: row.room_id, status: record.status ?? (row.enabled ? 'published' : 'draft'), coverUrl, updatedAt: row.updated_at, template: { ...record.template, id: row.id, name: row.name, backgroundUrl, thumbnailUrl } }
 }
 
 const templatePayload = (record: AdminTemplateRecord, displayOrder: number) => ({

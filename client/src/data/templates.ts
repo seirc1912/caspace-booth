@@ -5,12 +5,6 @@ const definitionModules = import.meta.glob('../../../templates/*/template.json',
   import: 'default',
 }) as Record<string, unknown>
 
-const assetModules = import.meta.glob('../../../templates/*/*.{png,jpg,jpeg,webp}', {
-  eager: true,
-  import: 'default',
-  query: '?url',
-}) as Record<string, string>
-
 const isNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
 
 function parseSlot(value: unknown): TemplateSlot {
@@ -65,12 +59,14 @@ function parseTemplate(path: string, value: unknown): PrintTemplate {
     variables: candidate.variables.map(parseVariable),
     elements: [],
   }
-  const folder = path.slice(0, path.lastIndexOf('/') + 1)
   return {
     ...document,
     slotCount: document.slots.length,
-    backgroundUrl: assetModules[`${folder}${document.assets.background}`] ?? null,
-    thumbnailUrl: assetModules[`${folder}${document.assets.thumbnail}`] ?? null,
+    // Built-in assets are served from public paths. Do not use Vite's /@fs/
+    // development URLs here: template records are shared through Supabase and
+    // must remain valid in a production deployment.
+    backgroundUrl: `/templates/${document.id}/${document.assets.background}`,
+    thumbnailUrl: `/templates/${document.id}/${document.assets.thumbnail}`,
   }
 }
 
