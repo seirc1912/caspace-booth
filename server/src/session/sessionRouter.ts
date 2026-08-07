@@ -7,6 +7,7 @@ export function createSessionRouter(sessionService: SessionService, photoStore: 
   router.post('/', async (request, response) => {
     const boothId = String(request.body.boothId ?? '')
     const phoneNumber = String(request.body.phoneNumber ?? '')
+    if (!boothId && !phoneNumber) return response.status(201).json(sessionService.create())
     if (!boothId || !/^\+?\d{9,15}$/.test(phoneNumber)) return response.status(400).json({ error: 'Valid boothId and phoneNumber are required' })
     if (!(await photoStore.boothExists(boothId))) return response.status(400).json({ error: 'Invalid booth' })
     const session = sessionService.create()

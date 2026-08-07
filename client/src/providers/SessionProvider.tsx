@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { SessionContext } from '../contexts/SessionContext'
 import type { CustomerSession } from '../types/session'
+import { env } from '../config/env'
 
 interface SessionProviderProps {
   children: ReactNode
@@ -24,7 +25,7 @@ function storedSession() {
 async function createSession() {
   const current = storedSession()
   if (current) return current
-  pendingSession ??= fetch('/api/sessions', { method: 'POST' }).then(async (response) => {
+  pendingSession ??= fetch(`${env.apiUrl}/api/sessions`, { method: 'POST' }).then(async (response) => {
     if (!response.ok) throw new Error('Unable to start a secure booth session')
     const session = await response.json() as CustomerSession
     sessionStorage.setItem(storageKey, JSON.stringify(session))
