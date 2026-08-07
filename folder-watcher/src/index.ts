@@ -1,17 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { existsSync, watch } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
-import { basename, extname, resolve } from 'node:path'
+import { basename, dirname, extname, join, resolve } from 'node:path'
+import { loadEnvFile } from 'node:process'
 
-interface Config { boothId: string; watchFolder: string; supabaseUrl: string }
+interface Config { boothId: string; watchFolder: string; supabaseUrl: string; serviceRoleKey?: string }
 interface QueueItem { path: string; attempts: number }
 interface ActiveSession { session_id: string }
 
 const configPath = resolve(process.argv[2] ?? 'config.json')
+const environmentServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? ''
 const config = JSON.parse(await readFile(configPath, 'utf8')) as Config
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? ''
+const envPath = join(dirname(configPath), '.env')
+if (existsSync(envPath)) loadEnvFile(envPath)
+const dotEnvServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? ''
+const serviceKey = environmentServiceKey || config.serviceRoleKey?.trim() || dotEnvServiceKey
 if (!config.boothId || !config.watchFolder || !config.supabaseUrl) throw new Error('config.json requires boothId, watchFolder, and supabaseUrl')
-if (!serviceKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required')
+if (!serviceKey) throw new Error('SUPABASE_SERVICE_ROLE_KEY is required in the environment, config.json, or .env')
 if (!existsSync(config.watchFolder)) throw new Error(`Watch folder does not exist: ${config.watchFolder}`)
 
 const projectUrl = config.supabaseUrl.replace(/\/$/, '')
