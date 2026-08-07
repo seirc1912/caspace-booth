@@ -11,6 +11,7 @@ import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
 import { useSessionPhotos } from './features/photos/useSessionPhotos'
 import type { CustomerSession } from './types/session'
+import { env } from './config/env'
 import { ComposerPage } from './pages/ComposerPage'
 import { HomePage } from './pages/HomePage'
 import { NotFoundPage } from './pages/NotFoundPage'
@@ -37,7 +38,7 @@ export function CustomerApp() {
   useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError)
 
   const startBoothSession = async (boothId: string) => {
-    const response = await fetch('/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boothId, phoneNumber: booth.phoneNumber }) })
+    const response = await fetch(`${env.apiUrl}/api/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ boothId, phoneNumber: booth.phoneNumber }) })
     if (!response.ok) throw new Error(await response.text())
     const session = await response.json() as CustomerSession
     sessionStorage.setItem('selfbooth.customer-session', JSON.stringify(session))
