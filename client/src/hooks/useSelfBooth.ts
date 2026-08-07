@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
 import { readCustomerTemplates, readRooms } from '../services/catalog/RoomCatalogService'
 import { loadPhotoFile } from '../features/photos/imageLoader'
@@ -33,7 +33,8 @@ export function useSelfBooth() {
   const [phoneNumber, setPhoneNumberState] = useState(storedJourney.phoneNumber ?? '')
   const [selectedRoomId, setSelectedRoomIdState] = useState(storedJourney.selectedRoomId ?? '')
   const [selectedTemplateId, setSelectedTemplateIdState] = useState(storedJourney.selectedTemplateId ?? '')
-  const [slots, setSlots] = useState<Array<FilledSlot | null>>([])
+  const [frameSlots, setFrameSlots] = useState<Record<string, Array<FilledSlot | null>>>({})
+  const [completedFrameIds, setCompletedFrameIds] = useState<string[]>([])
   const [currentSlot, setCurrentSlot] = useState<number | null>(null)
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([])
   const [uploadedPhotos, setUploadedPhotos] = useState<PhotoAsset[]>([])
@@ -56,17 +57,52 @@ export function useSelfBooth() {
   )
   const room = useMemo(() => catalog.rooms.find((item) => item.id === selectedRoomId) ?? null, [catalog.rooms, selectedRoomId])
   const roomTemplates = useMemo(() => catalog.templates.filter((item) => item.roomId === selectedRoomId), [catalog.templates, selectedRoomId])
+  const currentFrameIndex = Math.max(0, roomTemplates.findIndex((item) => item.id === selectedTemplateId))
+  const slots = frameSlots[selectedTemplateId] ?? template.slots.map(() => null)
+  const setSlots = useCallback((updater: SetStateAction<Array<FilledSlot | null>>) => {
+    if (!selectedTemplateId) return
+    setCompletedFrameIds((completed) => completed.filter((id) => id !== selectedTemplateId))
+    setFrameSlots((current) => {
+      const existing = current[selectedTemplateId] ?? template.slots.map(() => null)
+      const next = typeof updater === 'function' ? updater(existing) : updater
+      return { ...current, [selectedTemplateId]: next }
+    })
+  }, [selectedTemplateId, template.slots])
   const persistJourney = (next: { phoneNumber: string; selectedRoomId: string; selectedTemplateId: string }) => sessionStorage.setItem(journeyStorageKey, JSON.stringify(next))
   const setPhoneNumber = (value: string) => { setPhoneNumberState(value); persistJourney({ phoneNumber: value, selectedRoomId, selectedTemplateId }) }
-  const selectRoom = (id: string) => { setSelectedRoomIdState(id); setSelectedTemplateIdState(''); setSlots([]); persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: '' }) }
-  const selectTemplate = (id: string) => { setSelectedTemplateIdState(id); setSlots([]); persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id }) }
+  const selectRoom = (id: string) => {
+    const firstTemplate = catalog.templates.find((item) => item.roomId === id)
+    const templateId = firstTemplate?.id ?? ''
+    setSelectedRoomIdState(id); setSelectedTemplateIdState(templateId); setCurrentSlot(null)
+    setCompletedFrameIds([]); setFrameSlots({})
+    persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: templateId })
+  }
+  const selectTemplate = (id: string) => {
+    setSelectedTemplateIdState(id); setCurrentSlot(null)
+    persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
+  }
 
   const openEditor = useCallback(() => {
-    setSlots(template.slots.map(() => null))
+    setSlots((current) => current.length ? current : template.slots.map(() => null))
     setCurrentSlot(null)
     setSelectedPhotoIds([])
     setView('editor')
-  }, [template.slots])
+  }, [setSlots, template.slots])
+
+  const selectFrame = useCallback((index: number) => {
+    const next = roomTemplates[index]
+    if (!next) return false
+    setSelectedTemplateIdState(next.id)
+    setCurrentSlot(null)
+    persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
+    return true
+  }, [roomTemplates, phoneNumber, selectedRoomId])
+
+  const completeCurrentFrame = useCallback(() => {
+    if (!selectedTemplateId || !slots.length || slots.some((slot) => !slot)) return false
+    setCompletedFrameIds((current) => current.includes(selectedTemplateId) ? current : [...current, selectedTemplateId])
+    return true
+  }, [selectedTemplateId, slots])
 
   const fillEmpty = useCallback((photos: PhotoAsset[]) => {
     setSlots((current) => {
@@ -75,11 +111,11 @@ export function useSelfBooth() {
       emptyIndices.forEach((slotIndex, photoIndex) => { const photo = photos[photoIndex]; if (photo) next[slotIndex] = toSlot(photo) })
       return next
     })
-  }, [template.slots])
+  }, [setSlots, template.slots])
 
   const replaceSlot = useCallback((index: number, photo: PhotoAsset) => {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? toSlot(photo) : slot)))
-  }, [])
+  }, [setSlots])
 
   const updateTransform = useCallback((index: number, transform: Partial<ImageTransform>) => {
     setSlots((current) => current.map((slot, slotIndex) => (
@@ -87,15 +123,15 @@ export function useSelfBooth() {
         ? { ...slot, transform: { ...slot.transform, ...transform } }
         : slot
     )))
-  }, [])
+  }, [setSlots])
 
   const updateFit = useCallback((index: number, fit: 'contain' | 'cover') => {
     setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? { ...slot, fit } : slot))
-  }, [])
+  }, [setSlots])
 
   const removeSlot = useCallback((index: number) => {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? null : slot)))
-  }, [])
+  }, [setSlots])
 
   const randomFill = useCallback(() => {
     if (!uploadedPhotos.length) return
@@ -111,7 +147,7 @@ export function useSelfBooth() {
     }
     lastRandomOrder.current = visibleOrder.map((photo) => photo.id).join()
     setSlots(visibleOrder.map(toSlot))
-  }, [template.slots.length, uploadedPhotos])
+  }, [setSlots, template.slots.length, uploadedPhotos])
 
   const addUploadedPhotos = useCallback(async (files: File[]) => {
     setPhotoError(null)
@@ -133,7 +169,8 @@ export function useSelfBooth() {
       if (photo) { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) }
       return current.filter((item) => item.id !== photoId)
     })
-    setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? null : slot))
+    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? null : slot)])))
+    setCompletedFrameIds([])
   }, [])
 
   const replaceUploadedPhoto = useCallback(async (photoId: string, file: File) => {
@@ -148,7 +185,8 @@ export function useSelfBooth() {
       if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc)
       return replacement
     }))
-    setSlots((current) => current.map((slot) => slot?.photo.id === photoId ? toSlot(replacement) : slot))
+    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? { ...slot, photo: replacement } : slot)])))
+    setCompletedFrameIds([])
   }, [])
 
   const moveUploadedPhoto = useCallback((photoId: string, direction: -1 | 1) => {
@@ -180,7 +218,7 @@ export function useSelfBooth() {
       let filledIndex = 0
       return current.map((slot) => (slot ? filled[filledIndex++] : null))
     })
-  }, [])
+  }, [setSlots])
 
   const toggleSelectedPhoto = useCallback((id: string) => {
     setSelectedPhotoIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
@@ -193,6 +231,9 @@ export function useSelfBooth() {
     rooms: catalog.rooms,
     room,
     roomTemplates,
+    frameSlots,
+    completedFrameIds,
+    currentFrameIndex,
     templates: catalog.templates,
     phoneNumber,
     setPhoneNumber,
@@ -200,6 +241,8 @@ export function useSelfBooth() {
     selectRoom,
     selectedTemplateId,
     selectTemplate,
+    selectFrame,
+    completeCurrentFrame,
     slots,
     currentSlot,
     setCurrentSlot,
