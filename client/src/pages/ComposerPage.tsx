@@ -37,6 +37,7 @@ interface ComposerPageProps {
   frameIndex?: number
   frameCount?: number
   completedFrameIds?: string[]
+  canOrder?: boolean
   frameIds?: string[]
   onSelectFrame?: (index: number) => void
   onDownload?: () => void
@@ -47,7 +48,7 @@ interface ComposerPageProps {
 interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover' }
 const resetTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 
-export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onSave, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading, onPrevious }: ComposerPageProps) {
+export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onSave, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], canOrder, frameIds = [], onSelectFrame, onDownload, downloading, onPrevious }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null)
   const usage = useMemo(() => slots.reduce<Record<string, number>>((counts, slot) => {
@@ -102,6 +103,6 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
     <div className="mx-auto mt-5 w-full max-w-4xl"><PhotoLibraryDock activePhotoId={activePhotoId} onImageError={onPhotoError} onAdd={onAddPhotos} onSelect={(photo) => setActivePhotoId(photo.id)} onDelete={deletePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} usage={usage} /></div>
     {crop ? <CropToolbar fit={slots[crop.index]?.fit ?? 'contain'} onCancel={cancelCrop} onDone={finishCrop} onFitChange={(fit) => onFitChange(crop.index, fit)} onReset={resetCrop} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} zoom={slots[crop.index]?.transform.zoom ?? 1} /> : null}
     {photoError ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl" role="alert"><span>{photoError}</span><button className="min-h-10 shrink-0 rounded-xl bg-white/15 px-3 font-bold" onClick={onClearPhotoError} type="button">Dismiss</button></div> : null}
-    <EditorToolbar canContinue={slots.every(Boolean)} downloading={downloading} nextLabel="Order" onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null) }} onDownload={onDownload} onNext={onNext} onPrevious={onPrevious} onSave={() => { onSave(); onCurrentSlotChange(null); setCrop(null) }} onShuffle={onShuffle} previousDisabled={frameIndex === 0} saved={completedFrameIds.includes(template.id)} />
+    <EditorToolbar canContinue={slots.every(Boolean)} canOrder={canOrder} downloading={downloading} nextLabel="Order" onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null) }} onDownload={onDownload} onNext={onNext} onPrevious={onPrevious} onSave={() => { onSave(); onCurrentSlotChange(null); setCrop(null) }} onShuffle={onShuffle} previousDisabled={frameIndex === 0} saved={completedFrameIds.includes(template.id)} />
   </PageShell>
 }

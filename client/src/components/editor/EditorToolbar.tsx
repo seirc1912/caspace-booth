@@ -2,6 +2,7 @@ import { Icon } from '../ui/Icon'
 
 interface EditorToolbarProps {
   canContinue: boolean
+  canOrder?: boolean
   onAutoFill: () => void
   onClear: () => void
   onDownload?: () => void
@@ -18,7 +19,7 @@ interface EditorToolbarProps {
 const utilityActionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl px-1 text-[11px] font-semibold text-stone-600 hover:bg-stone-100 disabled:cursor-not-allowed disabled:opacity-35 md:min-h-14 md:text-xs'
 const primaryActionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl px-2 text-xs font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40 md:min-h-14 md:text-sm md:shadow-none'
 
-export function EditorToolbar({ canContinue, onAutoFill, onClear, onDownload, onNext, onSave, onShuffle, nextLabel = 'Order', downloading = false, onPrevious, previousDisabled = false, saved = false }: EditorToolbarProps) {
+export function EditorToolbar({ canContinue, canOrder, onAutoFill, onClear, onDownload, onNext, onSave, onShuffle, nextLabel = 'Order', downloading = false, onPrevious, previousDisabled = false, saved = false }: EditorToolbarProps) {
   return <nav aria-label="Editor actions" className="fixed inset-x-0 bottom-0 z-20 border-t border-stone-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:px-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
     <div className="mx-auto max-w-3xl md:flex md:items-stretch md:gap-2">
       <div className="grid grid-cols-4 gap-1 md:flex-1">
@@ -30,7 +31,7 @@ export function EditorToolbar({ canContinue, onAutoFill, onClear, onDownload, on
       <div className="mt-1 grid grid-cols-3 gap-1 md:mt-0 md:w-[22rem]">
         <button aria-label="Save" className={`${primaryActionClass} bg-sky-600`} disabled={!canContinue || downloading} onClick={onSave} type="button">{saved ? 'Saved' : 'Save'}</button>
         {onDownload ? <button aria-label="Download" className={`${primaryActionClass} bg-stone-950`} disabled={!canContinue || downloading} onClick={onDownload} type="button">{downloading ? 'Exporting' : 'Download'}</button> : <span />}
-        <button aria-busy={downloading} aria-label={nextLabel} className={`${primaryActionClass} bg-[var(--brand-secondary)]`} disabled={!canContinue || downloading} onClick={onNext} type="button">{downloading ? 'Ordering…' : nextLabel}</button>
+        <button aria-busy={downloading} aria-label={nextLabel} className={`${primaryActionClass} bg-[var(--brand-secondary)]`} disabled={!(canOrder ?? canContinue) || downloading} onClick={onNext} type="button">{downloading ? 'Ordering…' : nextLabel}</button>
       </div>
     </div>
   </nav>
