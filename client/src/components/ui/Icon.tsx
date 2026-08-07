@@ -1,5 +1,5 @@
 interface IconProps {
-  name: 'add' | 'back' | 'camera' | 'check' | 'crop' | 'phone' | 'rotate' | 'shuffle' | 'sparkles' | 'trash' | 'zoomIn' | 'zoomOut'
+  name: 'add' | 'back' | 'camera' | 'check' | 'crop' | 'download' | 'phone' | 'rotate' | 'shuffle' | 'sparkles' | 'trash' | 'zoomIn' | 'zoomOut'
   className?: string
 }
 
@@ -9,6 +9,7 @@ const paths = {
   camera: <><path d="M14.5 4 16 7h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h3l1.5-3h5Z" /><circle cx="12" cy="13" r="3" /></>,
   check: <path d="m5 12 4 4L19 6" />,
   crop: <><path d="M6 2v16a2 2 0 0 0 2 2h14" /><path d="M2 6h16a2 2 0 0 1 2 2v14" /></>,
+  download: <><path d="M12 3v12m0 0 5-5m-5 5-5-5" /><path d="M5 20h14" /></>,
   phone: <><rect x="6" y="2" width="12" height="20" rx="2" /><path d="M10 18h4" /></>,
   rotate: <><path d="M20 11a8.1 8.1 0 1 0 .5 4" /><path d="M20 4v7h-7" /></>,
   shuffle: <><path d="m18 4 3 3-3 3" /><path d="M3 7h3c4 0 5 10 9 10h6" /><path d="m18 14 3 3-3 3" /><path d="M3 17h3c1.2 0 2.1-.9 3-2.2" /></>,

@@ -34,12 +34,19 @@ interface ComposerPageProps {
   photoError: string | null
   onClearPhotoError: () => void
   onPhotoError: (message: string) => void
+  frameIndex?: number
+  frameCount?: number
+  completedFrameIds?: string[]
+  frameIds?: string[]
+  onSelectFrame?: (index: number) => void
+  onDownload?: () => void
+  downloading?: boolean
 }
 
 interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover' }
 const resetTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 
-export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError }: ComposerPageProps) {
+export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null)
   const usage = useMemo(() => slots.reduce<Record<string, number>>((counts, slot) => {
@@ -85,7 +92,8 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
   }
 
   return <PageShell className="pb-[15.5rem] md:pb-24">
-    <header className="mb-4 flex items-center justify-between"><button className="grid size-11 place-items-center rounded-full bg-white shadow-sm" onClick={onBack} type="button"><Icon name="back" /><span className="sr-only">Choose another template</span></button><div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Step 4 of 6</p><h1 className="font-bold">Compose your print</h1></div><span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span></header>
+    <header className="mb-4 flex items-center justify-between"><button className="grid size-11 place-items-center rounded-full bg-white shadow-sm" onClick={onBack} type="button"><Icon name="back" /><span className="sr-only">Previous frame</span></button><div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Frame {frameIndex + 1} / {frameCount}</p><h1 className="font-bold">{template.name}</h1></div><span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span></header>
+    <div className="mx-auto mb-5 max-w-4xl"><div className="h-2 overflow-hidden rounded-full bg-stone-200"><div className="h-full rounded-full bg-[var(--brand-primary)] transition-[width] duration-300" style={{ width: `${((frameIndex + 1) / Math.max(1, frameCount)) * 100}%` }} /></div>{onSelectFrame && frameIds.length > 1 ? <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Room frames">{frameIds.map((id, index) => { const complete = completedFrameIds.includes(id); const current = index === frameIndex; return <button aria-current={current ? 'step' : undefined} className={`min-h-10 shrink-0 rounded-full border px-4 text-sm font-bold transition ${current ? 'border-sky-500 bg-sky-50 text-sky-700' : complete ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-white text-stone-500'}`} key={id} onClick={() => onSelectFrame(index)} type="button">{complete ? '✓' : current ? '●' : '○'} Frame {index + 1}</button> })}</div> : null}</div>
     <div className="mx-auto grid w-full max-w-4xl items-start gap-5 md:grid-cols-[minmax(18rem,25rem)_1fr]">
       <TemplateCanvas activeSlot={currentSlot} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onActiveSlotChange={selectFrame} onAdd={selectFrame} onBeginCrop={beginCrop} onDropPhoto={dropPhoto} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, resetTransform); onFitChange(index, 'contain') }} onReplace={(index) => onCurrentSlotChange(index)} onTransform={onTransform} slots={slots} template={template} />
       <aside className="rounded-[1.75rem] bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Upload once. Create freely.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Select a library photo, then tap any frame. Reuse any photo as many times as you like. Cropping only starts when you choose Crop.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Desktop: drag thumbnails into frames. Mobile: tap photo, then tap frame.</div></aside>
@@ -93,6 +101,6 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
     <div className="mx-auto mt-5 w-full max-w-4xl"><PhotoLibraryDock activePhotoId={activePhotoId} onImageError={onPhotoError} onAdd={onAddPhotos} onSelect={(photo) => setActivePhotoId(photo.id)} onDelete={deletePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} usage={usage} /></div>
     {crop ? <CropToolbar fit={slots[crop.index]?.fit ?? 'contain'} onCancel={cancelCrop} onDone={finishCrop} onFitChange={(fit) => onFitChange(crop.index, fit)} onReset={resetCrop} /> : null}
     {photoError ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl" role="alert"><span>{photoError}</span><button className="min-h-10 shrink-0 rounded-xl bg-white/15 px-3 font-bold" onClick={onClearPhotoError} type="button">Dismiss</button></div> : null}
-    <EditorToolbar canContinue={slots.every(Boolean)} onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null) }} onNext={onNext} onShuffle={onShuffle} />
+    <EditorToolbar canContinue={slots.every(Boolean)} downloading={downloading} nextLabel={frameIndex === frameCount - 1 ? 'Summary' : 'Save & Next'} onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null) }} onDownload={onDownload} onNext={onNext} onShuffle={onShuffle} />
   </PageShell>
 }
