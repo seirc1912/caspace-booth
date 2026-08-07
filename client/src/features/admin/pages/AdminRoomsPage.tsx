@@ -1,13 +1,17 @@
 import type { ChangeEvent } from 'react'
 import { useAdminTemplates } from '../store/AdminTemplateContext'
 import { useRooms } from '../store/RoomContext'
-
-const readImage = (file: File, done: (url: string) => void) => { const reader = new FileReader(); reader.onload = () => done(String(reader.result)); reader.readAsDataURL(file) }
+import { prepareRoomCover } from '../../../services/catalog/RoomCatalogService'
 
 export function AdminRoomsPage() {
   const roomStore = useRooms()
   const templates = useAdminTemplates().templates
   const createRoom = () => { const name = window.prompt('Room name')?.trim(); if (name) roomStore.create(name) }
-  const upload = (id: string) => (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (file?.type.startsWith('image/')) readImage(file, (cover) => roomStore.update(id, { cover })) }
+  const upload = (id: string) => async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file?.type.startsWith('image/')) return
+    try { roomStore.update(id, { cover: await prepareRoomCover(file) }) }
+    catch { window.alert('The Room cover could not be prepared. Please choose another image.') }
+  }
   return <div><header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-sm font-bold text-violet-600">Catalog structure</p><h1 className="mt-1 text-3xl font-bold">Rooms</h1><p className="mt-2 text-stone-500">Organize templates into customer-facing collections.</p></div><button className="min-h-12 rounded-xl bg-stone-950 px-5 font-semibold text-white" onClick={createRoom} type="button">Create room</button></header><div className="mt-7 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{roomStore.rooms.map((room, index) => <article className={`overflow-hidden rounded-2xl bg-white shadow-sm ${!room.isActive ? 'opacity-60' : ''}`} key={room.id}><div className="grid aspect-[16/7] place-items-center bg-stone-100">{room.cover ? <img alt="" className="h-full w-full object-cover" src={room.cover} /> : <span className="text-sm text-stone-400">No cover</span>}</div><div className="p-4"><div className="flex items-center justify-between"><input aria-label="Room name" className="min-w-0 rounded-lg border border-transparent px-2 py-1 font-bold hover:border-stone-200" onChange={(event) => roomStore.update(room.id, { name: event.target.value })} value={room.name} /><span className="text-xs text-stone-400">{templates.filter((item) => item.roomId === room.id).length} templates</span></div><textarea aria-label="Room description" className="mt-2 min-h-16 w-full resize-none rounded-lg border border-stone-200 p-2 text-sm" onChange={(event) => roomStore.update(room.id, { description: event.target.value })} placeholder="Room description" value={room.description} /><div className="mt-4 grid grid-cols-2 gap-2 text-xs font-semibold"><label className="grid min-h-10 cursor-pointer place-items-center rounded-lg bg-stone-100">Upload cover<input accept="image/*" className="sr-only" onChange={upload(room.id)} type="file" /></label><button className="rounded-lg bg-stone-100" onClick={() => roomStore.update(room.id, { isActive: !room.isActive })} type="button">{room.isActive ? 'Disable' : 'Enable'}</button><button className="rounded-lg bg-stone-100" disabled={index === 0} onClick={() => roomStore.reorder(room.id, -1)} type="button">Move up</button><button className="rounded-lg bg-stone-100" disabled={index === roomStore.rooms.length - 1} onClick={() => roomStore.reorder(room.id, 1)} type="button">Move down</button><button className="col-span-2 rounded-lg py-3 text-rose-600 hover:bg-rose-50" onClick={() => { if (templates.some((item) => item.roomId === room.id)) return window.alert('Move this room’s templates before deleting it.'); if (window.confirm(`Delete ${room.name}?`)) roomStore.remove(room.id) }} type="button">Delete</button></div></div></article>)}</div></div>
 }
