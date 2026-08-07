@@ -27,25 +27,7 @@ const loadImageElement = (source: string) => new Promise<HTMLImageElement>((reso
   image.src = source
 })
 
-const blobDataUrl = (blob: Blob) => new Promise<string>((resolve, reject) => {
-  const reader = new FileReader()
-  reader.onerror = () => reject(new Error('The original image could not be read for export.'))
-  reader.onload = () => resolve(String(reader.result))
-  reader.readAsDataURL(blob)
-})
-
-async function loadImage(source: string, sourceBlob?: Blob, previewSource?: string) {
-  try { return await loadImageElement(source) }
-  catch (originalError) {
-    if (sourceBlob) {
-      try { return await loadImageElement(await blobDataUrl(sourceBlob)) } catch { /* Continue to the preview fallback. */ }
-    }
-    if (previewSource && previewSource !== source) {
-      try { return await loadImageElement(previewSource) } catch { /* Report the original decode error below. */ }
-    }
-    throw originalError
-  }
-}
+const loadImage = (source: string) => loadImageElement(source)
 
 const canvasBlob = (canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number) => new Promise<Blob>((resolve, reject) => {
   try { canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The browser could not encode the exported image.')), type, quality) }
@@ -154,7 +136,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
     if (layer.kind === 'slot') {
       const definition = layer.definition; const slot = slots[layer.index]
       if (slot && definition.visible !== false) {
-        const image = await loadImage(slot.photo.src, slot.photo.sourceBlob, slot.photo.previewSrc)
+        const image = await loadImage(slot.photo.src)
         context.save(); context.globalAlpha = definition.opacity ?? 1
         context.translate(definition.x + definition.width / 2, definition.y + definition.height / 2)
         context.rotate(definition.rotation * Math.PI / 180)
