@@ -68,7 +68,9 @@ export function CustomerApp() {
         if (!populatedIds.has(templateId)) await printOrderRepository.removeItem(draft, item)
       }
       for (const frame of populatedFrames) {
-        const rendered = await renderComposition(frame.template, frame.slots, { branding })
+        let rendered
+        try { rendered = await renderComposition(frame.template, frame.slots, { branding }) }
+        catch (reason) { throw new Error(`Failed to render print image: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }) }
         const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, rendered.print, frame.index)
         setOrderItems((current) => ({ ...current, [frame.template.id]: item }))
         const previewUrl = URL.createObjectURL(rendered.preview)
