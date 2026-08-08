@@ -43,7 +43,7 @@ export function PhotoLibraryDock({ photos, usage, activePhotoId, onAdd, onSelect
     event.dataTransfer.setData('application/x-selfbooth-photo', photoId)
   }
 
-  return <section aria-label="Photo library" className="fixed inset-x-0 bottom-[calc(4.75rem+env(safe-area-inset-bottom))] z-20 border-t border-stone-200 bg-white/95 px-3 py-2 shadow-[0_-12px_30px_rgba(28,25,23,0.08)] backdrop-blur-xl md:static md:rounded-[1.5rem] md:border md:p-4 md:shadow-sm">
+  return <section aria-label="Photo library" className="border-t border-stone-200 bg-white px-3 py-2 shadow-[0_-12px_30px_rgba(28,25,23,0.08)] md:static md:rounded-[1.5rem] md:border md:bg-white/95 md:p-4 md:shadow-sm md:backdrop-blur-xl">
     <div className="mx-auto max-w-4xl">
       <div className="mb-2 flex items-center justify-between gap-3"><div><h2 className="text-sm font-bold">Photo Library</h2><p className="text-[11px] text-stone-500">Select a photo, then tap any frame</p></div><button className="min-h-11 shrink-0 rounded-xl bg-stone-950 px-4 text-xs font-bold text-white disabled:opacity-40" onClick={() => addInput.current?.click()} type="button">{photos.length ? 'Upload More' : 'Upload Photos'}</button></div>
       <input accept="image/*" className="sr-only" multiple onChange={add} ref={addInput} type="file" />

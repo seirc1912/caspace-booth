@@ -20,7 +20,7 @@ const utilityActionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl 
 const primaryActionClass = 'grid min-h-12 min-w-0 place-items-center rounded-xl px-2 text-xs font-bold text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40 md:min-h-14 md:text-sm md:shadow-none'
 
 export function EditorToolbar({ canContinue, canOrder, onAutoFill, onClear, onDownload, onNext, onSave, onShuffle, nextLabel = 'Order', downloading = false, onPrevious, previousDisabled = false, saved = false }: EditorToolbarProps) {
-  return <nav aria-label="Editor actions" className="fixed inset-x-0 bottom-0 z-20 border-t border-stone-200 bg-white/95 px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 backdrop-blur-xl md:px-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+  return <nav aria-label="Editor actions" className="border-t border-stone-200 bg-white px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 md:fixed md:inset-x-0 md:bottom-0 md:z-20 md:bg-white/95 md:px-3 md:pb-[max(0.75rem,env(safe-area-inset-bottom))] md:backdrop-blur-xl">
     <div className="mx-auto max-w-3xl md:flex md:items-stretch md:gap-2">
       <div className="grid grid-cols-4 gap-1 md:flex-1">
         {onPrevious ? <button aria-label="Previous" className={utilityActionClass} disabled={previousDisabled || downloading} onClick={onPrevious} type="button"><Icon name="back" /><span className="hidden sm:inline">Previous</span></button> : <span />}
