@@ -37,7 +37,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
           {link("/admin/rooms", "Rooms")}
           {link("/admin/sessions", "Sessions")}
           {placeholder("Assets")}
-          {placeholder("Branding")}
+          {link("/admin/branding", "Site Branding")}
           {link("/admin/print-queue", "Print Queue")}
           {link("/admin/settings", "Settings")}
           <div className="mt-5 border-t border-stone-100 pt-4 text-xs leading-5 text-stone-400">

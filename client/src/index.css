@@ -9,10 +9,15 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
+html, body, #root {
+  background: #f7f5f2;
+  min-height: 100%;
+}
+
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 @utility tool-button {

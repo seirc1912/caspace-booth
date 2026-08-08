@@ -13,6 +13,7 @@ import { RoomProvider } from './store/RoomProvider'
 import { usePathname } from '../../hooks/usePathname'
 import { NotFoundPage } from '../../pages/NotFoundPage'
 import { getAdminToken } from '../../services/catalog/SupabaseCatalogService'
+import { AdminSiteBrandingPage } from './pages/AdminSiteBrandingPage'
 
 function AdminRoutes() {
   const { pathname } = usePathname()
@@ -24,6 +25,7 @@ function AdminRoutes() {
   else if (pathname === '/admin/templates/new') page = <AdminCreateTemplatePage />
   else if (pathname === '/admin/sessions') page = <AdminPlaceholderPage title="Sessions" />
   else if (pathname === '/admin/print-queue') page = <AdminPrintQueuePage />
+  else if (pathname === '/admin/branding') page = <AdminSiteBrandingPage />
   else if (pathname === '/admin/settings') page = <AdminPlaceholderPage title="Settings" />
   else {
     const match = pathname.match(/^\/admin\/templates\/([a-zA-Z0-9_-]+)(?:\/edit)?$/)
