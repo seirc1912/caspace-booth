@@ -30,6 +30,16 @@ begin
 end;
 $$;
 
+create or replace function public.admin_remove_site_asset(p_token uuid, p_path text)
+returns void language plpgsql security definer set search_path = storage, private, pg_catalog
+as $$
+begin
+  if not private.valid_admin_session(p_token) then raise exception 'Unauthorized' using errcode = '42501'; end if;
+  if p_path !~ '^branding/(logo|favicon|background)-[0-9]+$' then raise exception 'Invalid site asset path' using errcode = '22023'; end if;
+  delete from storage.objects where bucket_id = 'site-assets' and name = p_path;
+end;
+$$;
+
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('site-assets', 'site-assets', true, 8388608, array['image/jpeg','image/png','image/webp','image/gif','image/x-icon'])
 on conflict (id) do update set public = excluded.public, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
@@ -55,5 +65,7 @@ drop policy if exists "Admin can remove site assets" on storage.objects;
 
 revoke all on function public.site_branding() from public;
 revoke all on function public.admin_save_site_branding(uuid, jsonb) from public;
+revoke all on function public.admin_remove_site_asset(uuid, text) from public;
 grant execute on function public.site_branding() to anon;
 grant execute on function public.admin_save_site_branding(uuid, jsonb) to anon;
+grant execute on function public.admin_remove_site_asset(uuid, text) to anon;

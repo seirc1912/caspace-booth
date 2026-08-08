@@ -12,7 +12,7 @@ const merge = (value: unknown): BrandingConfig => {
 
 export async function loadSiteBranding() {
   const { data, error } = await supabase.rpc('site_branding')
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(`Failed to load site branding: ${error.message}`)
   return merge(data)
 }
 
@@ -20,7 +20,7 @@ export async function saveSiteBranding(value: BrandingConfig) {
   const token = getAdminToken()
   if (!token) throw new Error('Admin session expired. Please sign in again.')
   const { data, error } = await supabase.rpc('admin_save_site_branding', { p_token: token, p_settings: value })
-  if (error) throw new Error(error.message)
+  if (error) throw new Error(`Failed to save site branding: ${error.message}`)
   return merge(data)
 }
 
@@ -30,10 +30,21 @@ export async function uploadBrandingAsset(kind: 'logo' | 'favicon' | 'background
   if (!token) throw new Error('Admin session expired. Please sign in again.')
   const path = `branding/${kind}-${Date.now()}`
   const result = await supabase.storage.from('site-assets').upload(path, file, { upsert: true, contentType: file.type, cacheControl: '3600', metadata: { adminToken: token } })
-  if (result.error) throw new Error(result.error.message)
+  if (result.error) throw new Error(`Failed to upload ${kind}: ${result.error.message}`)
   return `${supabase.storage.from('site-assets').getPublicUrl(path).data.publicUrl}?v=${Date.now()}`
 }
 
-export async function removeBrandingAsset(kind: 'logo' | 'favicon' | 'background') {
-  void kind
+export async function removeBrandingAsset(kind: 'logo' | 'favicon' | 'background', assetUrl: string) {
+  const token = getAdminToken()
+  if (!token) throw new Error('Admin session expired. Please sign in again.')
+  let path: string
+  try {
+    const pathname = new URL(assetUrl).pathname
+    const marker = '/storage/v1/object/public/site-assets/'
+    if (!pathname.includes(marker)) throw new Error('not a site asset')
+    path = decodeURIComponent(pathname.slice(pathname.indexOf(marker) + marker.length))
+  } catch { throw new Error(`Failed to remove ${kind}: the stored asset URL is invalid.`) }
+  if (!new RegExp(`^branding/${kind}-[0-9]+$`).test(path)) throw new Error(`Failed to remove ${kind}: the asset path does not match this field.`)
+  const { error } = await supabase.rpc('admin_remove_site_asset', { p_token: token, p_path: path })
+  if (error) throw new Error(`Failed to remove ${kind}: ${error.message}`)
 }
