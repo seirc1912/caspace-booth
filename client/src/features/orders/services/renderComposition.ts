@@ -12,26 +12,45 @@ interface RenderOptions {
   onProgress?: ExportProgress
 }
 
+const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
+
+const isCrossOriginHttpSource = (source: string) => {
+  if (!/^https?:/i.test(source)) return false
+  try { return new URL(source, window.location.href).origin !== window.location.origin }
+  catch { return false }
+}
+
 const loadImageElement = (source: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-  if (typeof source !== 'string' || !source) { reject(new Error('An export image has no valid source.')); return }
+  if (typeof source !== 'string' || !source) { reject(new Error('Failed to load source image for export: image source is empty.')); return }
   const image = new Image()
-  image.decoding = 'async'
-  if (/^https?:/i.test(source)) image.crossOrigin = 'anonymous'
-  image.onload = () => {
-    if (!image.src || !image.complete || !Number.isFinite(image.naturalWidth) || !Number.isFinite(image.naturalHeight) || image.naturalWidth <= 0 || image.naturalHeight <= 0) { reject(new Error('An export image has invalid dimensions.')); return }
-    const finish = () => requestAnimationFrame(() => resolve(image))
-    if (typeof image.decode === 'function') void image.decode().then(finish, finish)
-    else finish()
+  let settled = false
+  const succeed = () => {
+    if (settled) return
+    if (!Number.isFinite(image.naturalWidth) || !Number.isFinite(image.naturalHeight) || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+      settled = true
+      reject(new Error('Failed to load source image for export: image has invalid dimensions.'))
+      return
+    }
+    settled = true
+    resolve(image)
   }
-  image.onerror = () => reject(new Error('An export image could not be decoded by this browser.'))
+  const fail = () => {
+    if (settled) return
+    settled = true
+    reject(new Error('Failed to load source image for export: the browser could not load or decode the image.'))
+  }
+  image.decoding = 'async'
+  if (isCrossOriginHttpSource(source)) image.crossOrigin = 'anonymous'
+  image.onload = succeed
+  image.onerror = fail
   image.src = source
 })
 
 const loadImage = (source: string) => loadImageElement(source)
 
 const canvasBlob = (canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number) => new Promise<Blob>((resolve, reject) => {
-  try { canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The browser could not encode the exported image.')), type, quality) }
-  catch { reject(new Error('The exported image could not be created.')) }
+  try { canvas.toBlob((blob) => blob && blob.size > 0 ? resolve(blob) : reject(new Error('Failed to render print image: the browser returned an empty image.')), type, quality) }
+  catch (reason) { reject(new Error(`Failed to render print image: ${errorMessage(reason)}`)) }
 })
 
 function validateCanvas(template: PrintTemplate) {
@@ -164,7 +183,9 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   const scale = Math.min(1, 900 / canvas.width)
   previewCanvas.width = Math.max(1, Math.round(canvas.width * scale)); previewCanvas.height = Math.max(1, Math.round(canvas.height * scale))
   previewCanvas.getContext('2d')?.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height)
+  const preview = await canvasBlob(previewCanvas, 'image/jpeg', 0.9)
   canvas.width = 1; canvas.height = 1
+  previewCanvas.width = 1; previewCanvas.height = 1
   options.onProgress?.(100)
-  return { print, preview: await canvasBlob(previewCanvas, 'image/jpeg', 0.9), width: canvas.width, height: canvas.height, format }
+  return { print, preview, width: template.canvas.width, height: template.canvas.height, format }
 }

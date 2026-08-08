@@ -1,5 +1,6 @@
 {
   "boothId": "booth-1",
   "watchFolder": "D:\\CaptureOne\\Export",
-  "supabaseUrl": "https://your-project.supabase.co"
+  "supabaseUrl": "https://your-project.supabase.co",
+  "serviceRoleKey": "your-service-role-key"
 }

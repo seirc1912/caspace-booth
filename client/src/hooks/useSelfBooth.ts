@@ -107,7 +107,7 @@ export function useSelfBooth() {
   }, [roomTemplates, phoneNumber, selectedRoomId])
 
   const completeCurrentFrame = useCallback(() => {
-    if (!selectedTemplateId || !slots.length || slots.some((slot) => !slot)) return false
+    if (!selectedTemplateId || !slots.some(Boolean)) return false
     setCompletedFrameIds((current) => current.includes(selectedTemplateId) ? current : [...current, selectedTemplateId])
     return true
   }, [selectedTemplateId, slots])

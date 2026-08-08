@@ -5,6 +5,7 @@ import type { CustomerTemplate } from './types'
 import { printTemplates } from '../../data/templates'
 
 const projectUrl = import.meta.env.VITE_SUPABASE_URL?.trim() || 'https://jmxhlueibhpltxrwqdpf.supabase.co'
+if (!projectUrl.startsWith('https://')) throw new Error('VITE_SUPABASE_URL must use HTTPS.')
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim() || 'sb_publishable_iQy5i_H_MAEGASo-sP-fWQ_7RYXa6rY'
 const adminSessionKey = 'selfbooth.admin-session.v1'
 

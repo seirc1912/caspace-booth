@@ -28,6 +28,7 @@ export function OrderPreviewPage({ template, slots, phoneNumber, roomId, onBack,
   const [exportResult, setExportResult] = useState<{ filename: string; bytes: number; width: number; height: number } | null>(null)
   const [error, setError] = useState<string | null>(null)
   const submit = async () => {
+    if (!slots.some(Boolean)) { setError('Please select at least one photo.'); return }
     setSubmitting(true); setError(null)
     try {
       const draft = await printOrderRepository.createDraft(phoneNumber, roomId)
@@ -55,7 +56,7 @@ export function OrderPreviewPage({ template, slots, phoneNumber, roomId, onBack,
     <div className="mx-auto mt-8 grid max-w-xl gap-3">
       <fieldset className="grid grid-cols-2 gap-2 rounded-2xl bg-white p-1.5 shadow-sm" disabled={exporting}><legend className="sr-only">Export format</legend>{(['png', 'jpg'] as const).map((value) => <button aria-pressed={format === value} className={`min-h-11 rounded-xl text-sm font-black uppercase transition-colors ${format === value ? 'bg-stone-950 text-white' : 'text-stone-500 hover:bg-stone-100'}`} key={value} onClick={() => setFormat(value)} type="button">{value}</button>)}</fieldset>
       <button aria-busy={exporting} className="relative min-h-14 overflow-hidden rounded-2xl border border-stone-300 bg-white px-5 font-bold shadow-sm disabled:cursor-wait disabled:text-stone-500" disabled={exporting || !slots.every(Boolean)} onClick={exportImage} type="button">{exporting ? `Exporting ${exportProgress}%` : `Export ${format.toUpperCase()}`}{exporting ? <span className="absolute inset-x-0 bottom-0 h-1 bg-stone-100"><span className="block h-full bg-[var(--brand-primary)] transition-[width] duration-200" style={{ width: `${exportProgress}%` }} /></span> : null}</button>
-      <PrimaryButton disabled={submitting || exporting || !slots.every(Boolean)} onClick={submit}>{submitting ? 'Preparing order…' : 'Send Print Order'}</PrimaryButton>
+      <PrimaryButton disabled={submitting || exporting || !slots.some(Boolean)} onClick={submit}>{submitting ? 'Preparing order…' : 'Send Print Order'}</PrimaryButton>
       <button className="min-h-12 rounded-xl font-semibold text-stone-600 hover:bg-white disabled:opacity-50" disabled={exporting} onClick={onBack} type="button">Back to editor</button>
     </div>
   </PageShell>
