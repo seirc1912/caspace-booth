@@ -9,8 +9,8 @@ export function BrandMark({ compact = false }: BrandMarkProps) {
 
   return (
     <span className="inline-flex items-center gap-2.5">
-      {branding.logoUrl ? <img alt="" className={compact ? 'size-7 object-contain' : 'h-9 w-auto object-contain'} src={branding.logoUrl} /> : null}
-      <span className={compact ? 'text-lg font-black tracking-[-0.04em]' : 'text-xl font-black tracking-[-0.04em]'}>{branding.brandName}</span>
+      {branding.logoUrl && branding.headerDisplayMode !== 'text' ? <img alt="" className={compact ? 'size-7 object-contain' : 'h-9 w-auto object-contain'} src={branding.logoUrl} /> : null}
+      {branding.headerDisplayMode !== 'logo' || !branding.logoUrl ? <span className={compact ? 'text-lg font-black tracking-[-0.04em]' : 'text-xl font-black tracking-[-0.04em]'}>{branding.brandName}</span> : null}
     </span>
   )
 }
