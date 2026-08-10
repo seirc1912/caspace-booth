@@ -32,7 +32,7 @@ export function CustomerApp() {
     } catch { return null }
   })
 
-  useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError)
+  useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError, booth.clearPhotoError)
 
   const enterRoom = (boothId: string) => {
     booth.resetSessionPhotos(); booth.selectRoom(boothId)
