@@ -1,3 +1,5 @@
+import { useEffect, useRef } from 'react'
+
 interface CropToolbarProps {
   fit: 'contain' | 'cover'
   onCancel: () => void
@@ -23,7 +25,21 @@ interface SliderRowProps {
 }
 
 function SliderRow({ id, label, min, max, value, valueLabel, onChange }: SliderRowProps) {
-  return <div className="flex min-h-11 items-center gap-2 px-2"><label className="w-24 shrink-0 text-xs font-bold text-stone-700" htmlFor={id}>{label}</label><input aria-label={label} className="h-9 min-w-0 flex-1 accent-sky-500" id={id} max={max} min={min} onInput={(event) => onChange(Number(event.currentTarget.value))} step="0.01" type="range" value={value} /><output className="w-12 text-right text-xs font-bold tabular-nums text-stone-600">{valueLabel}</output></div>
+  const frame = useRef<number | null>(null)
+  const pendingValue = useRef(value)
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+  const flush = () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current)
+    frame.current = null
+    onChangeRef.current(pendingValue.current)
+  }
+  const schedule = (nextValue: number) => {
+    pendingValue.current = nextValue
+    if (frame.current === null) frame.current = requestAnimationFrame(flush)
+  }
+  useEffect(() => () => { if (frame.current !== null) { cancelAnimationFrame(frame.current); onChangeRef.current(pendingValue.current) } }, [])
+  return <div className="flex min-h-11 items-center gap-2 px-2"><label className="w-24 shrink-0 text-xs font-bold text-stone-700" htmlFor={id}>{label}</label><input aria-label={label} className="h-9 min-w-0 flex-1 accent-sky-500" id={id} max={max} min={min} onChange={(event) => schedule(Number(event.currentTarget.value))} onInput={(event) => schedule(Number(event.currentTarget.value))} onPointerUp={flush} step="0.01" type="range" value={value} /><output className="w-12 text-right text-xs font-bold tabular-nums text-stone-600">{valueLabel}</output></div>
 }
 
 const positionLabel = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value * 100)}%`
