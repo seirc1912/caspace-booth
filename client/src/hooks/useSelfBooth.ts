@@ -179,8 +179,8 @@ export function useSelfBooth() {
   const resetSessionPhotos = useCallback(() => {
     setUploadedPhotos((current) => {
       current.forEach((photo) => {
-        if (photo.src.startsWith('blob:')) URL.revokeObjectURL(photo.src)
-        if (photo.previewSrc?.startsWith('blob:')) URL.revokeObjectURL(photo.previewSrc)
+        if (photo.src.startsWith('blob:')) window.setTimeout(() => URL.revokeObjectURL(photo.src), 60_000)
+        if (photo.previewSrc?.startsWith('blob:')) window.setTimeout(() => URL.revokeObjectURL(photo.previewSrc!), 60_000)
       })
       return []
     })
@@ -247,7 +247,7 @@ export function useSelfBooth() {
   const toggleSelectedPhoto = useCallback((id: string) => {
     setSelectedPhotoIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   }, [])
-  const clearPhotoError = useCallback(() => setPhotoError(null), [])
+  const clearPhotoError = useCallback((expected?: string) => setPhotoError((current) => expected && current !== expected ? current : null), [])
   const reportPhotoError = useCallback((message: string) => setPhotoError(message), [])
 
   return {

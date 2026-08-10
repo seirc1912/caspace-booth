@@ -15,21 +15,37 @@ function timestamp(date = new Date()) {
   return `${date.getFullYear()}${part(date.getMonth() + 1)}${part(date.getDate())}-${part(date.getHours())}${part(date.getMinutes())}${part(date.getSeconds())}`
 }
 
+const isIosSafari = () => {
+  const appleMobile = /iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  return appleMobile && /Safari/i.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/i.test(navigator.userAgent)
+}
+
 export async function downloadComposition({ branding, format = 'png', onProgress, slots, template }: DownloadCompositionInput) {
   if (!slots.length || slots.some((slot) => !slot)) throw new Error('Fill every photo slot before exporting.')
-  const rendered = await renderComposition(template, slots, { branding, createPreview: false, format, quality: 0.95, onProgress })
+  // iOS Safari may discard the user activation before async canvas rendering
+  // finishes. Reserve its destination synchronously while the tap is active.
+  const safariDestination = isIosSafari() ? window.open('', '_blank') : null
+  const rendered = await renderComposition(template, slots, { branding, createPreview: false, format, quality: 0.95, onProgress }).catch((reason) => {
+    safariDestination?.close()
+    throw reason
+  })
   const filename = `caspace-${timestamp()}.${format}`
   const url = URL.createObjectURL(rendered.print)
   try {
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = filename
-    anchor.rel = 'noopener'
-    document.body.appendChild(anchor)
-    anchor.click()
-    anchor.remove()
+    if (safariDestination) {
+      safariDestination.location.href = url
+    } else {
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = filename
+      anchor.rel = 'noopener'
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+    }
   } finally {
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    window.setTimeout(() => URL.revokeObjectURL(url), safariDestination ? 300_000 : 60_000)
   }
   return { filename, bytes: rendered.print.size, width: rendered.width, height: rendered.height }
 }
