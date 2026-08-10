@@ -12,7 +12,10 @@ export interface PhotoLibrarySession {
 
 interface PhotoRow { id: string; session_id: string; storage_path: string; source_name: string; created_at: string }
 const photoUrl = (path: string) => supabase.storage.from('session-photos').getPublicUrl(path).data.publicUrl
-const toAsset = (photo: PhotoRow): PhotoAsset => ({ id: photo.id, src: photoUrl(photo.storage_path), previewSrc: photoUrl(photo.storage_path), alt: photo.source_name, source: 'selfbooth' })
+const toAsset = (photo: PhotoRow): PhotoAsset => {
+  const src = photoUrl(photo.storage_path)
+  return { id: photo.id, src, previewSrc: src, alt: photo.source_name, source: 'selfbooth' }
+}
 
 export async function startPhotoLibrarySession(boothId: string, phoneNumber: string): Promise<PhotoLibrarySession> {
   const { data, error } = await supabase.rpc('customer_start_photo_session', { p_booth_id: boothId, p_phone_number: phoneNumber })

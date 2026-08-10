@@ -176,7 +176,16 @@ export function useSelfBooth() {
       return [...photos.filter((photo) => !known.has(photo.id)), ...current].slice(0, maximumPhotos)
     })
   }, [])
-  const resetSessionPhotos = useCallback(() => { setUploadedPhotos([]); setFrameSlots({}); setCompletedFrameIds([]) }, [])
+  const resetSessionPhotos = useCallback(() => {
+    setUploadedPhotos((current) => {
+      current.forEach((photo) => {
+        if (photo.src.startsWith('blob:')) URL.revokeObjectURL(photo.src)
+        if (photo.previewSrc?.startsWith('blob:')) URL.revokeObjectURL(photo.previewSrc)
+      })
+      return []
+    })
+    setFrameSlots({}); setCompletedFrameIds([])
+  }, [])
 
   const deleteUploadedPhoto = useCallback((photoId: string) => {
     setUploadedPhotos((current) => {
