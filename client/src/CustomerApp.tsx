@@ -34,6 +34,15 @@ export function CustomerApp() {
 
   useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError, booth.clearPhotoError)
 
+  const roomFrames = booth.roomTemplates.map((template, index) => ({
+    template,
+    index,
+    slots: template.id === booth.template.id ? booth.slots : booth.frameSlots[template.id] ?? template.slots.map(() => null),
+  }))
+  const readyFrameCount = roomFrames.filter((frame) => frame.slots.length === frame.template.slots.length && frame.slots.every(Boolean)).length
+  const canOrder = roomFrames.length > 0 && readyFrameCount === roomFrames.length
+  const incompleteOrderMessage = `Please complete all frames. ${readyFrameCount} of ${roomFrames.length} frames are ready.`
+
   const enterRoom = (boothId: string) => {
     booth.resetSessionPhotos(); booth.selectRoom(boothId)
     setOrderDraft(null); setOrderItems({}); setFramePreviews({}); navigate('/editor')
@@ -53,21 +62,16 @@ export function CustomerApp() {
 
   const saveAndContinue = async () => {
     if (!booth.room || downloading) return
-    const populatedFrames = booth.roomTemplates.map((template, index) => ({
-      template,
-      index,
-      slots: template.id === booth.template.id ? booth.slots : booth.frameSlots[template.id] ?? template.slots.map(() => null),
-    })).filter((frame) => frame.slots.some(Boolean))
-    if (!populatedFrames.length) { booth.reportPhotoError('Please select at least one photo.'); return }
+    if (!canOrder) { booth.reportPhotoError(incompleteOrderMessage); return }
     setDownloading(true)
     try {
       const draft = orderDraft ?? await printOrderRepository.createDraft(booth.phoneNumber, booth.room.id)
       if (!orderDraft) setOrderDraft(draft)
-      const populatedIds = new Set(populatedFrames.map((frame) => frame.template.id))
+      const populatedIds = new Set(roomFrames.map((frame) => frame.template.id))
       for (const [templateId, item] of Object.entries(orderItems)) {
         if (!populatedIds.has(templateId)) await printOrderRepository.removeItem(draft, item)
       }
-      for (const frame of populatedFrames) {
+      for (const frame of roomFrames) {
         let rendered
         try { rendered = await renderComposition(frame.template, frame.slots, { branding }) }
         catch (reason) { throw new Error(`Failed to render print image: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }) }
@@ -94,6 +98,7 @@ export function CustomerApp() {
   }
 
   const submitOrder = async () => {
+    if (!canOrder) throw new Error(incompleteOrderMessage)
     if (!orderDraft) throw new Error('Add at least one image to the Print Order.')
     return (await printOrderRepository.submit(orderDraft)).id
   }
@@ -103,7 +108,7 @@ export function CustomerApp() {
   if (pathname === '/') return <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
   if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
   if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
-  if (pathname === '/editor' && booth.selectedTemplateId) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage canOrder={Object.values(booth.frameSlots).some((slots) => slots.some(Boolean))} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={booth.roomTemplates.length} frameIds={booth.roomTemplates.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAddPhotoAssets={booth.addUploadedAssets} onAddPhotos={booth.addUploadedPhotos} onBack={() => navigate('/rooms')} onClear={booth.clearAll} onClearSelectedPhotos={booth.clearSelectedPhotos} onCurrentSlotChange={booth.setCurrentSlot} onDeletePhoto={booth.deleteUploadedPhoto} onDownload={downloadCurrentFrame} onFillEmpty={booth.fillEmpty} onMovePhoto={booth.moveUploadedPhoto} onNext={saveAndContinue} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRandomFill={booth.randomFill} onRemove={booth.removeSlot} onReplace={booth.replaceSlot} onReplacePhoto={booth.replaceUploadedPhoto} onSave={booth.completeCurrentFrame} onSelectFrame={booth.selectFrame} onShuffle={booth.shuffleSlots} onToggleSelectedPhoto={booth.toggleSelectedPhoto} onTransform={booth.updateTransform} onFitChange={booth.updateFit} selectedPhotoIds={booth.selectedPhotoIds} slots={booth.slots} template={booth.template} uploadedPhotos={booth.uploadedPhotos} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
+  if (pathname === '/editor' && booth.selectedTemplateId) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage canOrder={canOrder} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={booth.roomTemplates.length} frameIds={booth.roomTemplates.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAddPhotoAssets={booth.addUploadedAssets} onAddPhotos={booth.addUploadedPhotos} onBack={() => navigate('/rooms')} onClear={booth.clearAll} onClearSelectedPhotos={booth.clearSelectedPhotos} onCurrentSlotChange={booth.setCurrentSlot} onDeletePhoto={booth.deleteUploadedPhoto} onDownload={downloadCurrentFrame} onFillEmpty={booth.fillEmpty} onMovePhoto={booth.moveUploadedPhoto} onNext={saveAndContinue} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRandomFill={booth.randomFill} onRemove={booth.removeSlot} onReplace={booth.replaceSlot} onReplacePhoto={booth.replaceUploadedPhoto} onSave={booth.completeCurrentFrame} onSelectFrame={booth.selectFrame} onShuffle={booth.shuffleSlots} onToggleSelectedPhoto={booth.toggleSelectedPhoto} onTransform={booth.updateTransform} onFitChange={booth.updateFit} selectedPhotoIds={booth.selectedPhotoIds} slots={booth.slots} template={booth.template} uploadedPhotos={booth.uploadedPhotos} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
   if (pathname === '/summary' && booth.room) return <RoomSummaryPage completedFrameIds={booth.completedFrameIds} frameSlots={booth.frameSlots} onEdit={(index) => { booth.selectFrame(index); navigate('/editor') }} onRemove={removeOrderItem} onSubmit={submitOrder} onSuccess={(id) => { sessionStorage.setItem('selfbooth.last-order-id', id); setOrderId(id); navigate('/success') }} previewUrls={framePreviews} roomName={booth.room.name} templates={booth.roomTemplates} />
   if (pathname === '/preview' && booth.room) return <OrderPreviewPage onBack={() => navigate('/editor')} onSuccess={(id) => { sessionStorage.setItem('selfbooth.last-order-id', id); setOrderId(id); navigate('/success') }} phoneNumber={booth.phoneNumber} roomId={booth.room.id} slots={booth.slots} template={booth.template} />
   if (pathname === '/success' && orderId) return <SuccessPage onStartOver={() => { sessionStorage.removeItem('selfbooth.last-order-id'); setOrderId(''); navigate('/') }} orderId={orderId} />
