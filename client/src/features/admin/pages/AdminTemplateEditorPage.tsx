@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent, ReactNode } from 'react'
 import { TemplateCanvas } from '../../../components/editor/TemplateCanvas'
 import { printSizes } from '../../../data/printSizes'
@@ -22,6 +22,7 @@ import type { AdminAsset } from '../store/AssetLibraryContext'
 import type { AdminTemplateInfo, AdminTemplateRecord } from '../types'
 import { downloadTemplateJson, downloadTemplatePackage } from '../utils/templateDownloads'
 import { asPrintTemplate, createAdminTemplateRecord } from '../model/templateFactory'
+import { uploadTemplateAsset } from '../../../services/catalog/SupabaseCatalogService'
 
 const uid = () => globalThis.crypto.randomUUID()
 const inputClass = 'mt-1 min-h-10 w-full rounded-lg border border-stone-200 px-3 text-sm font-normal'
@@ -38,9 +39,23 @@ function createElement(type: TemplateElement['type']): TemplateElement {
 
 export function AdminTemplateEditorPage({ templateId }: { templateId: string | null }) {
   const store = useAdminTemplates()
+  const [record, setRecord] = useState<AdminTemplateRecord | null>(templateId ? null : blankRecord())
+  const [loadError, setLoadError] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    if (!templateId) return () => { active = false }
+    void store.loadDetail(templateId).then((detail) => { if (active) setRecord(detail) }).catch((error: unknown) => { if (active) setLoadError(error instanceof Error ? error.message : 'Template could not be loaded.') })
+    return () => { active = false }
+  }, [store, templateId])
+  if (loadError) return <div className="rounded-2xl bg-rose-50 p-6 text-rose-700">{loadError}</div>
+  if (!record) return <div className="rounded-2xl bg-white p-6 text-stone-500">Loading template…</div>
+  return <LoadedTemplateEditor initial={record} />
+}
+
+function LoadedTemplateEditor({ initial }: { initial: AdminTemplateRecord }) {
+  const store = useAdminTemplates()
   const { rooms } = useRooms()
   const { navigate } = usePathname()
-  const initial = useMemo(() => templateId ? store.templates.find((item) => item.id === templateId) ?? blankRecord() : blankRecord(), [store.templates, templateId])
   const history = useTemplateHistory(structuredClone(initial.template))
   const [info, setInfo] = useState<AdminTemplateInfo>(initial.info)
   const [roomId, setRoomId] = useState(initial.roomId)
@@ -141,17 +156,21 @@ export function AdminTemplateEditorPage({ templateId }: { templateId: string | n
     }
   }
 
-  const uploadTemplateAsset = (target: 'cover' | 'thumbnail' | 'background') => (event: ChangeEvent<HTMLInputElement>) => {
+  const chooseTemplateAsset = (target: 'cover' | 'thumbnail' | 'background') => async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (!file?.type.startsWith('image/')) return
-    const url = URL.createObjectURL(file)
-    if (target === 'cover') setCoverUrl(url)
-    else if (target === 'thumbnail') setThumbnailUrl(url)
-    else setBackgroundUrl(url)
+    try {
+      const url = await uploadTemplateAsset(initial.id, target, file)
+      if (target === 'cover') setCoverUrl(url)
+      else if (target === 'thumbnail') setThumbnailUrl(url)
+      else setBackgroundUrl(url)
+    } catch (error) { window.alert(error instanceof Error ? error.message : 'Asset upload failed.') }
   }
-  const uploadLayerAsset = (event: ChangeEvent<HTMLInputElement>) => {
+  const uploadLayerAsset = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (file?.type.startsWith('image/')) changeElement({ assetUrl: URL.createObjectURL(file) })
+    if (!file?.type.startsWith('image/') || !selectedElement) return
+    try { changeElement({ assetUrl: await uploadTemplateAsset(initial.id, `element-${selectedElement.id}`, file) }) }
+    catch (error) { window.alert(error instanceof Error ? error.message : 'Asset upload failed.') }
   }
   const applyPreset = (presetId: LayoutPresetId) => {
     const preset = layoutPresets.find((item) => item.id === presetId)
@@ -159,9 +178,11 @@ export function AdminTemplateEditorPage({ templateId }: { templateId: string | n
     history.commit({ ...history.document, slots: preset.createSlots(template.canvas.width, template.canvas.height) })
     setSelectedIds([])
   }
-  const save = (status = initial.status) => {
-    store.save({ ...initial, roomId, status, info, coverUrl, updatedAt: new Date().toISOString(), template: { ...template, settings: guides, backgroundUrl, thumbnailUrl } })
-    navigate('/admin/templates')
+  const save = async (status = initial.status) => {
+    try {
+      await store.save({ ...initial, roomId, status, info, coverUrl, updatedAt: new Date().toISOString(), template: { ...template, settings: guides, backgroundUrl, thumbnailUrl } })
+      navigate('/admin/templates')
+    } catch (error) { window.alert(error instanceof Error ? error.message : 'Template save failed.') }
   }
 
   useEffect(() => {
@@ -196,7 +217,7 @@ export function AdminTemplateEditorPage({ templateId }: { templateId: string | n
       <div>{previewPhotos ? <div className="grid h-[65dvh] min-h-[32rem] place-items-center overflow-auto rounded-2xl bg-stone-200 p-12"><div className="w-full max-w-xl" style={{ transform: `scale(${zoom})` }}><TemplateCanvas activeSlot={null} onActiveSlotChange={() => undefined} onAdd={() => undefined} onRemove={() => undefined} onReplace={() => undefined} onTransform={() => undefined} readonly slots={previewSlots} template={template} /></div></div> : <StudioCanvas cropSlotId={cropSlotId} guides={guides} onClearSelection={() => setSelectedIds([])} onContextAction={contextAction} onDoubleClick={enterEditMode} onElementChange={changeElementById} onSelect={select} onSlotChange={changeSlot} onViewportChange={(nextZoom, nextPan) => { setZoom(nextZoom); setPan(nextPan) }} pan={pan} selectedSlotIds={selectedIds} template={template} zoom={zoom} />}<div className="mt-2 flex justify-center gap-2"><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan((value) => ({ ...value, x: value.x - 30 }))} type="button">Pan left</button><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan({ x: 0, y: 0 })} type="button">Center</button><button className="rounded-lg bg-white px-3 py-2 text-xs" onClick={() => setPan((value) => ({ ...value, x: value.x + 30 }))} type="button">Pan right</button></div></div>
       <aside className="grid content-start gap-4">
         <section className="panel"><h2 className="text-sm font-bold">Template</h2><div className="mt-3 grid gap-3"><label className="field">Name<input className={inputClass} onChange={(event) => history.commit({ ...history.document, name: event.target.value })} value={template.name} /></label><label className="field">Category<input className={inputClass} onChange={(event) => setInfo((value) => ({ ...value, category: event.target.value }))} value={info.category} /></label><label className="field">Print size<select className={inputClass} onChange={(event) => setInfo((value) => ({ ...value, printSize: event.target.value }))} value={info.printSize}>{printSizes.map((size) => <option key={size.id}>{size.label}</option>)}</select></label><label className="field">Orientation<select className={inputClass} onChange={(event) => setInfo((value) => ({ ...value, orientation: event.target.value as AdminTemplateInfo['orientation'] }))} value={info.orientation}><option value="portrait">Portrait</option><option value="landscape">Landscape</option><option value="square">Square</option></select></label><div className="grid grid-cols-2 gap-2"><NumberField label="Width" value={template.canvas.width} onChange={(width) => history.commit({ ...history.document, canvas: { ...history.document.canvas, width } })} /><NumberField label="Height" value={template.canvas.height} onChange={(height) => history.commit({ ...history.document, canvas: { ...history.document.canvas, height } })} /></div><NumberField label="DPI" value={info.dpi} onChange={(dpi) => setInfo((value) => ({ ...value, dpi }))} /></div></section>
-        <section className="panel"><h2 className="text-sm font-bold">Template assets</h2>{(['cover', 'thumbnail', 'background'] as const).map((assetName) => <label className="mt-2 flex min-h-10 cursor-pointer items-center justify-between rounded-lg bg-stone-100 px-3 text-xs font-semibold capitalize" key={assetName}>{assetName}<input accept="image/*" className="sr-only" onChange={uploadTemplateAsset(assetName)} type="file" /></label>)}</section>
+        <section className="panel"><h2 className="text-sm font-bold">Template assets</h2>{(['cover', 'thumbnail', 'background'] as const).map((assetName) => <label className="mt-2 flex min-h-10 cursor-pointer items-center justify-between rounded-lg bg-stone-100 px-3 text-xs font-semibold capitalize" key={assetName}>{assetName}<input accept="image/*" className="sr-only" onChange={chooseTemplateAsset(assetName)} type="file" /></label>)}</section>
         <section className="panel"><h2 className="text-sm font-bold">Room</h2><label className="field mt-3 block">Assigned room<select className={inputClass} onChange={(event) => setRoomId(event.target.value)} value={roomId}>{rooms.filter((room) => room.isActive).map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select></label></section>
         <GuideControls onChange={(settings) => history.commit({ ...history.document, settings })} settings={guides} />
         {selectedSlot ? <SlotInspector onChange={(changes) => changeSlot(selectedSlot.id, changes)} slot={selectedSlot} /> : null}

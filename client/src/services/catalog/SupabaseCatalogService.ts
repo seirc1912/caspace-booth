@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import type { Room } from '../../models/Room'
-import type { AdminTemplateRecord } from '../../features/admin/types'
+import type { AdminTemplateRecord, AdminTemplateSummary } from '../../features/admin/types'
 import type { CustomerTemplate } from './types'
 import { printTemplates } from '../../data/templates'
 
@@ -19,6 +19,11 @@ interface RoomRow {
 interface TemplateRow {
   id: string; room_id: string; name: string; thumbnail: string | null; editor_data: unknown
   enabled: boolean; display_order: number; updated_at: string
+}
+
+interface TemplateSummaryRow {
+  id: string; room_id: string; name: string; thumbnail: string | null; enabled: boolean
+  status: string | null; category: string | null; slot_count: number; display_order: number; updated_at: string
 }
 
 const unwrap = <T>(data: T | null, error: { message: string } | null): T => {
@@ -90,9 +95,72 @@ export async function loadAdminTemplates() {
   return unwrap(data as TemplateRow[] | null, error).map(toAdminTemplate)
 }
 
-export async function saveAdminTemplate(record: AdminTemplateRecord, displayOrder: number) {
-  const { data, error } = await supabase.rpc('admin_upsert_template', { p_token: requireToken(), p_template: templatePayload(record, displayOrder) })
+const toTemplateSummary = (row: TemplateSummaryRow): AdminTemplateSummary => ({
+  id: row.id, roomId: row.room_id, name: row.name,
+  status: row.status === 'archived' ? 'archived' : row.enabled ? 'published' : 'draft',
+  thumbnailUrl: row.thumbnail, category: row.category ?? 'Custom', slotCount: row.slot_count ?? 0,
+  displayOrder: row.display_order, updatedAt: row.updated_at,
+})
+
+export async function loadAdminTemplateSummaries() {
+  const { data, error } = await supabase.rpc('admin_templates_summary', { p_token: requireToken() })
+  return unwrap(data as TemplateSummaryRow[] | null, error).map(toTemplateSummary)
+}
+
+export async function loadAdminTemplateDetail(id: string) {
+  const { data, error } = await supabase.rpc('admin_template_detail', { p_token: requireToken(), p_id: id })
   return toAdminTemplate(unwrap(data as TemplateRow | null, error))
+}
+
+export async function saveAdminTemplate(record: AdminTemplateRecord, displayOrder: number) {
+  const storageRecord = await uploadEmbeddedTemplateAssets(record)
+  const { data, error } = await supabase.rpc('admin_upsert_template', { p_token: requireToken(), p_template: templatePayload(storageRecord, displayOrder) })
+  return toAdminTemplate(unwrap(data as TemplateRow | null, error))
+}
+
+const dataUrlPattern = /^data:(image\/[a-z0-9.+-]+);base64,/i
+const templateAssetBucket = 'template-assets'
+
+async function dataUrlToBlob(value: string) {
+  const response = await fetch(value)
+  if (!response.ok) throw new Error('Template asset could not be decoded.')
+  return response.blob()
+}
+
+const assetExtension = (mime: string) => mime === 'image/svg+xml' ? 'svg' : mime.split('/')[1]?.replace('jpeg', 'jpg') ?? 'bin'
+
+async function uploadDataUrl(templateId: string, field: string, value: string) {
+  if (!dataUrlPattern.test(value)) return value
+  const blob = await dataUrlToBlob(value)
+  const path = `${templateId}/${field}-${crypto.randomUUID()}.${assetExtension(blob.type)}`
+  const token = requireToken()
+  const { error } = await supabase.storage.from(templateAssetBucket).upload(path, blob, {
+    contentType: blob.type, upsert: false, metadata: { adminToken: token },
+  })
+  if (error) throw new Error(`Template asset upload failed: ${error.message}`)
+  return supabase.storage.from(templateAssetBucket).getPublicUrl(path).data.publicUrl
+}
+
+/** Uploads only embedded image fields and leaves the input record untouched if any upload fails. */
+export async function uploadEmbeddedTemplateAssets(record: AdminTemplateRecord): Promise<AdminTemplateRecord> {
+  const next = structuredClone(record)
+  if (next.coverUrl) next.coverUrl = await uploadDataUrl(record.id, 'cover', next.coverUrl)
+  if (next.template.backgroundUrl) next.template.backgroundUrl = await uploadDataUrl(record.id, 'background', next.template.backgroundUrl)
+  if (next.template.thumbnailUrl) next.template.thumbnailUrl = await uploadDataUrl(record.id, 'thumbnail', next.template.thumbnailUrl)
+  for (const element of next.template.elements) {
+    if (element.assetUrl) element.assetUrl = await uploadDataUrl(record.id, `element-${element.id}`, element.assetUrl)
+  }
+  return next
+}
+
+export async function uploadTemplateAsset(templateId: string, field: string, file: File) {
+  if (!file.type.startsWith('image/')) throw new Error('Only image assets are supported.')
+  const path = `${templateId}/${field}-${crypto.randomUUID()}.${assetExtension(file.type)}`
+  const { error } = await supabase.storage.from(templateAssetBucket).upload(path, file, {
+    contentType: file.type, upsert: false, metadata: { adminToken: requireToken() },
+  })
+  if (error) throw new Error(`Template asset upload failed: ${error.message}`)
+  return supabase.storage.from(templateAssetBucket).getPublicUrl(path).data.publicUrl
 }
 
 export async function deleteAdminTemplate(id: string) {
