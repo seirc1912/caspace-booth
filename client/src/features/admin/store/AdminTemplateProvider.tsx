@@ -1,39 +1,42 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { AdminTemplateRecord, TemplateStatus } from '../types'
+import type { AdminTemplateRecord, AdminTemplateSummary, TemplateStatus } from '../types'
 import { AdminTemplateContext } from './AdminTemplateContext'
-import { deleteAdminTemplate, loadAdminTemplates, saveAdminTemplate } from '../../../services/catalog/SupabaseCatalogService'
+import { deleteAdminTemplate, loadAdminTemplateDetail, loadAdminTemplateSummaries, saveAdminTemplate } from '../../../services/catalog/SupabaseCatalogService'
 import { migrateLegacyCatalogOnce } from '../../../services/catalog/LegacyCatalogMigration'
 
 const uid = () => globalThis.crypto.randomUUID()
 
 export function AdminTemplateProvider({ children }: { children: ReactNode }) {
-  const [templates, setTemplates] = useState<AdminTemplateRecord[]>([])
-  const writeQueue = useRef(Promise.resolve())
+  const [templates, setTemplates] = useState<AdminTemplateSummary[]>([])
+  const details = useRef(new Map<string, AdminTemplateRecord>())
 
-  const refresh = useCallback(async () => setTemplates(await loadAdminTemplates()), [])
-  const enqueue = useCallback((operation: () => Promise<unknown>) => {
-    writeQueue.current = writeQueue.current.then(operation).then(() => undefined).catch(async (error) => {
-      console.error(error)
-      await refresh()
-    })
-  }, [refresh])
+  const refresh = useCallback(async () => setTemplates(await loadAdminTemplateSummaries()), [])
 
   useEffect(() => {
     let active = true
-    void migrateLegacyCatalogOnce().then(loadAdminTemplates).then((catalog) => { if (active) setTemplates(catalog) }).catch(console.error)
+    void migrateLegacyCatalogOnce().then((catalog) => { if (active) setTemplates(catalog.templates) }).catch(console.error)
     return () => { active = false }
   }, [])
 
   const value = useMemo(() => ({
     templates,
-    save: (record: AdminTemplateRecord) => {
-      const index = templates.findIndex((item) => item.id === record.id)
-      setTemplates((current) => index >= 0 ? current.map((item) => item.id === record.id ? record : item) : [...current, record])
-      enqueue(() => saveAdminTemplate(record, index >= 0 ? index : templates.length))
+    loadDetail: async (id: string) => {
+      const cached = details.current.get(id)
+      if (cached) return structuredClone(cached)
+      const detail = await loadAdminTemplateDetail(id)
+      details.current.set(id, detail)
+      return structuredClone(detail)
     },
-    duplicate: (id: string) => {
-      const source = templates.find((item) => item.id === id)
+    save: async (record: AdminTemplateRecord) => {
+      const index = templates.findIndex((item) => item.id === record.id)
+      const saved = await saveAdminTemplate(record, index >= 0 ? templates[index]!.displayOrder : templates.length)
+      details.current.set(saved.id, saved)
+      await refresh()
+      return saved
+    },
+    duplicate: async (id: string) => {
+      const source = await (details.current.get(id) ? Promise.resolve(details.current.get(id)!) : loadAdminTemplateDetail(id))
       if (!source) return null
       const newId = uid()
       const copy = structuredClone(source)
@@ -42,32 +45,37 @@ export function AdminTemplateProvider({ children }: { children: ReactNode }) {
       copy.template.id = newId
       copy.template.name = `${source.template.name} Copy`
       copy.updatedAt = new Date().toISOString()
-      setTemplates((current) => [...current, copy])
-      enqueue(() => saveAdminTemplate(copy, templates.length))
+      const saved = await saveAdminTemplate(copy, templates.length)
+      details.current.set(saved.id, saved)
+      await refresh()
       return newId
     },
-    setStatus: (id: string, status: TemplateStatus) => {
+    setStatus: async (id: string, status: TemplateStatus) => {
       const index = templates.findIndex((item) => item.id === id)
-      const template = templates[index]
-      if (!template) return
-      const updated = { ...template, status, updatedAt: new Date().toISOString() }
-      setTemplates((current) => current.map((item) => item.id === id ? updated : item))
-      enqueue(() => saveAdminTemplate(updated, index))
+      if (index < 0) return
+      const template = await (details.current.get(id) ? Promise.resolve(details.current.get(id)!) : loadAdminTemplateDetail(id))
+      const saved = await saveAdminTemplate({ ...template, status, updatedAt: new Date().toISOString() }, templates[index]!.displayOrder)
+      details.current.set(id, saved)
+      await refresh()
     },
-    remove: (id: string) => {
+    remove: async (id: string) => {
+      await deleteAdminTemplate(id)
+      details.current.delete(id)
       setTemplates((current) => current.filter((item) => item.id !== id))
-      enqueue(() => deleteAdminTemplate(id))
     },
-    reorder: (id: string, direction: -1 | 1) => {
+    reorder: async (id: string, direction: -1 | 1) => {
       const index = templates.findIndex((template) => template.id === id)
       const swap = index + direction
       if (index < 0 || swap < 0 || swap >= templates.length) return
       const reordered = [...templates]
       ;[reordered[index], reordered[swap]] = [reordered[swap]!, reordered[index]!]
-      setTemplates(reordered)
-      enqueue(async () => { for (const [displayOrder, template] of reordered.entries()) await saveAdminTemplate(template, displayOrder) })
+      for (const [displayOrder, summary] of reordered.entries()) {
+        const detail = await (details.current.get(summary.id) ? Promise.resolve(details.current.get(summary.id)!) : loadAdminTemplateDetail(summary.id))
+        await saveAdminTemplate(detail, displayOrder)
+      }
+      await refresh()
     },
-  }), [enqueue, templates])
+  }), [refresh, templates])
 
   return <AdminTemplateContext.Provider value={value}>{children}</AdminTemplateContext.Provider>
 }

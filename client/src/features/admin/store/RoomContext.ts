@@ -3,10 +3,10 @@ import type { AdminRoom } from '../types'
 
 export interface RoomStoreValue {
   rooms: AdminRoom[]
-  create: (name: string) => string
-  update: (id: string, changes: Partial<Omit<AdminRoom, 'id'>>) => void
-  remove: (id: string) => void
-  reorder: (id: string, direction: -1 | 1) => void
+  create: (name: string) => Promise<string>
+  update: (id: string, changes: Partial<Omit<AdminRoom, 'id'>>) => Promise<void>
+  remove: (id: string) => Promise<void>
+  reorder: (id: string, direction: -1 | 1) => Promise<void>
 }
 
 export const RoomContext = createContext<RoomStoreValue | null>(null)

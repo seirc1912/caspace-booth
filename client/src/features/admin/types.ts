@@ -22,4 +22,16 @@ export interface AdminTemplateRecord {
   updatedAt: string
 }
 
+export interface AdminTemplateSummary {
+  id: string
+  roomId: string
+  name: string
+  status: TemplateStatus
+  thumbnailUrl: string | null
+  category: string
+  slotCount: number
+  displayOrder: number
+  updatedAt: string
+}
+
 export type AdminRoom = Room

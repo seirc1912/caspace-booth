@@ -22,37 +22,27 @@ export function AdminTemplatesPage() {
       store.templates
         .filter(
           (record) =>
-            record.template.name.toLowerCase().includes(query.toLowerCase()) &&
+            record.name.toLowerCase().includes(query.toLowerCase()) &&
             (status === "all" || record.status === status) &&
             (roomId === "all" || record.roomId === roomId),
         )
         .sort((a, b) =>
           sort === "name"
-            ? a.template.name.localeCompare(b.template.name)
+            ? a.name.localeCompare(b.name)
             : b.updatedAt.localeCompare(a.updatedAt),
         ),
     [query, roomId, sort, status, store.templates],
   );
   const rename = (id: string) => {
     const source = store.templates.find((item) => item.id === id);
-    const name =
-      source && window.prompt("Template name", source.template.name)?.trim();
-    if (source && name)
-      store.save({
-        ...source,
-        updatedAt: new Date().toISOString(),
-        template: { ...source.template, name },
-      });
+    const name = source && window.prompt("Template name", source.name)?.trim();
+    if (source && name) void store.loadDetail(id).then((detail) => store.save({ ...detail, updatedAt: new Date().toISOString(), template: { ...detail.template, name } })).catch(showError);
   };
   const assignRoom = (id: string, nextRoomId: string) => {
     const source = store.templates.find((item) => item.id === id);
-    if (source)
-      store.save({
-        ...source,
-        roomId: nextRoomId,
-        updatedAt: new Date().toISOString(),
-      });
+    if (source) void store.loadDetail(id).then((detail) => store.save({ ...detail, roomId: nextRoomId, updatedAt: new Date().toISOString() })).catch(showError);
   };
+  const showError = (error: unknown) => window.alert(error instanceof Error ? error.message : 'The template operation failed.')
 
   return (
     <div>
@@ -129,13 +119,11 @@ export function AdminTemplatesPage() {
                 key={record.id}
               >
                 <div className="grid aspect-[16/9] place-items-center bg-stone-100">
-                  {record.coverUrl || record.template.thumbnailUrl ? (
+                  {record.thumbnailUrl ? (
                     <img
                       alt=""
                       className="h-full w-full object-cover"
-                      src={
-                        record.coverUrl ?? record.template.thumbnailUrl ?? ""
-                      }
+                      src={record.thumbnailUrl}
                     />
                   ) : (
                     <span className="text-sm text-stone-400">No cover</span>
@@ -144,9 +132,9 @@ export function AdminTemplatesPage() {
                 <div className="p-4">
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <h2 className="font-bold">{record.template.name}</h2>
+                      <h2 className="font-bold">{record.name}</h2>
                       <p className="mt-1 text-xs text-stone-500">
-                        {record.info.category} · {record.template.slotCount}{" "}
+                        {record.category} · {record.slotCount}{" "}
                         slots
                       </p>
                       <p className="mt-1 text-[11px] text-stone-400">
@@ -160,7 +148,7 @@ export function AdminTemplatesPage() {
                     </span>
                   </div>
                   <select
-                    aria-label={`Room for ${record.template.name}`}
+                    aria-label={`Room for ${record.name}`}
                     className="mt-3 min-h-10 w-full rounded-lg border border-stone-200 px-2 text-xs"
                     onChange={(event) =>
                       assignRoom(record.id, event.target.value)
@@ -190,19 +178,17 @@ export function AdminTemplatesPage() {
                     </button>
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
-                      onClick={() => store.duplicate(record.id)}
+                      onClick={() => { void store.duplicate(record.id).catch(showError) }}
                       type="button"
                     >
                       Duplicate
                     </button>
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
-                      onClick={() =>
-                        store.setStatus(
+                      onClick={() => { void store.setStatus(
                           record.id,
                           record.status === "published" ? "draft" : "published",
-                        )
-                      }
+                        ).catch(showError) }}
                       type="button"
                     >
                       {record.status === "published" ? "Unpublish" : "Publish"}
@@ -210,7 +196,7 @@ export function AdminTemplatesPage() {
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
                       disabled={position === 0}
-                      onClick={() => store.reorder(record.id, -1)}
+                      onClick={() => { void store.reorder(record.id, -1).catch(showError) }}
                       type="button"
                     >
                       Move up
@@ -218,14 +204,14 @@ export function AdminTemplatesPage() {
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
                       disabled={position === store.templates.length - 1}
-                      onClick={() => store.reorder(record.id, 1)}
+                      onClick={() => { void store.reorder(record.id, 1).catch(showError) }}
                       type="button"
                     >
                       Move down
                     </button>
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
-                      onClick={() => store.setStatus(record.id, "archived")}
+                      onClick={() => { void store.setStatus(record.id, "archived").catch(showError) }}
                       type="button"
                     >
                       Archive
@@ -233,8 +219,8 @@ export function AdminTemplatesPage() {
                     <button
                       className="min-h-10 rounded-lg text-sm font-semibold text-rose-600 hover:bg-rose-50"
                       onClick={() => {
-                        if (window.confirm(`Delete ${record.template.name}?`))
-                          store.remove(record.id);
+                        if (window.confirm(`Delete ${record.name}?`))
+                          void store.remove(record.id).catch(showError);
                       }}
                       type="button"
                     >
