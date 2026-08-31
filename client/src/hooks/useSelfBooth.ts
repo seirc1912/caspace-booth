@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
 import { printTemplates } from '../data/templates'
-import { loadPublishedCatalog } from '../services/catalog/SupabaseCatalogService'
-import type { CustomerTemplate } from '../services/catalog/types'
+import { loadPublishedRooms, loadPublishedTemplateDetail, loadPublishedTemplateSummaries } from '../services/catalog/SupabaseCatalogService'
+import type { CustomerTemplate, CustomerTemplateSummary } from '../services/catalog/types'
 import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 
@@ -30,7 +30,11 @@ async function loadPhotos(files: File[], concurrency = 2) {
 }
 
 export function useSelfBooth() {
-  const [catalog, setCatalog] = useState<{ rooms: Room[]; templates: CustomerTemplate[] }>({ rooms: [], templates: [] })
+  const [rooms, setRooms] = useState<Room[]>([])
+  const [templateSummaries, setTemplateSummaries] = useState<CustomerTemplateSummary[]>([])
+  const [templateDetails, setTemplateDetails] = useState<Record<string, CustomerTemplate>>({})
+  const [roomsLoading, setRoomsLoading] = useState(true)
+  const [roomsError, setRoomsError] = useState<string | null>(null)
   const storedJourney = useMemo(() => { try { return JSON.parse(sessionStorage.getItem(journeyStorageKey) ?? '{}') as { phoneNumber?: string; selectedRoomId?: string; selectedTemplateId?: string } } catch { return {} } }, [])
   const [view, setView] = useState<AppView>('templates')
   const [phoneNumber, setPhoneNumberState] = useState(storedJourney.phoneNumber ?? '')
@@ -48,7 +52,13 @@ export function useSelfBooth() {
   useEffect(() => { uploadedPhotosRef.current = uploadedPhotos }, [uploadedPhotos])
   useEffect(() => {
     let active = true
-    void loadPublishedCatalog().then((next) => { if (active) setCatalog(next) }).catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load the published catalog.') })
+    void loadPublishedRooms()
+      .then((next) => { if (active) setRooms(next) })
+      .catch((reason) => { if (active) setRoomsError(reason instanceof Error ? reason.message : 'Unable to load available rooms.') })
+      .finally(() => { if (active) setRoomsLoading(false) })
+    void loadPublishedTemplateSummaries()
+      .then((next) => { if (active) setTemplateSummaries(next) })
+      .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load published frames.') })
     return () => { active = false }
   }, [])
   useEffect(() => {
@@ -60,12 +70,13 @@ export function useSelfBooth() {
   }, [])
 
   const template = useMemo(
-    () => catalog.templates.find((item) => item.id === selectedTemplateId) ?? catalog.templates[0] ?? { ...printTemplates[0]!, roomId: '', printSize: '' },
-    [catalog.templates, selectedTemplateId],
+    () => templateDetails[selectedTemplateId] ?? { ...printTemplates[0]!, roomId: '', printSize: '' },
+    [selectedTemplateId, templateDetails],
   )
-  const room = useMemo(() => catalog.rooms.find((item) => item.id === selectedRoomId) ?? null, [catalog.rooms, selectedRoomId])
-  const roomTemplates = useMemo(() => catalog.templates.filter((item) => item.roomId === selectedRoomId), [catalog.templates, selectedRoomId])
-  const currentFrameIndex = Math.max(0, roomTemplates.findIndex((item) => item.id === selectedTemplateId))
+  const room = useMemo(() => rooms.find((item) => item.id === selectedRoomId) ?? null, [rooms, selectedRoomId])
+  const roomTemplateSummaries = useMemo(() => templateSummaries.filter((item) => item.roomId === selectedRoomId), [templateSummaries, selectedRoomId])
+  const roomTemplates = useMemo(() => roomTemplateSummaries.map((item) => templateDetails[item.id]).filter((item): item is CustomerTemplate => Boolean(item)), [roomTemplateSummaries, templateDetails])
+  const currentFrameIndex = Math.max(0, roomTemplateSummaries.findIndex((item) => item.id === selectedTemplateId))
   const slots = frameSlots[selectedTemplateId] ?? template.slots.map(() => null)
   const setSlots = useCallback((updater: SetStateAction<Array<FilledSlot | null>>) => {
     if (!selectedTemplateId) return
@@ -78,16 +89,38 @@ export function useSelfBooth() {
   }, [selectedTemplateId, template.slots])
   const persistJourney = (next: { phoneNumber: string; selectedRoomId: string; selectedTemplateId: string }) => sessionStorage.setItem(journeyStorageKey, JSON.stringify(next))
   const setPhoneNumber = (value: string) => { setPhoneNumberState(value); persistJourney({ phoneNumber: value, selectedRoomId, selectedTemplateId }) }
-  const selectRoom = (id: string) => {
-    const firstTemplate = catalog.templates.find((item) => item.roomId === id)
-    const templateId = firstTemplate?.id ?? ''
+  const ensureTemplateDetail = useCallback(async (id: string) => {
+    const existing = templateDetails[id]
+    if (existing) return existing
+    const detail = await loadPublishedTemplateDetail(id)
+    setTemplateDetails((current) => current[id] ? current : { ...current, [id]: detail })
+    return detail
+  }, [templateDetails])
+  useEffect(() => {
+    if (!selectedTemplateId || !templateSummaries.some((item) => item.id === selectedTemplateId) || templateDetails[selectedTemplateId]) return
+    let active = true
+    void loadPublishedTemplateDetail(selectedTemplateId)
+      .then((detail) => { if (active) setTemplateDetails((current) => current[selectedTemplateId] ? current : { ...current, [selectedTemplateId]: detail }) })
+      .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.') })
+    return () => { active = false }
+  }, [selectedTemplateId, templateDetails, templateSummaries])
+  const selectRoom = async (id: string) => {
+    const summaries = templateSummaries.length ? templateSummaries : await loadPublishedTemplateSummaries()
+    if (!templateSummaries.length) setTemplateSummaries(summaries)
+    const firstTemplate = summaries.find((item) => item.roomId === id)
+    if (!firstTemplate) throw new Error('No published frames are available in this Room.')
+    const templateId = firstTemplate.id
+    await ensureTemplateDetail(templateId)
     setSelectedRoomIdState(id); setSelectedTemplateIdState(templateId); setCurrentSlot(null)
     setCompletedFrameIds([]); setFrameSlots({})
     persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: templateId })
   }
-  const selectTemplate = (id: string) => {
+  const selectTemplate = async (id: string) => {
+    try { await ensureTemplateDetail(id) }
+    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
     setSelectedTemplateIdState(id); setCurrentSlot(null)
     persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
+    return true
   }
 
   const openEditor = useCallback(() => {
@@ -97,14 +130,16 @@ export function useSelfBooth() {
     setView('editor')
   }, [setSlots, template.slots])
 
-  const selectFrame = useCallback((index: number) => {
-    const next = roomTemplates[index]
+  const selectFrame = useCallback(async (index: number) => {
+    const next = roomTemplateSummaries[index]
     if (!next) return false
+    try { await ensureTemplateDetail(next.id) }
+    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
     setSelectedTemplateIdState(next.id)
     setCurrentSlot(null)
     persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
     return true
-  }, [roomTemplates, phoneNumber, selectedRoomId])
+  }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId])
 
   const completeCurrentFrame = useCallback(() => {
     if (!selectedTemplateId || !slots.some(Boolean)) return false
@@ -254,13 +289,17 @@ export function useSelfBooth() {
     view,
     setView,
     template,
-    rooms: catalog.rooms,
+    templateReady: Boolean(selectedTemplateId && templateDetails[selectedTemplateId]),
+    rooms,
+    roomsLoading,
+    roomsError,
     room,
     roomTemplates,
+    roomTemplateSummaries,
     frameSlots,
     completedFrameIds,
     currentFrameIndex,
-    templates: catalog.templates,
+    templates: templateSummaries,
     phoneNumber,
     setPhoneNumber,
     selectedRoomId,

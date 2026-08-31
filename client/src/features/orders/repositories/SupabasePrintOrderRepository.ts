@@ -16,6 +16,26 @@ const safePhone = (phone: string) => phone.replace(/[^0-9+]/g, '').replace(/^\+/
 const imageUrl = (path: string) => supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 const stageError = (stage: string, reason: unknown) => new Error(`${stage}: ${message(reason)}`, { cause: reason })
+const uploadedPaths = new Set<string>()
+const retryDelays = [400, 900]
+const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+const isTransient = (reason: unknown) => {
+  const value = reason as { status?: number; statusCode?: number; message?: string }
+  const status = value?.status ?? value?.statusCode
+  const detail = (value?.message ?? message(reason)).toLowerCase()
+  if (status === 408 || status === 429 || (status !== undefined && status >= 500)) return true
+  if (status !== undefined && status >= 400 && status < 500) return false
+  return /network|fetch|timeout|timed out|connection|temporar|unavailable|gateway|rate limit/.test(detail)
+}
+async function withTransientRetry<T>(operation: () => Promise<T>) {
+  for (let attempt = 0; ; attempt += 1) {
+    try { return await operation() }
+    catch (reason) {
+      if (attempt >= retryDelays.length || !isTransient(reason)) throw reason
+      await wait(retryDelays[attempt]!)
+    }
+  }
+}
 
 interface ItemRow { id: string; order_id: string; template_id: string; template_name?: string; storage_path: string; display_order: number; created_at: string }
 interface OrderRow { id: string; phone_number: string; room_id: string; room_name: string; total_images: number; status: PrintOrderStatus; submitted_at: string; created_at: string; updated_at: string }
@@ -37,15 +57,21 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
     const filename = path.slice(path.lastIndexOf('/') + 1)
     const uploadBody = typeof File === 'function' ? new File([image], filename, { type: 'image/png' }) : image
     try {
-      const upload = await supabase.storage.from(bucket).upload(path, uploadBody, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
-      if (upload.error) throw new Error(upload.error.message)
+      if (!uploadedPaths.has(path)) await withTransientRetry(async () => {
+        const upload = await supabase.storage.from(bucket).upload(path, uploadBody, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
+        if (upload.error) throw upload.error
+        uploadedPaths.add(path)
+      })
     } catch (reason) { throw stageError('Failed to upload print image', reason) }
     try {
-      const result = await supabase.rpc('customer_upsert_print_order_item', { p_order_id: draft.id, p_edit_token: draft.editToken, p_template_id: templateId, p_storage_path: path, p_display_order: displayOrder })
-      if (result.error) throw new Error(result.error.message)
-      return toItem(unwrap(result.data as ItemRow | null, result.error))
+      return await withTransientRetry(async () => {
+        const result = await supabase.rpc('customer_upsert_print_order_item', { p_order_id: draft.id, p_edit_token: draft.editToken, p_template_id: templateId, p_storage_path: path, p_display_order: displayOrder })
+        if (result.error) throw result.error
+        return toItem(unwrap(result.data as ItemRow | null, result.error))
+      })
     } catch (reason) {
-      try { await supabase.storage.from(bucket).remove([path]) } catch { /* Best-effort cleanup must not hide the item-save failure. */ }
+      // Keep the deterministic upload for a same-session item-RPC retry. The next
+      // attempt reuses it instead of re-encoding and transferring the PNG again.
       throw stageError('Failed to save print-order item', reason)
     }
   }

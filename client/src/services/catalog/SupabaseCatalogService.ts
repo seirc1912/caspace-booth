@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import type { Room } from '../../models/Room'
 import type { AdminTemplateRecord, AdminTemplateSummary } from '../../features/admin/types'
-import type { CustomerTemplate } from './types'
+import type { CustomerTemplate, CustomerTemplateSummary } from './types'
 import { printTemplates } from '../../data/templates'
 
 const projectUrl = import.meta.env.VITE_SUPABASE_URL?.trim() || 'https://jmxhlueibhpltxrwqdpf.supabase.co'
@@ -24,6 +24,11 @@ interface TemplateRow {
 interface TemplateSummaryRow {
   id: string; room_id: string; name: string; thumbnail: string | null; enabled: boolean
   status: string | null; category: string | null; slot_count: number; display_order: number; updated_at: string
+}
+
+interface PublishedTemplateSummaryRow {
+  id: string; room_id: string; name: string; thumbnail: string | null
+  print_size: string | null; slot_count: number; display_order: number
 }
 
 const unwrap = <T>(data: T | null, error: { message: string } | null): T => {
@@ -168,14 +173,41 @@ export async function deleteAdminTemplate(id: string) {
   if (error) throw new Error(error.message)
 }
 
-export async function loadPublishedCatalog(): Promise<{ rooms: Room[]; templates: CustomerTemplate[] }> {
-  const [roomResult, templateResult] = await Promise.all([supabase.rpc('published_rooms'), supabase.rpc('published_templates')])
-  const rooms = unwrap(roomResult.data as RoomRow[] | null, roomResult.error).map(toRoom)
-  const templates = unwrap(templateResult.data as TemplateRow[] | null, templateResult.error).map((row) => {
-    const record = toAdminTemplate(row)
-    return { ...record.template, roomId: record.roomId, printSize: record.info.printSize }
+export async function loadPublishedRooms(): Promise<Room[]> {
+  const { data, error } = await supabase.rpc('published_rooms')
+  return unwrap(data as RoomRow[] | null, error).map(toRoom)
+}
+
+let publishedTemplateSummariesRequest: Promise<CustomerTemplateSummary[]> | null = null
+export function loadPublishedTemplateSummaries(): Promise<CustomerTemplateSummary[]> {
+  publishedTemplateSummariesRequest ??= (async () => {
+    const { data, error } = await supabase.rpc('published_templates_summary')
+    return unwrap(data as PublishedTemplateSummaryRow[] | null, error).map((row) => ({
+      id: row.id, roomId: row.room_id, name: row.name, thumbnailUrl: row.thumbnail,
+      printSize: row.print_size ?? '', slotCount: row.slot_count ?? 0, displayOrder: row.display_order,
+    }))
+  })().catch((reason: unknown) => {
+    publishedTemplateSummariesRequest = null
+    throw reason
   })
-  return { rooms, templates }
+  return publishedTemplateSummariesRequest
+}
+
+const publishedTemplateCache = new Map<string, Promise<CustomerTemplate>>()
+
+export function loadPublishedTemplateDetail(id: string): Promise<CustomerTemplate> {
+  const cached = publishedTemplateCache.get(id)
+  if (cached) return cached
+  const request = (async () => {
+    const { data, error } = await supabase.rpc('published_template_detail', { p_id: id })
+    const record = toAdminTemplate(unwrap(data as TemplateRow | null, error))
+    return { ...record.template, roomId: record.roomId, printSize: record.info.printSize }
+  })().catch((reason: unknown) => {
+    publishedTemplateCache.delete(id)
+    throw reason
+  })
+  publishedTemplateCache.set(id, request)
+  return request
 }
 
 export { templatePayload }
