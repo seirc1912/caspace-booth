@@ -4,7 +4,7 @@ import { useBranding } from './contexts/BrandingContext'
 import type { PrintOrderDraft, PrintOrderItem } from './features/orders/repositories/PrintOrderRepository'
 import { downloadComposition } from './features/orders/services/downloadComposition'
 import { printOrderRepository } from './features/orders/services/orderServiceInstance'
-import { renderComposition } from './features/orders/services/renderComposition'
+import { compositionAssetSources, RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
@@ -32,6 +32,7 @@ export function CustomerApp() {
   const orderDraftRef = useRef<PrintOrderDraft | null>(null)
   const orderItemsRef = useRef<Record<string, PrintOrderItem>>({})
   const uploadedFrameSlotsRef = useRef<Record<string, Array<FilledSlot | null>>>({})
+  const debugOrderTiming = import.meta.env.DEV || sessionStorage.getItem('selfbooth.debug-order-timing') === '1'
   const [customerSession, setCustomerSession] = useState<PhotoLibrarySession | null>(() => {
     try {
       return JSON.parse(sessionStorage.getItem('selfbooth.photo-library-session') ?? 'null') as PhotoLibrarySession | null
@@ -54,6 +55,7 @@ export function CustomerApp() {
     booth.resetSessionPhotos()
     try { await booth.selectRoom(boothId) }
     catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to load this Room’s first frame.'); return }
+    if (orderDraftRef.current) printOrderRepository.releaseDraft(orderDraftRef.current)
     orderDraftRef.current = null; orderItemsRef.current = {}; uploadedFrameSlotsRef.current = {}
     setOrderDraft(null); setOrderItems({}); setFramePreviews({}); navigate('/editor')
     void startPhotoLibrarySession(boothId, booth.phoneNumber).then((session) => {
@@ -75,40 +77,64 @@ export function CustomerApp() {
     if (!canOrder) { booth.reportPhotoError(incompleteOrderMessage); return }
     processingOrder.current = true
     setDownloading(true)
+    const orderStartedAt = performance.now()
+    const orderTimings: Array<{ frame: number; render: RenderTiming; uploadMs: number; itemRpcMs: number }> = []
+    const assetCache = new RenderAssetCache()
     try {
       setOrderProgress('Creating print order…')
+      const draftStartedAt = performance.now()
       const draft = orderDraftRef.current ?? await printOrderRepository.createDraft(booth.phoneNumber, booth.room.id)
+      const draftMs = performance.now() - draftStartedAt
       if (!orderDraftRef.current) { orderDraftRef.current = draft; setOrderDraft(draft) }
       const populatedIds = new Set(roomFrames.map((frame) => frame.template.id))
       for (const [templateId, item] of Object.entries(orderItemsRef.current)) {
         if (!populatedIds.has(templateId)) await printOrderRepository.removeItem(draft, item)
       }
       const pendingFrames = roomFrames.filter((frame) => !orderItemsRef.current[frame.template.id] || uploadedFrameSlotsRef.current[frame.template.id] !== frame.slots)
-      let nextIndex = 0
       let completed = roomFrames.length - pendingFrames.length
-      const worker = async () => {
-        while (nextIndex < pendingFrames.length) {
-          const frame = pendingFrames[nextIndex++]!
+      const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+      const networkConcurrency = mobile ? 1 : 2
+      const activeUploads = new Set<Promise<void>>()
+      try {
+        for (let pendingIndex = 0; pendingIndex < pendingFrames.length; pendingIndex += 1) {
+          const frame = pendingFrames[pendingIndex]!
+          if (activeUploads.size >= networkConcurrency) await Promise.race(activeUploads)
           setOrderProgress(`Preparing prints ${completed + 1}/${roomFrames.length}…`)
+          let timing: RenderTiming | undefined
           let rendered
-          try { rendered = await renderComposition(frame.template, frame.slots, { branding, createPreview: false }) }
+          try { rendered = await renderComposition(frame.template, frame.slots, { branding, createPreview: false, assetCache, onTiming: (value) => { timing = value } }) }
           catch (reason) { throw new Error(`Failed to render print image: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }) }
+          const nextFrame = pendingFrames[pendingIndex + 1]
+          assetCache.retainOnly(nextFrame ? compositionAssetSources(nextFrame.template, nextFrame.slots, branding) : [])
           setOrderProgress(`Uploading prints ${completed + 1}/${roomFrames.length}…`)
-          const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, rendered.print, frame.index)
-          orderItemsRef.current = { ...orderItemsRef.current, [frame.template.id]: item }
-          uploadedFrameSlotsRef.current = { ...uploadedFrameSlotsRef.current, [frame.template.id]: frame.slots }
-          setOrderItems(orderItemsRef.current)
-          completed += 1
+          const upload = (async () => {
+            let networkTiming: { uploadMs: number; itemRpcMs: number } | undefined
+            const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, rendered.print, frame.index, (value) => { networkTiming = value })
+            orderItemsRef.current = { ...orderItemsRef.current, [frame.template.id]: item }
+            uploadedFrameSlotsRef.current = { ...uploadedFrameSlotsRef.current, [frame.template.id]: frame.slots }
+            setOrderItems(orderItemsRef.current)
+            completed += 1
+            if (timing && networkTiming) orderTimings.push({ frame: frame.index + 1, render: timing, ...networkTiming })
+          })()
+          activeUploads.add(upload)
+          void upload.then(() => activeUploads.delete(upload), () => activeUploads.delete(upload))
         }
+        await Promise.all(activeUploads)
+      } catch (reason) {
+        await Promise.allSettled(activeUploads)
+        throw reason
       }
-      await Promise.all(Array.from({ length: Math.min(2, pendingFrames.length) }, worker))
-      setOrderProgress('Submitting order…')
+      setOrderProgress('Finalizing order…')
+      const submitStartedAt = performance.now()
       const submitted = await printOrderRepository.submit(draft)
+      const submitMs = performance.now() - submitStartedAt
+      printOrderRepository.releaseDraft(draft)
+      if (debugOrderTiming) console.info('[print-order timing]', { draftMs, frames: orderTimings.sort((left, right) => left.frame - right.frame), submitMs, totalMs: performance.now() - orderStartedAt, concurrency: { render: 1, network: networkConcurrency } })
       sessionStorage.setItem('selfbooth.last-order-id', submitted.id)
       setOrderId(submitted.id)
       navigate('/success')
     } catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to add this image to the Print Order.') }
-    finally { processingOrder.current = false; setDownloading(false); setOrderProgress(null) }
+    finally { assetCache.clear(); processingOrder.current = false; setDownloading(false); setOrderProgress(null) }
   }
 
   const removeOrderItem = async (templateId: string) => {
