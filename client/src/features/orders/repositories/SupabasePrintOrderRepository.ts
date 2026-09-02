@@ -16,8 +16,8 @@ const safePhone = (phone: string) => phone.replace(/[^0-9+]/g, '').replace(/^\+/
 const imageUrl = (path: string) => supabase.storage.from(bucket).getPublicUrl(path).data.publicUrl
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 const stageError = (stage: string, reason: unknown) => new Error(`${stage}: ${message(reason)}`, { cause: reason })
-const uploadedPaths = new Set<string>()
-const retryDelays = [400, 900]
+const uploadedPathsByOrder = new Map<string, Set<string>>()
+const retryDelays = [350, 800]
 const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
 const isTransient = (reason: unknown) => {
   const value = reason as { status?: number; statusCode?: number; message?: string }
@@ -32,7 +32,8 @@ async function withTransientRetry<T>(operation: () => Promise<T>) {
     try { return await operation() }
     catch (reason) {
       if (attempt >= retryDelays.length || !isTransient(reason)) throw reason
-      await wait(retryDelays[attempt]!)
+      const delay = retryDelays[attempt]!
+      await wait(delay + Math.round(Math.random() * delay * 0.25))
     }
   }
 }
@@ -51,11 +52,14 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
     } catch (reason) { throw stageError('Failed to create print-order draft', reason) }
   }
 
-  async addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number) {
+  async addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number, onTiming?: (timing: { uploadMs: number; itemRpcMs: number }) => void) {
     const path = `${safePhone(phoneNumber)}/${draft.id}/${String(displayOrder + 1).padStart(2, '0')}.png`
     if (!(image instanceof Blob) || image.size <= 0) throw new Error('Failed to upload print image: rendered image is empty or invalid.')
     const filename = path.slice(path.lastIndexOf('/') + 1)
     const uploadBody = typeof File === 'function' ? new File([image], filename, { type: 'image/png' }) : image
+    const uploadedPaths = uploadedPathsByOrder.get(draft.id) ?? new Set<string>()
+    uploadedPathsByOrder.set(draft.id, uploadedPaths)
+    const uploadStartedAt = performance.now()
     try {
       if (!uploadedPaths.has(path)) await withTransientRetry(async () => {
         const upload = await supabase.storage.from(bucket).upload(path, uploadBody, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
@@ -63,12 +67,16 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
         uploadedPaths.add(path)
       })
     } catch (reason) { throw stageError('Failed to upload print image', reason) }
+    const uploadMs = performance.now() - uploadStartedAt
+    const itemRpcStartedAt = performance.now()
     try {
-      return await withTransientRetry(async () => {
+      const item = await withTransientRetry(async () => {
         const result = await supabase.rpc('customer_upsert_print_order_item', { p_order_id: draft.id, p_edit_token: draft.editToken, p_template_id: templateId, p_storage_path: path, p_display_order: displayOrder })
         if (result.error) throw result.error
         return toItem(unwrap(result.data as ItemRow | null, result.error))
       })
+      onTiming?.({ uploadMs, itemRpcMs: performance.now() - itemRpcStartedAt })
+      return item
     } catch (reason) {
       // Keep the deterministic upload for a same-session item-RPC retry. The next
       // attempt reuses it instead of re-encoding and transferring the PNG again.
@@ -85,10 +93,16 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
 
   async submit(draft: PrintOrderDraft) {
     try {
-      const { data, error } = await supabase.rpc('customer_submit_print_order', { p_order_id: draft.id, p_edit_token: draft.editToken })
-      const row = unwrap(data as Omit<OrderRow, 'room_name'> | null, error)
-      return toOrder({ ...row, room_name: '' })
+      return await withTransientRetry(async () => {
+        const { data, error } = await supabase.rpc('customer_submit_print_order', { p_order_id: draft.id, p_edit_token: draft.editToken })
+        const row = unwrap(data as Omit<OrderRow, 'room_name'> | null, error)
+        return toOrder({ ...row, room_name: '' })
+      })
     } catch (reason) { throw stageError('Failed to submit print order', reason) }
+  }
+
+  releaseDraft(draft: PrintOrderDraft) {
+    uploadedPathsByOrder.delete(draft.id)
   }
 
   async listQueue() {

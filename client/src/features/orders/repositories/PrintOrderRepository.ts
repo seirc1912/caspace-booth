@@ -25,9 +25,10 @@ export interface PrintQueueOrder {
 
 export interface PrintOrderRepository {
   createDraft(phoneNumber: string, roomId: string): Promise<PrintOrderDraft>
-  addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number): Promise<PrintOrderItem>
+  addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number, onTiming?: (timing: { uploadMs: number; itemRpcMs: number }) => void): Promise<PrintOrderItem>
   removeItem(draft: PrintOrderDraft, item: PrintOrderItem): Promise<void>
   submit(draft: PrintOrderDraft): Promise<PrintQueueOrder>
+  releaseDraft(draft: PrintOrderDraft): void
   listQueue(): Promise<PrintQueueOrder[]>
   listItems(orderId: string): Promise<PrintOrderItem[]>
   updateStatus(orderId: string, status: PrintOrderStatus): Promise<void>

@@ -10,6 +10,33 @@ interface RenderOptions {
   format?: ImageExportFormat
   quality?: number
   onProgress?: ExportProgress
+  assetCache?: RenderAssetCache
+  onTiming?: (timing: RenderTiming) => void
+}
+
+export interface RenderTiming {
+  assetPreparationMs: number
+  renderMs: number
+  pngEncodingMs: number
+  pngBytes: number
+}
+
+export class RenderAssetCache {
+  private readonly images = new Map<string, Promise<HTMLImageElement>>()
+
+  load(source: string) {
+    let image = this.images.get(source)
+    if (!image) {
+      image = loadImageElement(source)
+      this.images.set(source, image)
+      void image.catch(() => this.images.delete(source))
+    }
+    return image
+  }
+
+  clear() {
+    this.images.clear()
+  }
 }
 
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
@@ -46,7 +73,7 @@ const loadImageElement = (source: string) => new Promise<HTMLImageElement>((reso
   image.src = source
 })
 
-const loadImage = (source: string) => loadImageElement(source)
+const loadImage = (source: string, cache?: RenderAssetCache) => cache?.load(source) ?? loadImageElement(source)
 
 const canvasBlob = (canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number) => new Promise<Blob>((resolve, reject) => {
   try { canvas.toBlob((blob) => blob && blob.size > 0 ? resolve(blob) : reject(new Error('Failed to render print image: the browser returned an empty image.')), type, quality) }
@@ -105,7 +132,7 @@ function drawText(context: CanvasRenderingContext2D, value: string, x: number, y
   context.restore()
 }
 
-async function drawElement(context: CanvasRenderingContext2D, element: TemplateElement) {
+async function drawElement(context: CanvasRenderingContext2D, element: TemplateElement, cache?: RenderAssetCache) {
   if (!element.visible) return
   context.save()
   context.globalAlpha = Math.min(1, Math.max(0, element.opacity))
@@ -114,7 +141,7 @@ async function drawElement(context: CanvasRenderingContext2D, element: TemplateE
   context.translate(-element.width / 2, -element.height / 2)
   if (element.shadowBlur) { context.shadowColor = element.shadowColor ?? '#000000'; context.shadowBlur = element.shadowBlur; context.shadowOffsetX = element.shadowX ?? 0; context.shadowOffsetY = element.shadowY ?? 0 }
   if ((element.type === 'image' || element.type === 'logo' || element.type === 'sticker' || element.type === 'overlay') && element.assetUrl) {
-    const image = await loadImage(element.assetUrl)
+    const image = await loadImage(element.assetUrl, cache)
     const scale = Math.min(element.width / image.naturalWidth, element.height / image.naturalHeight)
     const width = image.naturalWidth * scale; const height = image.naturalHeight * scale
     context.drawImage(image, (element.width - width) / 2, (element.height - height) / 2, width, height)
@@ -135,7 +162,16 @@ export function renderComposition(template: PrintTemplate, slots: Array<FilledSl
 export function renderComposition(template: PrintTemplate, slots: Array<FilledSlot | null>, options?: RenderOptions): Promise<{ print: Blob; preview: Blob; width: number; height: number; format: ImageExportFormat }>
 export async function renderComposition(template: PrintTemplate, slots: Array<FilledSlot | null>, options: RenderOptions = {}) {
   validateCanvas(template)
+  const startedAt = performance.now()
   const format = options.format ?? 'png'
+  const assetSources = [
+    template.backgroundUrl,
+    ...slots.map((slot) => slot?.photo.src),
+    ...template.elements.map((element) => element.visible && element.assetUrl ? element.assetUrl : undefined),
+    ...template.variables.map((variable) => variable.type === 'brandLogo' ? options.branding?.logoUrl : undefined),
+  ].filter((source): source is string => Boolean(source))
+  await Promise.all([...new Set(assetSources)].map((source) => loadImage(source, options.assetCache)))
+  const assetsReadyAt = performance.now()
   const canvas = document.createElement('canvas')
   canvas.width = template.canvas.width; canvas.height = template.canvas.height
   const context = canvas.getContext('2d', { alpha: format === 'png' })
@@ -143,7 +179,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   options.onProgress?.(5)
   if (format === 'jpg') { context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height) }
   if (template.backgroundColor && template.backgroundColor !== 'transparent') { context.fillStyle = template.backgroundColor; context.fillRect(0, 0, canvas.width, canvas.height) }
-  if (template.backgroundUrl) { const background = await loadImage(template.backgroundUrl); context.drawImage(background, 0, 0, canvas.width, canvas.height) }
+  if (template.backgroundUrl) { const background = await loadImage(template.backgroundUrl, options.assetCache); context.drawImage(background, 0, 0, canvas.width, canvas.height) }
 
   const layers = [
     ...template.slots.map((definition, index) => ({ kind: 'slot' as const, zIndex: definition.zIndex, definition, index })),
@@ -155,7 +191,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
     if (layer.kind === 'slot') {
       const definition = layer.definition; const slot = slots[layer.index]
       if (slot && definition.visible !== false) {
-        const image = await loadImage(slot.photo.src)
+        const image = await loadImage(slot.photo.src, options.assetCache)
         context.save(); context.globalAlpha = definition.opacity ?? 1
         context.translate(definition.x + definition.width / 2, definition.y + definition.height / 2)
         context.rotate(definition.rotation * Math.PI / 180)
@@ -168,13 +204,16 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
       }
     } else if (layer.kind === 'variable') {
       const variable = layer.variable
-      if (variable.type === 'brandLogo' && options.branding?.logoUrl) { const image = await loadImage(options.branding.logoUrl); context.drawImage(image, variable.x, variable.y, variable.width, variable.height) }
+      if (variable.type === 'brandLogo' && options.branding?.logoUrl) { const image = await loadImage(options.branding.logoUrl, options.assetCache); context.drawImage(image, variable.x, variable.y, variable.width, variable.height) }
       else drawText(context, variableValue(variable, options.branding), variable.x, variable.y, variable.width, variable.height, variable.fontSize, variable.color, variable.align)
-    } else await drawElement(context, layer.element)
+    } else await drawElement(context, layer.element, options.assetCache)
     options.onProgress?.(10 + Math.round((layerIndex + 1) / Math.max(1, layers.length) * 75))
   }
   options.onProgress?.(90)
+  const renderedAt = performance.now()
   const print = await canvasBlob(canvas, format === 'png' ? 'image/png' : 'image/jpeg', format === 'jpg' ? options.quality ?? 0.95 : undefined)
+  const encodedAt = performance.now()
+  options.onTiming?.({ assetPreparationMs: assetsReadyAt - startedAt, renderMs: renderedAt - assetsReadyAt, pngEncodingMs: encodedAt - renderedAt, pngBytes: print.size })
   if (options.createPreview === false) {
     canvas.width = 1; canvas.height = 1; options.onProgress?.(100)
     return { print, preview: null, width: template.canvas.width, height: template.canvas.height, format }
