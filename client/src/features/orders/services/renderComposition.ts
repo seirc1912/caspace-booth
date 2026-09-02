@@ -37,7 +37,21 @@ export class RenderAssetCache {
   clear() {
     this.images.clear()
   }
+
+  retainOnly(sources: Iterable<string>) {
+    const retained = new Set(sources)
+    for (const source of this.images.keys()) {
+      if (!retained.has(source)) this.images.delete(source)
+    }
+  }
 }
+
+export const compositionAssetSources = (template: PrintTemplate, slots: Array<FilledSlot | null>, branding?: BrandingConfig) => [...new Set([
+  template.backgroundUrl,
+  ...slots.map((slot) => slot?.photo.src),
+  ...template.elements.map((element) => element.visible && element.assetUrl ? element.assetUrl : undefined),
+  ...template.variables.map((variable) => variable.type === 'brandLogo' ? branding?.logoUrl : undefined),
+].filter((source): source is string => Boolean(source)))]
 
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 
@@ -164,13 +178,8 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   validateCanvas(template)
   const startedAt = performance.now()
   const format = options.format ?? 'png'
-  const assetSources = [
-    template.backgroundUrl,
-    ...slots.map((slot) => slot?.photo.src),
-    ...template.elements.map((element) => element.visible && element.assetUrl ? element.assetUrl : undefined),
-    ...template.variables.map((variable) => variable.type === 'brandLogo' ? options.branding?.logoUrl : undefined),
-  ].filter((source): source is string => Boolean(source))
-  await Promise.all([...new Set(assetSources)].map((source) => loadImage(source, options.assetCache)))
+  const assetSources = compositionAssetSources(template, slots, options.branding)
+  await Promise.all(assetSources.map((source) => loadImage(source, options.assetCache)))
   const assetsReadyAt = performance.now()
   const canvas = document.createElement('canvas')
   canvas.width = template.canvas.width; canvas.height = template.canvas.height

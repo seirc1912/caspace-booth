@@ -4,7 +4,7 @@ import { useBranding } from './contexts/BrandingContext'
 import type { PrintOrderDraft, PrintOrderItem } from './features/orders/repositories/PrintOrderRepository'
 import { downloadComposition } from './features/orders/services/downloadComposition'
 import { printOrderRepository } from './features/orders/services/orderServiceInstance'
-import { RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
+import { compositionAssetSources, RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
@@ -96,13 +96,16 @@ export function CustomerApp() {
       const networkConcurrency = mobile ? 1 : 2
       const activeUploads = new Set<Promise<void>>()
       try {
-        for (const frame of pendingFrames) {
+        for (let pendingIndex = 0; pendingIndex < pendingFrames.length; pendingIndex += 1) {
+          const frame = pendingFrames[pendingIndex]!
           if (activeUploads.size >= networkConcurrency) await Promise.race(activeUploads)
           setOrderProgress(`Preparing prints ${completed + 1}/${roomFrames.length}…`)
           let timing: RenderTiming | undefined
           let rendered
           try { rendered = await renderComposition(frame.template, frame.slots, { branding, createPreview: false, assetCache, onTiming: (value) => { timing = value } }) }
           catch (reason) { throw new Error(`Failed to render print image: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }) }
+          const nextFrame = pendingFrames[pendingIndex + 1]
+          assetCache.retainOnly(nextFrame ? compositionAssetSources(nextFrame.template, nextFrame.slots, branding) : [])
           setOrderProgress(`Uploading prints ${completed + 1}/${roomFrames.length}…`)
           const upload = (async () => {
             let networkTiming: { uploadMs: number; itemRpcMs: number } | undefined

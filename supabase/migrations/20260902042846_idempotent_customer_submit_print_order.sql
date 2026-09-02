@@ -24,6 +24,13 @@ begin
       total_images = (select count(*) from public.print_order_items where order_id = p_order_id)
   where id = p_order_id and submitted_at is null
   returning * into result;
+
+  -- A concurrent valid submit may have committed while this call waited on the
+  -- row lock. Return that submitted row instead of a misleading null result.
+  if result.id is null then
+    select * into result from public.print_orders
+    where id = p_order_id and submitted_at is not null;
+  end if;
   return result;
 end;
 $$;
