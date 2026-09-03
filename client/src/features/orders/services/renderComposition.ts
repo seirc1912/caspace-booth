@@ -1,6 +1,7 @@
 import type { BrandingConfig } from '../../../types/branding'
 import type { FilledSlot, PrintTemplate, TemplateElement, TemplateVariable } from '../../../types/selfBooth'
 import { basePhotoFitScale } from '../../photos/photoFit'
+import { fillPhotoSlotBacking } from '../../photos/photoSlotBacking'
 
 export type ImageExportFormat = 'png' | 'jpg'
 export type ExportProgress = (progress: number) => void
@@ -122,6 +123,7 @@ function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, s
   context.save()
   framePath(context, x, y, width, height, mask, radius)
   context.clip()
+  fillPhotoSlotBacking(context, x, y, width, height)
   context.translate(x + width / 2 + transform.x * width, y + height / 2 + transform.y * height)
   context.rotate(transform.rotation * Math.PI / 180)
   context.scale(transform.flipX ? -transform.zoom : transform.zoom, transform.flipY ? -transform.zoom : transform.zoom)

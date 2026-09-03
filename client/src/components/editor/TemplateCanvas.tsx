@@ -1,4 +1,5 @@
 import type { FilledSlot, ImageTransform, PrintTemplate } from '../../types/selfBooth'
+import { photoSlotBackingColor } from '../../features/photos/photoSlotBacking'
 import { TemplateSurface } from '../template/TemplateSurface'
 import { PhotoFrame } from './PhotoFrame'
 import { EditorErrorBoundary } from './EditorErrorBoundary'
@@ -30,7 +31,7 @@ export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, o
         const borderRadius = templateSlot.mask === 'circle' || templateSlot.mask === 'ellipse' ? '50%' : `${templateSlot.borderRadius / Math.min(templateSlot.width, templateSlot.height) * 100}%`
 
         return (
-          <div className="h-full w-full overflow-hidden" style={{ borderRadius, border: templateSlot.borderWidth ? `${templateSlot.borderWidth}px solid ${templateSlot.borderColor ?? '#000000'}` : undefined, boxShadow: templateSlot.shadow?.blur ? `${templateSlot.shadow.offsetX}px ${templateSlot.shadow.offsetY}px ${templateSlot.shadow.blur}px ${templateSlot.shadow.color}` : undefined }}>
+          <div className="h-full w-full overflow-hidden" style={{ backgroundColor: slot ? photoSlotBackingColor : undefined, borderRadius, border: templateSlot.borderWidth ? `${templateSlot.borderWidth}px solid ${templateSlot.borderColor ?? '#000000'}` : undefined, boxShadow: templateSlot.shadow?.blur ? `${templateSlot.shadow.offsetX}px ${templateSlot.shadow.offsetY}px ${templateSlot.shadow.blur}px ${templateSlot.shadow.color}` : undefined }}>
             {readonly && slot ? (
               <CustomerPhotoLayer slot={slot} />
             ) : (
