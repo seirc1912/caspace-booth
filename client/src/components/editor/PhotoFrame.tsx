@@ -4,6 +4,7 @@ import type { FilledSlot, ImageTransform, PhotoSlotEditableRules } from '../../t
 import { Icon } from '../ui/Icon'
 import { FrameToolbar } from './FrameToolbar'
 import { CustomerPhotoLayer } from './CustomerPhotoLayer'
+import { clampUserPhotoZoom } from '../../features/photos/photoFit'
 
 interface PhotoFrameProps {
   index: number
@@ -26,8 +27,6 @@ interface GestureOrigin { centroidX: number; centroidY: number; distance: number
 const center = (points: Array<{ x: number; y: number }>) => ({ x: points.reduce((sum, point) => sum + point.x, 0) / points.length, y: points.reduce((sum, point) => sum + point.y, 0) / points.length })
 const distance = (points: Array<{ x: number; y: number }>) => points[0] && points[1] ? Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) : 0
 const angle = (points: Array<{ x: number; y: number }>) => points[0] && points[1] ? Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x) * 180 / Math.PI : 0
-const clampZoom = (value: number) => Math.min(6, Math.max(0.25, value))
-
 export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMode, onActivate, onAdd, onBeginCrop, onDropPhoto, onImageError, onRemove, onReset, onReplace, onTransform, rules }: PhotoFrameProps) {
   const permissions = rules ?? { canReplace: true, canMove: true, canZoom: true, canRotate: true }
   const displaySrc = slot?.photo.previewSrc ?? slot?.photo.src ?? ''
@@ -59,7 +58,7 @@ export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMo
       next.x = origin.current.transform.x + (centroid.x - origin.current.centroidX) / target.clientWidth
       next.y = origin.current.transform.y + (centroid.y - origin.current.centroidY) / target.clientHeight
     } else if (points.length >= 2) {
-      if (permissions.canZoom && origin.current.distance > 0) next.zoom = clampZoom(origin.current.transform.zoom * distance(points) / origin.current.distance)
+      if (permissions.canZoom && origin.current.distance > 0) next.zoom = clampUserPhotoZoom(origin.current.transform.zoom * distance(points) / origin.current.distance)
       if (permissions.canRotate) next.rotation = origin.current.transform.rotation + angle(points) - origin.current.angle
     }
     liveTransform.current = { ...liveTransform.current, ...next }; onTransform(next)
@@ -92,7 +91,7 @@ export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMo
   }
   const wheel = (event: WheelEvent<HTMLDivElement>) => {
     if (!slot || !cropMode || !permissions.canZoom) return
-    event.preventDefault(); const zoom = clampZoom((liveTransform.current?.zoom ?? slot.transform.zoom) * Math.exp(-event.deltaY * 0.002))
+    event.preventDefault(); const zoom = clampUserPhotoZoom((liveTransform.current?.zoom ?? slot.transform.zoom) * Math.exp(-event.deltaY * 0.002))
     liveTransform.current = { ...(liveTransform.current ?? slot.transform), zoom }; onTransform({ zoom })
   }
   const drop = (event: DragEvent<HTMLDivElement>) => {

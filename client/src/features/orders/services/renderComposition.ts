@@ -1,5 +1,6 @@
 import type { BrandingConfig } from '../../../types/branding'
 import type { FilledSlot, PrintTemplate, TemplateElement, TemplateVariable } from '../../../types/selfBooth'
+import { basePhotoFitScale } from '../../photos/photoFit'
 
 export type ImageExportFormat = 'png' | 'jpg'
 export type ExportProgress = (progress: number) => void
@@ -111,7 +112,11 @@ function framePath(context: CanvasRenderingContext2D, x: number, y: number, widt
 
 function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, slot: FilledSlot, x: number, y: number, width: number, height: number, mask: 'rectangle' | 'rounded' | 'circle' | 'ellipse', radius: number) {
   const transform = slot.transform
-  const baseScale = slot.fit === 'cover' ? Math.max(width / image.naturalWidth, height / image.naturalHeight) : Math.min(width / image.naturalWidth, height / image.naturalHeight)
+  const baseScale = basePhotoFitScale(
+    { width: image.naturalWidth, height: image.naturalHeight },
+    { width, height },
+    slot.fit ?? 'contain',
+  )
   const drawWidth = image.naturalWidth * baseScale
   const drawHeight = image.naturalHeight * baseScale
   context.save()
