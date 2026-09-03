@@ -2,6 +2,7 @@ import type { FilledSlot, ImageTransform, PrintTemplate } from '../../types/self
 import { TemplateSurface } from '../template/TemplateSurface'
 import { PhotoFrame } from './PhotoFrame'
 import { EditorErrorBoundary } from './EditorErrorBoundary'
+import { CustomerPhotoLayer } from './CustomerPhotoLayer'
 
 interface TemplateCanvasProps {
   template: PrintTemplate
@@ -32,7 +33,7 @@ export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, o
         return (
           <div className="h-full w-full overflow-hidden" style={{ borderRadius, border: templateSlot.borderWidth ? `${templateSlot.borderWidth}px solid ${templateSlot.borderColor ?? '#000000'}` : undefined, boxShadow: templateSlot.shadow?.blur ? `${templateSlot.shadow.offsetX}px ${templateSlot.shadow.offsetY}px ${templateSlot.shadow.blur}px ${templateSlot.shadow.color}` : undefined }}>
             {readonly && slot ? (
-              <img alt={slot.photo.alt} className={`h-full w-full ${slot.fit === 'cover' ? 'object-cover' : 'object-contain'}`} src={slot.photo.previewSrc ?? slot.photo.src} style={{ transform: `translate(${slot.transform.x * 100}%, ${slot.transform.y * 100}%) rotate(${slot.transform.rotation}deg) scale(${slot.transform.flipX ? -slot.transform.zoom : slot.transform.zoom}, ${slot.transform.flipY ? -slot.transform.zoom : slot.transform.zoom})`, transformOrigin: 'center center' }} />
+              <CustomerPhotoLayer slot={slot} />
             ) : (
               <EditorErrorBoundary fallback={<button className="grid h-full w-full place-items-center bg-rose-50 p-2 text-xs font-bold text-rose-600" onClick={() => onRemove(index)} type="button">Remove unavailable image</button>} onError={onImageError}><PhotoFrame
                 active={activeSlot === index}
