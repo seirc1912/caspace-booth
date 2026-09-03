@@ -17,12 +17,11 @@ interface TemplateCanvasProps {
   onBeginCrop?: (index: number) => void
   onDropPhoto?: (index: number, photoId: string) => void
   onImageError?: (message: string) => void
-  onImageSize?: (photoId: string, size: { width: number; height: number }) => void
   onTransform: (index: number, transform: Partial<ImageTransform>) => void
   readonly?: boolean
 }
 
-export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onReplace, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onImageSize = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
+export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onReplace, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
   return (
     <TemplateSurface
       className="rounded-[1.75rem] shadow-xl shadow-stone-900/10"
@@ -44,7 +43,6 @@ export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, o
                 onBeginCrop={() => onBeginCrop(index)}
                 onDropPhoto={(photoId) => onDropPhoto(index, photoId)}
                 onImageError={onImageError}
-                onImageSize={(size) => { if (slot) onImageSize(slot.photo.id, size) }}
                 onRemove={() => onRemove(index)}
                 onReset={() => onReset(index)}
                 onReplace={() => onReplace(index)}
