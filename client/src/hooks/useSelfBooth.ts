@@ -12,7 +12,7 @@ const journeyStorageKey = 'selfbooth.customer-journey.v1'
 const supportedPhoto = (file: File) => file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|heic|heif)$/i.test(file.name)
 
 function toSlot(photo: PhotoAsset): FilledSlot {
-  return { photo, transform: { ...initialTransform }, fit: 'contain' }
+  return { photo, transform: { ...initialTransform }, fit: 'cover' }
 }
 
 async function loadPhotos(files: File[], concurrency = 2) {
@@ -244,7 +244,7 @@ export function useSelfBooth() {
       if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc)
       return replacement
     }))
-    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? { ...slot, photo: replacement } : slot)])))
+    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? toSlot(replacement) : slot)])))
     setCompletedFrameIds([])
   }, [])
 
