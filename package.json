@@ -11,7 +11,8 @@
     "dev": "npm run dev --workspaces --if-present",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "node --import tsx --test tests/photoGeometry.test.ts"
   },
   "engines": {
     "node": ">=22.0.0",
