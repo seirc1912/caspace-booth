@@ -5,15 +5,11 @@ import { loadPublishedRooms, loadPublishedTemplateDetail, loadPublishedTemplateS
 import type { CustomerTemplate, CustomerTemplateSummary } from '../services/catalog/types'
 import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
+import { createInitialPhotoSlot } from '../features/photos/initialPhotoSlot'
 
-const initialTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 const maximumPhotos = Number.MAX_SAFE_INTEGER
 const journeyStorageKey = 'selfbooth.customer-journey.v1'
 const supportedPhoto = (file: File) => file.type.startsWith('image/') || /\.(jpe?g|png|webp|gif|avif|heic|heif)$/i.test(file.name)
-
-function toSlot(photo: PhotoAsset): FilledSlot {
-  return { photo, transform: { ...initialTransform }, fit: 'cover' }
-}
 
 async function loadPhotos(files: File[], concurrency = 2) {
   const results: PromiseSettledResult<PhotoAsset>[] = new Array(files.length)
@@ -154,13 +150,13 @@ export function useSelfBooth() {
     setSlots((current) => {
       const next = [...current]
       const emptyIndices = template.slots.map((slot, index) => ({ index, x: slot.x, y: slot.y })).filter(({ index }) => !next[index]).sort((left, right) => left.y - right.y || left.x - right.x).map(({ index }) => index)
-      emptyIndices.forEach((slotIndex, photoIndex) => { const photo = photos[photoIndex]; if (photo) next[slotIndex] = toSlot(photo) })
+      emptyIndices.forEach((slotIndex, photoIndex) => { const photo = photos[photoIndex]; if (photo) next[slotIndex] = createInitialPhotoSlot(photo) })
       return next
     })
   }, [setSlots, template.slots])
 
   const replaceSlot = useCallback((index: number, photo: PhotoAsset) => {
-    setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? toSlot(photo) : slot)))
+    setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? createInitialPhotoSlot(photo) : slot)))
   }, [setSlots])
 
   const updateTransform = useCallback((index: number, transform: Partial<ImageTransform>) => {
@@ -192,7 +188,7 @@ export function useSelfBooth() {
       visibleOrder.push(visibleOrder.shift()!)
     }
     lastRandomOrder.current = visibleOrder.map((photo) => photo.id).join()
-    setSlots(visibleOrder.map(toSlot))
+    setSlots(visibleOrder.map(createInitialPhotoSlot))
   }, [setSlots, template.slots.length, uploadedPhotos])
 
   const addUploadedPhotos = useCallback(async (files: File[]) => {
@@ -244,7 +240,7 @@ export function useSelfBooth() {
       if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc)
       return replacement
     }))
-    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? toSlot(replacement) : slot)])))
+    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? createInitialPhotoSlot(replacement) : slot)])))
     setCompletedFrameIds([])
   }, [])
 

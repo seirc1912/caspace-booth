@@ -15,7 +15,6 @@ interface PhotoFrameProps {
   onBeginCrop: () => void
   onDropPhoto: (photoId: string) => void
   onImageError: (message: string) => void
-  onImageSize: (size: { width: number; height: number }) => void
   onRemove: () => void
   onReset: () => void
   onReplace: () => void
@@ -29,7 +28,7 @@ const distance = (points: Array<{ x: number; y: number }>) => points[0] && point
 const angle = (points: Array<{ x: number; y: number }>) => points[0] && points[1] ? Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x) * 180 / Math.PI : 0
 const clampZoom = (value: number) => Math.min(6, Math.max(0.25, value))
 
-export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMode, onActivate, onAdd, onBeginCrop, onDropPhoto, onImageError, onImageSize, onRemove, onReset, onReplace, onTransform, rules }: PhotoFrameProps) {
+export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMode, onActivate, onAdd, onBeginCrop, onDropPhoto, onImageError, onRemove, onReset, onReplace, onTransform, rules }: PhotoFrameProps) {
   const permissions = rules ?? { canReplace: true, canMove: true, canZoom: true, canRotate: true }
   const displaySrc = slot?.photo.previewSrc ?? slot?.photo.src ?? ''
   const pointers = useRef(new Map<number, { x: number; y: number }>())
@@ -107,6 +106,6 @@ export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMo
   }
 
   return <><div ref={frameElement} className={`group relative h-full min-h-12 overflow-hidden bg-stone-100 ring-offset-2 transition-shadow duration-200 ${cropMode ? 'touch-none ring-4 ring-sky-500' : 'touch-manipulation'} ${active && !cropMode ? 'ring-2 ring-[var(--brand-primary)]' : ''}`} onDoubleClick={() => slot && imageReady && onBeginCrop()} onDragOver={(event) => event.preventDefault()} onDrop={drop} onPointerCancel={pointerUp} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={wheel}>
-    {slot ? <>{!imageFailed && displaySrc ? <CustomerPhotoLayer className="select-none" loading="lazy" onLoad={(size) => { setImageReady(true); onImageSize(size) }} onError={() => { setImageFailed(true); onImageError(`${slot.photo.alt || 'This image'} could not be displayed.`) }} slot={slot} /> : <div className="absolute inset-0 grid place-items-center bg-rose-50 p-2 text-center text-xs font-bold text-rose-600">Image unavailable</div>}<button aria-label={`Select frame ${index + 1}`} className={`absolute inset-0 ${cropMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`} onClick={activateFilledFrame} type="button" /></> : <button className="grid h-full min-h-12 w-full place-items-center p-2 text-sky-600 transition-colors hover:bg-sky-50" onClick={onAdd} type="button"><span className="grid place-items-center gap-1.5"><span className="grid size-10 place-items-center rounded-xl bg-sky-100"><Icon name="camera" /></span><span className="text-xs font-bold">Add Image</span></span></button>}
+    {slot ? <>{!imageFailed && displaySrc ? <CustomerPhotoLayer className="select-none" loading="lazy" onLoad={() => setImageReady(true)} onError={() => { setImageFailed(true); onImageError(`${slot.photo.alt || 'This image'} could not be displayed.`) }} slot={slot} /> : <div className="absolute inset-0 grid place-items-center bg-rose-50 p-2 text-center text-xs font-bold text-rose-600">Image unavailable</div>}<button aria-label={`Select frame ${index + 1}`} className={`absolute inset-0 ${cropMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`} onClick={activateFilledFrame} type="button" /></> : <button className="grid h-full min-h-12 w-full place-items-center p-2 text-sky-600 transition-colors hover:bg-sky-50" onClick={onAdd} type="button"><span className="grid place-items-center gap-1.5"><span className="grid size-10 place-items-center rounded-xl bg-sky-100"><Icon name="camera" /></span><span className="text-xs font-bold">Add Image</span></span></button>}
   </div>{active && slot && !cropMode ? <FrameToolbar anchor={frameElement.current} canCrop={imageReady && !imageFailed} onCrop={onBeginCrop} onDelete={onRemove} onReplace={onReplace} /> : null}</>
 })

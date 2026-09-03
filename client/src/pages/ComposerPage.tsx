@@ -5,7 +5,6 @@ import { TemplateCanvas } from '../components/editor/TemplateCanvas'
 import { PageShell } from '../components/layout/PageShell'
 import { PhotoLibraryDock } from '../components/photo/PhotoLibraryDock'
 import { CropToolbar } from '../components/editor/CropToolbar'
-import { constrainCoverTransform, type ImageSize } from '../features/photos/photoGeometry'
 
 interface ComposerPageProps {
   template: PrintTemplate
@@ -50,11 +49,10 @@ interface ComposerPageProps {
 interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover' }
 const resetTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 
-export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onSave, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform: commitTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], canOrder, frameIds = [], onSelectFrame, onDownload, downloading, onPrevious, orderProgress }: ComposerPageProps) {
+export function ComposerPage({ template, slots, currentSlot, onBack, onClear, onSave, onFillEmpty, onNext, onShuffle, onCurrentSlotChange, onRemove, onReplace, onTransform, onFitChange, uploadedPhotos, onAddPhotos, onDeletePhoto, onReplacePhoto, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], canOrder, frameIds = [], onSelectFrame, onDownload, downloading, onPrevious, orderProgress }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
   const [activePhotoId, setActivePhotoId] = useState<string | null>(null)
   const [replaceSlot, setReplaceSlot] = useState<number | null>(null)
-  const [imageSizes, setImageSizes] = useState<Record<string, ImageSize>>({})
   const bottomControls = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const controls = bottomControls.current
@@ -70,14 +68,6 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
     if (slot) counts[slot.photo.id] = (counts[slot.photo.id] ?? 0) + 1
     return counts
   }, {}), [slots])
-  const changeTransform = (index: number, update: Partial<ImageTransform>) => {
-    const slot = slots[index]
-    const definition = template.slots[index]
-    const imageSize = slot ? imageSizes[slot.photo.id] : undefined
-    if (!slot || !definition || slot.fit !== 'cover' || !imageSize) { commitTransform(index, update); return }
-    commitTransform(index, constrainCoverTransform({ ...slot.transform, ...update }, imageSize, { width: definition.width, height: definition.height }))
-  }
-  const onTransform = changeTransform
 
   const assign = (photo: PhotoAsset, target: number) => {
     if (target < 0 || target >= slots.length) return
@@ -110,7 +100,7 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
   const resetCrop = () => {
     if (!crop) return
     onTransform(crop.index, resetTransform)
-    onFitChange(crop.index, 'cover')
+    onFitChange(crop.index, 'contain')
   }
   const dropPhoto = (index: number, photoId: string) => {
     const photo = uploadedPhotos.find((item) => item.id === photoId)
@@ -125,7 +115,7 @@ export function ComposerPage({ template, slots, currentSlot, onBack, onClear, on
     <header className="mb-4 flex items-center justify-between"><button className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onBack} type="button">Rooms</button><div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Frame {frameIndex + 1} / {frameCount}</p><h1 className="font-bold">{template.name}</h1></div><span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span></header>
     <div className="mx-auto mb-5 max-w-4xl"><div aria-label={`Frame progress: ${frameIndex + 1} of ${frameCount}`} aria-valuemax={frameCount} aria-valuemin={1} aria-valuenow={frameIndex + 1} className="h-2 overflow-hidden rounded-full bg-stone-200" role="progressbar"><div className="h-full rounded-full bg-[var(--brand-primary)] transition-[width] duration-300" style={{ width: `${((frameIndex + 1) / Math.max(1, frameCount)) * 100}%` }} /></div>{onSelectFrame && frameIds.length > 1 ? <div className="mt-3 flex gap-2 overflow-x-auto pb-1" aria-label="Room frames">{frameIds.map((id, index) => { const complete = completedFrameIds.includes(id); const current = index === frameIndex; const status = current ? 'current' : complete ? 'completed' : 'incomplete'; return <button aria-current={current ? 'step' : undefined} aria-label={`Frame ${index + 1}, ${status}`} className={`min-h-10 shrink-0 rounded-full border px-4 text-sm font-bold transition ${current ? 'border-sky-500 bg-sky-50 text-sky-700' : complete ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-stone-200 bg-white text-stone-500'}`} key={id} onClick={() => onSelectFrame(index)} type="button">{complete ? '✓' : current ? '●' : '○'} Frame {index + 1}</button> })}</div> : null}</div>
     <div className="mx-auto grid w-full max-w-4xl items-start gap-5 md:grid-cols-[minmax(18rem,25rem)_1fr]">
-      <TemplateCanvas activeSlot={currentSlot} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onImageSize={(photoId, size) => setImageSizes((current) => current[photoId]?.width === size.width && current[photoId]?.height === size.height ? current : { ...current, [photoId]: size })} onActiveSlotChange={selectFrame} onAdd={selectFrame} onBeginCrop={beginCrop} onDropPhoto={dropPhoto} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null); if (replaceSlot === index) setReplaceSlot(null) }} onReset={(index) => { onTransform(index, resetTransform); onFitChange(index, 'cover') }} onReplace={(index) => { onCurrentSlotChange(index); setReplaceSlot(index) }} onTransform={changeTransform} slots={slots} template={template} />
+      <TemplateCanvas activeSlot={currentSlot} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onActiveSlotChange={selectFrame} onAdd={selectFrame} onBeginCrop={beginCrop} onDropPhoto={dropPhoto} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null); if (replaceSlot === index) setReplaceSlot(null) }} onReset={(index) => { onTransform(index, resetTransform); onFitChange(index, 'contain') }} onReplace={(index) => { onCurrentSlotChange(index); setReplaceSlot(index) }} onTransform={onTransform} slots={slots} template={template} />
       <aside className="rounded-[1.75rem] bg-white p-5 shadow-sm"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Upload once. Create freely.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Select a library photo, then tap any frame. Reuse any photo as many times as you like. Cropping only starts when you choose Crop.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Desktop: drag thumbnails into frames. Mobile: tap photo, then tap frame.</div></aside>
     </div>
     <div className="fixed inset-x-0 bottom-0 z-20 bg-white md:contents" ref={bottomControls}>{!crop ? <div className="mx-auto w-full max-w-4xl md:mt-5"><PhotoLibraryDock activePhotoId={activePhotoId} onImageError={onPhotoError} onAdd={onAddPhotos} onSelect={(photo) => { setActivePhotoId(photo.id); if (replaceSlot !== null) { assign(photo, replaceSlot); setReplaceSlot(null) } }} onDelete={deletePhoto} onReplace={onReplacePhoto} photos={uploadedPhotos} usage={usage} /></div> : <CropToolbar fit={slots[crop.index]?.fit ?? 'contain'} onCancel={cancelCrop} onDone={finishCrop} onFitChange={(fit) => onFitChange(crop.index, fit)} onPositionXChange={(x) => onTransform(crop.index, { x })} onPositionYChange={(y) => onTransform(crop.index, { y })} onReset={resetCrop} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} positionX={slots[crop.index]?.transform.x ?? 0} positionY={slots[crop.index]?.transform.y ?? 0} zoom={slots[crop.index]?.transform.zoom ?? 1} />}<EditorToolbar canContinue={slots.every(Boolean)} canOrder={canOrder} downloading={downloading} nextLabel="Order" onAutoFill={() => onFillEmpty(uploadedPhotos)} onClear={() => { onClear(); onCurrentSlotChange(null); setCrop(null); setReplaceSlot(null) }} onDownload={onDownload} onNext={onNext} onPrevious={onPrevious} onSave={() => { onSave(); onCurrentSlotChange(null); setCrop(null); setReplaceSlot(null) }} onShuffle={onShuffle} previousDisabled={frameIndex === 0} progressLabel={orderProgress} saved={completedFrameIds.includes(template.id)} /></div>
