@@ -6,6 +6,7 @@ import type { CustomerTemplate, CustomerTemplateSummary } from '../services/cata
 import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 import { createInitialPhotoSlot } from '../features/photos/initialPhotoSlot'
+import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 
 const maximumPhotos = Number.MAX_SAFE_INTEGER
 const journeyStorageKey = 'selfbooth.customer-journey.v1'
@@ -201,6 +202,17 @@ export function useSelfBooth() {
     if (photos.length) setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
     if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
   }, [uploadedPhotos.length])
+  const addPhotoToTarget = useCallback(async (target: DirectPhotoTarget, file: File) => {
+    if (!supportedPhoto(file)) return
+    setPhotoError(null)
+    let photo: PhotoAsset
+    try { photo = await loadPhotoFile(file) }
+    catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'The image could not be loaded.'); return }
+    if (!mountedRef.current) { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc); return }
+    setUploadedPhotos((current) => [...current, photo].slice(0, maximumPhotos))
+    setFrameSlots((current) => assignPhotoToTarget(current, target, photo))
+    setCompletedFrameIds((current) => current.filter((id) => id !== target.templateId))
+  }, [])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => {
       const known = new Set(current.map((photo) => photo.id))
@@ -315,6 +327,7 @@ export function useSelfBooth() {
     reportPhotoError,
     maximumPhotos,
     addUploadedPhotos,
+    addPhotoToTarget,
     addUploadedAssets,
     resetSessionPhotos,
     deleteUploadedPhoto,
