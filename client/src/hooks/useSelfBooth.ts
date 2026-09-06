@@ -7,6 +7,7 @@ import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 import { createInitialPhotoSlot } from '../features/photos/initialPhotoSlot'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
+import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 
 const maximumPhotos = Number.MAX_SAFE_INTEGER
@@ -218,6 +219,25 @@ export function useSelfBooth() {
     setFrameSlots((current) => assignPhotoToTarget(current, target, photo))
     setCompletedFrameIds((current) => current.filter((id) => id !== target.templateId))
   }, [])
+  const addPhotosToFrame = useCallback(async (target: FramePhotoTarget, files: File[]) => {
+    const capacity = target.emptySlotIndices.length
+    const candidates = files.filter(supportedPhoto).slice(0, capacity)
+    if (!candidates.length) return
+    setPhotoError(null)
+    const results = await loadPhotos(candidates)
+    const photos = results.filter((result): result is PromiseFulfilledResult<PhotoAsset> => result.status === 'fulfilled').map((result) => result.value)
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (!mountedRef.current) {
+      photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
+      return
+    }
+    if (photos.length) {
+      setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
+      setFrameSlots((current) => assignPhotosToFrameTarget(current, target, photos))
+      setCompletedFrameIds((current) => current.filter((id) => id !== target.templateId))
+    }
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
+  }, [])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => {
       const known = new Set(current.map((photo) => photo.id))
@@ -333,6 +353,7 @@ export function useSelfBooth() {
     maximumPhotos,
     addUploadedPhotos,
     addPhotoToTarget,
+    addPhotosToFrame,
     addUploadedAssets,
     resetSessionPhotos,
     deleteUploadedPhoto,
