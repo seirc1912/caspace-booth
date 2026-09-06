@@ -87,6 +87,7 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
   async removeItem(draft: PrintOrderDraft, item: PrintOrderItem) {
     const removed = await supabase.storage.from(bucket).remove([item.storagePath])
     if (removed.error) throw new Error(removed.error.message)
+    uploadedPathsByOrder.get(draft.id)?.delete(item.storagePath)
     const { error } = await supabase.rpc('customer_remove_print_order_item', { p_order_id: draft.id, p_edit_token: draft.editToken, p_template_id: item.templateId })
     if (error) throw new Error(error.message)
   }
