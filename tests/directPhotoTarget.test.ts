@@ -33,6 +33,7 @@ test('replacement receives a fresh centered 100% contain transform', () => {
   assert.deepEqual(next.frame?.[0], {
     photo: photo('replacement'),
     fit: 'contain',
+    filter: 'none',
     transform: { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
   })
 })

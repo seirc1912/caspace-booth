@@ -1,6 +1,7 @@
 import type { BrandingConfig } from '../../../types/branding'
 import type { FilledSlot, PrintTemplate, TemplateElement, TemplateVariable } from '../../../types/selfBooth'
 import { basePhotoFitScale } from '../../photos/photoFit'
+import { drawWithPhotoFilter } from '../../photos/photoFilter'
 import { fillPhotoSlotBacking } from '../../photos/photoSlotBacking'
 
 export type ImageExportFormat = 'png' | 'jpg'
@@ -127,7 +128,7 @@ function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, s
   context.translate(x + width / 2 + transform.x * width, y + height / 2 + transform.y * height)
   context.rotate(transform.rotation * Math.PI / 180)
   context.scale(transform.flipX ? -transform.zoom : transform.zoom, transform.flipY ? -transform.zoom : transform.zoom)
-  context.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
+  drawWithPhotoFilter(context, slot.filter, () => context.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight))
   context.restore()
 }
 
