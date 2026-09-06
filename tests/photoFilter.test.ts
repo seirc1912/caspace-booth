@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { drawWithPhotoFilter, photoFilterCss, withPhotoFilter } from '../client/src/features/photos/photoFilter'
+import { drawWithPhotoFilter, grayscaleRgbaPixels, photoFilterCss, withPhotoFilter } from '../client/src/features/photos/photoFilter'
 import type { FilledSlot, PhotoAsset } from '../client/src/types/selfBooth'
 
 const photo: PhotoAsset = { id: 'photo', src: 'blob:photo', alt: 'Photo', source: 'phone' }
@@ -46,4 +46,24 @@ test('final rendering grayscales only the customer photo operation', () => {
 
   assert.deepEqual(operations, ['frame:none', 'photo:grayscale(1)', 'template:none'])
   assert.equal(context.filter, 'none')
+})
+
+test('export fallback changes actual B&W photo pixels without touching alpha or the original source', () => {
+  const original = new Uint8ClampedArray([220, 40, 10, 128, 10, 180, 240, 255])
+  const rendered = grayscaleRgbaPixels(new Uint8ClampedArray(original))
+
+  assert.deepEqual([...rendered], [76, 76, 76, 128, 148, 148, 148, 255])
+  assert.deepEqual([...original], [220, 40, 10, 128, 10, 180, 240, 255])
+})
+
+test('mixed export pixels keep original photos, frame color, and white backing unchanged', () => {
+  const blackAndWhitePhoto = grayscaleRgbaPixels(new Uint8ClampedArray([200, 20, 40, 255]))
+  const originalPhoto = new Uint8ClampedArray([20, 80, 220, 255])
+  const frame = new Uint8ClampedArray([240, 90, 30, 255])
+  const whiteBacking = new Uint8ClampedArray([255, 255, 255, 255])
+
+  assert.deepEqual([...blackAndWhitePhoto], [60, 60, 60, 255])
+  assert.deepEqual([...originalPhoto], [20, 80, 220, 255])
+  assert.deepEqual([...frame], [240, 90, 30, 255])
+  assert.deepEqual([...whiteBacking], [255, 255, 255, 255])
 })

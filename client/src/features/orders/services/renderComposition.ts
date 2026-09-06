@@ -1,7 +1,7 @@
 import type { BrandingConfig } from '../../../types/branding'
 import type { FilledSlot, PrintTemplate, TemplateElement, TemplateVariable } from '../../../types/selfBooth'
 import { basePhotoFitScale } from '../../photos/photoFit'
-import { drawWithPhotoFilter } from '../../photos/photoFilter'
+import { grayscaleRgbaPixels } from '../../photos/photoFilter'
 import { fillPhotoSlotBacking } from '../../photos/photoSlotBacking'
 
 export type ImageExportFormat = 'png' | 'jpg'
@@ -112,7 +112,20 @@ function framePath(context: CanvasRenderingContext2D, x: number, y: number, widt
   else context.rect(x, y, width, height)
 }
 
-function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, slot: FilledSlot, x: number, y: number, width: number, height: number, mask: 'rectangle' | 'rounded' | 'circle' | 'ellipse', radius: number) {
+function grayscalePhotoSource(image: HTMLImageElement) {
+  const canvas = document.createElement('canvas')
+  canvas.width = image.naturalWidth
+  canvas.height = image.naturalHeight
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) throw new Error('Canvas rendering is unavailable on this device.')
+  context.drawImage(image, 0, 0)
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+  grayscaleRgbaPixels(imageData.data)
+  context.putImageData(imageData, 0, 0)
+  return canvas
+}
+
+function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, source: CanvasImageSource, slot: FilledSlot, x: number, y: number, width: number, height: number, mask: 'rectangle' | 'rounded' | 'circle' | 'ellipse', radius: number) {
   const transform = slot.transform
   const baseScale = basePhotoFitScale(
     { width: image.naturalWidth, height: image.naturalHeight },
@@ -128,7 +141,7 @@ function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, s
   context.translate(x + width / 2 + transform.x * width, y + height / 2 + transform.y * height)
   context.rotate(transform.rotation * Math.PI / 180)
   context.scale(transform.flipX ? -transform.zoom : transform.zoom, transform.flipY ? -transform.zoom : transform.zoom)
-  drawWithPhotoFilter(context, slot.filter, () => context.drawImage(image, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight))
+  context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
   context.restore()
 }
 
@@ -193,6 +206,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   canvas.width = template.canvas.width; canvas.height = template.canvas.height
   const context = canvas.getContext('2d', { alpha: format === 'png' })
   if (!context) throw new Error('Canvas rendering is unavailable on this device.')
+  const grayscaleSources = new Map<string, HTMLCanvasElement>()
   options.onProgress?.(5)
   if (format === 'jpg') { context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height) }
   if (template.backgroundColor && template.backgroundColor !== 'transparent') { context.fillStyle = template.backgroundColor; context.fillRect(0, 0, canvas.width, canvas.height) }
@@ -209,12 +223,18 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
       const definition = layer.definition; const slot = slots[layer.index]
       if (slot && definition.visible !== false) {
         const image = await loadImage(slot.photo.src, options.assetCache)
+        let source: CanvasImageSource = image
+        if (slot.filter === 'grayscale') {
+          let grayscale = grayscaleSources.get(slot.photo.src)
+          if (!grayscale) { grayscale = grayscalePhotoSource(image); grayscaleSources.set(slot.photo.src, grayscale) }
+          source = grayscale
+        }
         context.save(); context.globalAlpha = definition.opacity ?? 1
         context.translate(definition.x + definition.width / 2, definition.y + definition.height / 2)
         context.rotate(definition.rotation * Math.PI / 180)
         context.translate(-(definition.x + definition.width / 2), -(definition.y + definition.height / 2))
         if (definition.shadow?.blur) { context.shadowColor = definition.shadow.color; context.shadowBlur = definition.shadow.blur; context.shadowOffsetX = definition.shadow.offsetX; context.shadowOffsetY = definition.shadow.offsetY }
-        drawPhoto(context, image, slot, definition.x, definition.y, definition.width, definition.height, definition.mask ?? 'rectangle', definition.borderRadius)
+        drawPhoto(context, image, source, slot, definition.x, definition.y, definition.width, definition.height, definition.mask ?? 'rectangle', definition.borderRadius)
         context.shadowColor = 'transparent'
         if (definition.borderWidth) { framePath(context, definition.x, definition.y, definition.width, definition.height, definition.mask ?? 'rectangle', definition.borderRadius); context.strokeStyle = definition.borderColor ?? '#000000'; context.lineWidth = definition.borderWidth; context.stroke() }
         context.restore()
