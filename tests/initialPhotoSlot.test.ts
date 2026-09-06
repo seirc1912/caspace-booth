@@ -6,7 +6,7 @@ import type { PhotoAsset } from '../client/src/types/selfBooth'
 const photo: PhotoAsset = { id: 'photo', src: 'blob:photo', alt: 'Original photo', source: 'phone' }
 
 test('new and replacement photos initialize centered at a sensible contain fit', () => {
-  assert.deepEqual(createInitialPhotoSlot(photo), { photo, fit: 'contain', transform: initialPhotoTransform })
+  assert.deepEqual(createInitialPhotoSlot(photo), { photo, fit: 'contain', filter: 'none', transform: initialPhotoTransform })
 })
 
 test('each initialization receives independent transform state', () => {

@@ -155,4 +155,5 @@ export interface FilledSlot {
   photo: PhotoAsset
   transform: ImageTransform
   fit?: 'contain' | 'cover'
+  filter?: 'none' | 'grayscale'
 }

@@ -7,6 +7,7 @@ import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 import { createInitialPhotoSlot } from '../features/photos/initialPhotoSlot'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
+import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 
 const maximumPhotos = Number.MAX_SAFE_INTEGER
 const journeyStorageKey = 'selfbooth.customer-journey.v1'
@@ -170,6 +171,10 @@ export function useSelfBooth() {
 
   const updateFit = useCallback((index: number, fit: 'contain' | 'cover') => {
     setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? { ...slot, fit } : slot))
+  }, [setSlots])
+
+  const updateFilter = useCallback((index: number, filter: PhotoFilter) => {
+    setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? withPhotoFilter(slot, filter) : slot))
   }, [setSlots])
 
   const removeSlot = useCallback((index: number) => {
@@ -340,6 +345,7 @@ export function useSelfBooth() {
     replaceSlot,
     updateTransform,
     updateFit,
+    updateFilter,
     removeSlot,
     clearAll: () => setSlots((current) => current.map(() => null)),
     randomFill,
