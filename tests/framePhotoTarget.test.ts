@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assignPhotosToFrameTarget, createFramePhotoTarget } from '../client/src/features/photos/framePhotoTarget'
+import { assignPhotoToTarget } from '../client/src/features/photos/directPhotoTarget'
 import { initialPhotoTransform } from '../client/src/features/photos/initialPhotoSlot'
+import { basePhotoFitScale } from '../client/src/features/photos/photoFit'
 import type { FilledSlot, PhotoAsset } from '../client/src/types/selfBooth'
 
 const photo = (index: number): PhotoAsset => ({ id: `photo-${index}`, src: `blob:photo-${index}`, alt: `Photo ${index}`, source: 'phone' })
@@ -48,4 +50,18 @@ test('returning from a backgrounded picker targets the captured frame and skips 
   const result = assignPhotosToFrameTarget(current, createFramePhotoTarget('first', capturedSlots), [photo(1), photo(2), photo(3)])
   assert.deepEqual(result.first.map((slot) => slot?.photo.id ?? null), ['photo-9', 'photo-1', 'photo-2'])
   assert.strictEqual(result.second, current.second)
+})
+
+test('single and multi add initialize the same photo in the same slot identically', () => {
+  const selected = photo(1)
+  const single = assignPhotoToTarget({}, { templateId: 'frame', slotIndex: 0, slotCount: 1 }, selected)
+  const multi = assignPhotosToFrameTarget({}, createFramePhotoTarget('frame', [null]), [selected])
+  assert.deepEqual(multi.frame?.[0], single.frame?.[0])
+})
+
+test('each assigned photo computes its contain fit independently for its actual slot aspect ratio', () => {
+  const image = { width: 1200, height: 800 }
+  assert.equal(basePhotoFitScale(image, { width: 300, height: 600 }, 'contain'), 0.25)
+  assert.equal(basePhotoFitScale(image, { width: 600, height: 300 }, 'contain'), 0.375)
+  assert.equal(basePhotoFitScale(image, { width: 400, height: 400 }, 'contain'), 1 / 3)
 })
