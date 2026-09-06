@@ -32,7 +32,7 @@ export function EditorToolbar({ canContinue, canOrder, onAutoFill, onDownload, o
       </div>
       <div className="mt-1 grid grid-cols-3 gap-1 md:mt-0 md:w-[22rem]">
         <button aria-label="Save" className={`${primaryActionClass} bg-sky-600`} disabled={!canContinue || downloading} onClick={onSave} type="button">{saved ? 'Saved' : 'Save'}</button>
-        {onDownload ? <button aria-label="Download" className={`${primaryActionClass} bg-stone-950`} disabled={!canContinue || downloading} onClick={onDownload} type="button">{downloading ? 'Exporting' : 'Download'}</button> : <span />}
+        {onDownload ? <button aria-label="Save Photo" className={`${primaryActionClass} bg-stone-950`} disabled={!canContinue || downloading} onClick={onDownload} type="button">{downloading ? 'Preparing' : 'Save Photo'}</button> : <span />}
         <button aria-busy={downloading} aria-label={nextLabel} className={`${primaryActionClass} bg-[var(--brand-secondary)]`} disabled={!(canOrder ?? canContinue) || downloading} onClick={onNext} type="button">{downloading ? progressLabel ?? 'Ordering…' : nextLabel}</button>
       </div>
     </div>
