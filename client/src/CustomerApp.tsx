@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { EditorErrorBoundary } from './components/editor/EditorErrorBoundary'
 import { useBranding } from './contexts/BrandingContext'
 import type { PrintOrderDraft, PrintOrderItem } from './features/orders/repositories/PrintOrderRepository'
+import { completedFramesForOrder } from './features/orders/completedFrames'
 import { saveComposition } from './features/orders/services/saveComposition'
 import { printOrderRepository } from './features/orders/services/orderServiceInstance'
 import { compositionAssetSources, RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
@@ -46,10 +47,11 @@ export function CustomerApp() {
     index,
     slots: template.id === booth.template.id ? booth.slots : booth.frameSlots[template.id] ?? template.slots.map(() => null),
   }))
-  const readyFrameCount = roomFrames.filter((frame) => frame.slots.length === frame.template.slots.length && frame.slots.every(Boolean)).length
+  const completedFrames = completedFramesForOrder(roomFrames)
+  const readyFrameCount = completedFrames.length
   const requiredFrameCount = booth.roomTemplateSummaries.length
-  const canOrder = requiredFrameCount > 0 && roomFrames.length === requiredFrameCount && readyFrameCount === requiredFrameCount
-  const incompleteOrderMessage = `Please complete all frames. ${readyFrameCount} of ${requiredFrameCount} frames are ready.`
+  const canOrder = readyFrameCount > 0
+  const incompleteOrderMessage = 'Please complete at least one frame before ordering.'
 
   const enterRoom = async (boothId: string) => {
     booth.resetSessionPhotos()
@@ -86,12 +88,17 @@ export function CustomerApp() {
       const draft = orderDraftRef.current ?? await printOrderRepository.createDraft(booth.phoneNumber, booth.room.id)
       const draftMs = performance.now() - draftStartedAt
       if (!orderDraftRef.current) { orderDraftRef.current = draft; setOrderDraft(draft) }
-      const populatedIds = new Set(roomFrames.map((frame) => frame.template.id))
+      const populatedIds = new Set(completedFrames.map((frame) => frame.template.id))
       for (const [templateId, item] of Object.entries(orderItemsRef.current)) {
-        if (!populatedIds.has(templateId)) await printOrderRepository.removeItem(draft, item)
+        if (!populatedIds.has(templateId)) {
+          await printOrderRepository.removeItem(draft, item)
+          delete orderItemsRef.current[templateId]
+          delete uploadedFrameSlotsRef.current[templateId]
+        }
       }
-      const pendingFrames = roomFrames.filter((frame) => !orderItemsRef.current[frame.template.id] || uploadedFrameSlotsRef.current[frame.template.id] !== frame.slots)
-      let completed = roomFrames.length - pendingFrames.length
+      setOrderItems({ ...orderItemsRef.current })
+      const pendingFrames = completedFrames.filter((frame) => !orderItemsRef.current[frame.template.id] || uploadedFrameSlotsRef.current[frame.template.id] !== frame.slots)
+      let completed = completedFrames.length - pendingFrames.length
       const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
       const networkConcurrency = mobile ? 1 : 2
       const activeUploads = new Set<Promise<void>>()
@@ -99,14 +106,14 @@ export function CustomerApp() {
         for (let pendingIndex = 0; pendingIndex < pendingFrames.length; pendingIndex += 1) {
           const frame = pendingFrames[pendingIndex]!
           if (activeUploads.size >= networkConcurrency) await Promise.race(activeUploads)
-          setOrderProgress(`Preparing prints ${completed + 1}/${roomFrames.length}…`)
+          setOrderProgress(`Preparing prints ${completed + 1}/${completedFrames.length}…`)
           let timing: RenderTiming | undefined
           let rendered
           try { rendered = await renderComposition(frame.template, frame.slots, { branding, createPreview: false, assetCache, onTiming: (value) => { timing = value } }) }
           catch (reason) { throw new Error(`Failed to render print image: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }) }
           const nextFrame = pendingFrames[pendingIndex + 1]
           assetCache.retainOnly(nextFrame ? compositionAssetSources(nextFrame.template, nextFrame.slots, branding) : [])
-          setOrderProgress(`Uploading prints ${completed + 1}/${roomFrames.length}…`)
+          setOrderProgress(`Uploading prints ${completed + 1}/${completedFrames.length}…`)
           const upload = (async () => {
             let networkTiming: { uploadMs: number; itemRpcMs: number } | undefined
             const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, rendered.print, frame.index, (value) => { networkTiming = value })
