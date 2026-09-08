@@ -9,6 +9,17 @@ import { createInitialPhotoSlot } from '../features/photos/initialPhotoSlot'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
+import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
+import {
+  cleanupAbandonedEditorDrafts,
+  clearEditorDraft,
+  createEditorDraftMetadata,
+  editorDraftScopeKey,
+  loadEditorDraft,
+  persistPhotoOnce,
+  saveEditorDraft,
+  type EditorDraftIdentity,
+} from '../features/drafts/editorDraftStore'
 
 const maximumPhotos = Number.MAX_SAFE_INTEGER
 const journeyStorageKey = 'selfbooth.customer-journey.v1'
@@ -28,7 +39,7 @@ async function loadPhotos(files: File[], concurrency = 2) {
   return results
 }
 
-export function useSelfBooth() {
+export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const [rooms, setRooms] = useState<Room[]>([])
   const [templateSummaries, setTemplateSummaries] = useState<CustomerTemplateSummary[]>([])
   const [templateDetails, setTemplateDetails] = useState<Record<string, CustomerTemplate>>({})
@@ -46,8 +57,20 @@ export function useSelfBooth() {
   const [uploadedPhotos, setUploadedPhotos] = useState<PhotoAsset[]>([])
   const uploadedPhotosRef = useRef<PhotoAsset[]>([])
   const mountedRef = useRef(true)
+  const [draftReady, setDraftReady] = useState(() => !customerSession)
+  const hydratedDraftScopeRef = useRef<string | null>(null)
+  const suppressedDraftScopesRef = useRef(new Set<string>())
+  const metadataTimerRef = useRef<number | null>(null)
+  const persistedPhotoKeysRef = useRef(new Set<string>())
+  const persistingPhotoKeysRef = useRef(new Set<string>())
   const [photoError, setPhotoError] = useState<string | null>(null)
   const lastRandomOrder = useRef('')
+  const draftIdentity = useMemo<EditorDraftIdentity | null>(() => customerSession ? {
+    sessionId: customerSession.sessionId,
+    boothId: customerSession.boothId,
+    phoneNumber: customerSession.phoneNumber,
+  } : null, [customerSession])
+  const draftScopeKey = useMemo(() => draftIdentity ? editorDraftScopeKey(draftIdentity) : null, [draftIdentity])
   useEffect(() => { uploadedPhotosRef.current = uploadedPhotos }, [uploadedPhotos])
   useEffect(() => {
     let active = true
@@ -318,8 +341,95 @@ export function useSelfBooth() {
   const clearPhotoError = useCallback((expected?: string) => setPhotoError((current) => expected && current !== expected ? current : null), [])
   const reportPhotoError = useCallback((message: string) => setPhotoError(message), [])
 
+  useEffect(() => {
+    let active = true
+    if (!draftIdentity || !draftScopeKey) {
+      hydratedDraftScopeRef.current = null
+      queueMicrotask(() => { if (active) setDraftReady(true) })
+      return () => { active = false }
+    }
+    hydratedDraftScopeRef.current = null
+    queueMicrotask(() => { if (active) setDraftReady(false) })
+    void loadEditorDraft(draftIdentity).then((draft) => {
+      if (!active) {
+        draft?.uploadedPhotos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
+        return
+      }
+      if (draft) {
+        setPhoneNumberState(draftIdentity.phoneNumber)
+        setSelectedRoomIdState(draft.roomId)
+        setSelectedTemplateIdState(draft.selectedTemplateId)
+        setCurrentSlot(draft.currentSlot)
+        setFrameSlots(draft.frameSlots)
+        setCompletedFrameIds(draft.completedFrameIds)
+        setUploadedPhotos(draft.uploadedPhotos)
+        persistJourney({ phoneNumber: draftIdentity.phoneNumber, selectedRoomId: draft.roomId, selectedTemplateId: draft.selectedTemplateId })
+      }
+    }).catch((reason) => { console.warn('[editor draft] restore unavailable', reason) }).finally(() => {
+      if (active) { hydratedDraftScopeRef.current = draftScopeKey; setDraftReady(true) }
+    })
+    return () => { active = false }
+  }, [draftIdentity, draftScopeKey])
+
+  useEffect(() => {
+    if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey)) return
+    uploadedPhotos.forEach((photo) => {
+      const key = `${draftScopeKey}:${photo.id}`
+      if (persistedPhotoKeysRef.current.has(key) || persistingPhotoKeysRef.current.has(key)) return
+      persistingPhotoKeysRef.current.add(key)
+      void persistPhotoOnce(draftScopeKey, photo)
+        .then(() => persistedPhotoKeysRef.current.add(key))
+        .catch((reason) => console.warn('[editor draft] photo persistence unavailable', reason))
+        .finally(() => persistingPhotoKeysRef.current.delete(key))
+    })
+  }, [draftScopeKey, draftReady, uploadedPhotos])
+
+  const currentDraftMetadata = useCallback(() => draftIdentity ? createEditorDraftMetadata(draftIdentity, {
+    roomId: selectedRoomId,
+    selectedTemplateId,
+    currentSlot,
+    frameSlots,
+    completedFrameIds,
+  }, uploadedPhotos.map((photo) => photo.id)) : null, [completedFrameIds, currentSlot, draftIdentity, frameSlots, selectedRoomId, selectedTemplateId, uploadedPhotos])
+
+  useEffect(() => {
+    if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey) || !selectedRoomId || !selectedTemplateId) return
+    if (metadataTimerRef.current !== null) window.clearTimeout(metadataTimerRef.current)
+    metadataTimerRef.current = window.setTimeout(() => {
+      metadataTimerRef.current = null
+      const metadata = currentDraftMetadata()
+      if (metadata) void saveEditorDraft(metadata).catch((reason) => console.warn('[editor draft] metadata persistence unavailable', reason))
+    }, 400)
+    return () => { if (metadataTimerRef.current !== null) { window.clearTimeout(metadataTimerRef.current); metadataTimerRef.current = null } }
+  }, [currentDraftMetadata, draftReady, draftScopeKey, selectedRoomId, selectedTemplateId])
+
+  useEffect(() => {
+    const flush = () => {
+      if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey)) return
+      const metadata = currentDraftMetadata()
+      if (metadata) void saveEditorDraft(metadata).catch((reason) => console.warn('[editor draft] lifecycle flush unavailable', reason))
+    }
+    const onVisibilityChange = () => { if (document.visibilityState === 'hidden') flush() }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    window.addEventListener('pagehide', flush)
+    return () => { document.removeEventListener('visibilitychange', onVisibilityChange); window.removeEventListener('pagehide', flush) }
+  }, [currentDraftMetadata, draftScopeKey])
+
+  useEffect(() => {
+    void cleanupAbandonedEditorDrafts(draftScopeKey).catch((reason) => console.warn('[editor draft] cleanup unavailable', reason))
+  }, [draftScopeKey])
+
+  const clearLocalDraft = useCallback(async () => {
+    if (!draftScopeKey) return
+    suppressedDraftScopesRef.current.add(draftScopeKey)
+    if (metadataTimerRef.current !== null) { window.clearTimeout(metadataTimerRef.current); metadataTimerRef.current = null }
+    try { await clearEditorDraft(draftScopeKey) }
+    catch (reason) { console.warn('[editor draft] cleanup unavailable', reason) }
+  }, [draftScopeKey])
+
   return {
     view,
+    draftReady,
     setView,
     template,
     templateReady: Boolean(selectedTemplateId && templateDetails[selectedTemplateId]),
@@ -350,6 +460,7 @@ export function useSelfBooth() {
     photoError,
     clearPhotoError,
     reportPhotoError,
+    clearLocalDraft,
     maximumPhotos,
     addUploadedPhotos,
     addPhotoToTarget,
