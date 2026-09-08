@@ -12,6 +12,11 @@ export interface EditorDraftIdentity {
   phoneNumber: string
 }
 
+export interface ActiveEditorDraftLocator extends EditorDraftIdentity {
+  scopeKey: string
+  updatedAt: number
+}
+
 interface StoredPhoto {
   key: string
   scopeKey: string
@@ -85,6 +90,37 @@ const withDatabase = async <T>(operation: (database: IDBDatabase) => Promise<T>)
 
 export function editorDraftScopeKey(identity: EditorDraftIdentity) {
   return `v1:${encodeURIComponent(identity.sessionId)}:${encodeURIComponent(identity.boothId)}:${encodeURIComponent(identity.phoneNumber)}`
+}
+
+const locatorKey = (phoneNumber: string) => `selfbooth.active-editor-draft.v1:${encodeURIComponent(phoneNumber)}`
+
+export function saveActiveEditorDraftLocator(identity: EditorDraftIdentity, storage: Pick<Storage, 'setItem'> = localStorage, now = Date.now()) {
+  const locator: ActiveEditorDraftLocator = { ...identity, scopeKey: editorDraftScopeKey(identity), updatedAt: now }
+  storage.setItem(locatorKey(identity.phoneNumber), JSON.stringify(locator))
+  return locator
+}
+
+export function findActiveEditorDraftLocator(phoneNumber: string, storage: Pick<Storage, 'getItem' | 'removeItem'> = localStorage, now = Date.now()): EditorDraftIdentity | null {
+  const key = locatorKey(phoneNumber)
+  try {
+    const locator = JSON.parse(storage.getItem(key) ?? 'null') as ActiveEditorDraftLocator | null
+    if (!locator || locator.phoneNumber !== phoneNumber || typeof locator.sessionId !== 'string' || !locator.sessionId || typeof locator.boothId !== 'string' || !locator.boothId || !Number.isFinite(locator.updatedAt) || locator.scopeKey !== editorDraftScopeKey(locator) || now - locator.updatedAt > editorDraftTtlMs) {
+      if (locator) storage.removeItem(key)
+      return null
+    }
+    return { sessionId: locator.sessionId, boothId: locator.boothId, phoneNumber: locator.phoneNumber }
+  } catch {
+    try { storage.removeItem(key) } catch { /* Persistent locator storage is best-effort. */ }
+    return null
+  }
+}
+
+export function clearActiveEditorDraftLocator(identity: EditorDraftIdentity, storage: Pick<Storage, 'getItem' | 'removeItem'> = localStorage) {
+  const key = locatorKey(identity.phoneNumber)
+  try {
+    const locator = JSON.parse(storage.getItem(key) ?? 'null') as ActiveEditorDraftLocator | null
+    if (locator?.scopeKey === editorDraftScopeKey(identity)) storage.removeItem(key)
+  } catch { try { storage.removeItem(key) } catch { /* Persistent locator storage is best-effort. */ } }
 }
 
 export function serializeFrameSlots(frameSlots: Record<string, Array<FilledSlot | null>>) {

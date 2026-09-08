@@ -12,11 +12,14 @@ import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilte
 import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
 import {
   cleanupAbandonedEditorDrafts,
+  clearActiveEditorDraftLocator,
   clearEditorDraft,
   createEditorDraftMetadata,
   editorDraftScopeKey,
+  findActiveEditorDraftLocator,
   loadEditorDraft,
   persistPhotoOnce,
+  saveActiveEditorDraftLocator,
   saveEditorDraft,
   type EditorDraftIdentity,
 } from '../features/drafts/editorDraftStore'
@@ -58,6 +61,8 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const uploadedPhotosRef = useRef<PhotoAsset[]>([])
   const mountedRef = useRef(true)
   const [draftReady, setDraftReady] = useState(() => !customerSession)
+  const [hydratedDraftScope, setHydratedDraftScope] = useState<string | null>(null)
+  const [recoveryIdentity, setRecoveryIdentity] = useState<EditorDraftIdentity | null>(null)
   const hydratedDraftScopeRef = useRef<string | null>(null)
   const suppressedDraftScopesRef = useRef(new Set<string>())
   const metadataTimerRef = useRef<number | null>(null)
@@ -65,11 +70,11 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const persistingPhotoKeysRef = useRef(new Set<string>())
   const [photoError, setPhotoError] = useState<string | null>(null)
   const lastRandomOrder = useRef('')
-  const draftIdentity = useMemo<EditorDraftIdentity | null>(() => customerSession ? {
+  const draftIdentity = useMemo<EditorDraftIdentity | null>(() => recoveryIdentity ?? (customerSession ? {
     sessionId: customerSession.sessionId,
     boothId: customerSession.boothId,
     phoneNumber: customerSession.phoneNumber,
-  } : null, [customerSession])
+  } : null), [customerSession, recoveryIdentity])
   const draftScopeKey = useMemo(() => draftIdentity ? editorDraftScopeKey(draftIdentity) : null, [draftIdentity])
   useEffect(() => { uploadedPhotosRef.current = uploadedPhotos }, [uploadedPhotos])
   useEffect(() => {
@@ -110,7 +115,14 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     })
   }, [selectedTemplateId, template.slots])
   const persistJourney = (next: { phoneNumber: string; selectedRoomId: string; selectedTemplateId: string }) => sessionStorage.setItem(journeyStorageKey, JSON.stringify(next))
-  const setPhoneNumber = (value: string) => { setPhoneNumberState(value); persistJourney({ phoneNumber: value, selectedRoomId, selectedTemplateId }) }
+  const setPhoneNumber = (value: string) => {
+    let recovery: EditorDraftIdentity | null = null
+    try { recovery = findActiveEditorDraftLocator(value) } catch { /* Persistent locator storage is best-effort. */ }
+    setRecoveryIdentity(recovery)
+    setPhoneNumberState(value)
+    persistJourney({ phoneNumber: value, selectedRoomId: recovery?.boothId ?? '', selectedTemplateId: '' })
+    return Boolean(recovery)
+  }
   const ensureTemplateDetail = useCallback(async (id: string) => {
     const existing = templateDetails[id]
     if (existing) return existing
@@ -345,17 +357,23 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     let active = true
     if (!draftIdentity || !draftScopeKey) {
       hydratedDraftScopeRef.current = null
-      queueMicrotask(() => { if (active) setDraftReady(true) })
+      queueMicrotask(() => { if (active) { setHydratedDraftScope(null); setDraftReady(true) } })
       return () => { active = false }
     }
     hydratedDraftScopeRef.current = null
-    queueMicrotask(() => { if (active) setDraftReady(false) })
-    void loadEditorDraft(draftIdentity).then((draft) => {
+    queueMicrotask(() => { if (active) { setHydratedDraftScope(null); setDraftReady(false) } })
+    void loadEditorDraft(draftIdentity).then(async (draft) => {
       if (!active) {
         draft?.uploadedPhotos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
         return
       }
       if (draft) {
+        const detail = await loadPublishedTemplateDetail(draft.selectedTemplateId)
+        if (!active) {
+          draft.uploadedPhotos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
+          return
+        }
+        setTemplateDetails((current) => current[draft.selectedTemplateId] ? current : { ...current, [draft.selectedTemplateId]: detail })
         setPhoneNumberState(draftIdentity.phoneNumber)
         setSelectedRoomIdState(draft.roomId)
         setSelectedTemplateIdState(draft.selectedTemplateId)
@@ -364,12 +382,15 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
         setCompletedFrameIds(draft.completedFrameIds)
         setUploadedPhotos(draft.uploadedPhotos)
         persistJourney({ phoneNumber: draftIdentity.phoneNumber, selectedRoomId: draft.roomId, selectedTemplateId: draft.selectedTemplateId })
+      } else if (!customerSession) {
+        try { clearActiveEditorDraftLocator(draftIdentity) } catch { /* Persistent locator storage is best-effort. */ }
+        setRecoveryIdentity(null)
       }
     }).catch((reason) => { console.warn('[editor draft] restore unavailable', reason) }).finally(() => {
-      if (active) { hydratedDraftScopeRef.current = draftScopeKey; setDraftReady(true) }
+      if (active) { hydratedDraftScopeRef.current = draftScopeKey; setHydratedDraftScope(draftScopeKey); setDraftReady(true) }
     })
     return () => { active = false }
-  }, [draftIdentity, draftScopeKey])
+  }, [customerSession, draftIdentity, draftScopeKey])
 
   useEffect(() => {
     if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey)) return
@@ -398,22 +419,26 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     metadataTimerRef.current = window.setTimeout(() => {
       metadataTimerRef.current = null
       const metadata = currentDraftMetadata()
-      if (metadata) void saveEditorDraft(metadata).catch((reason) => console.warn('[editor draft] metadata persistence unavailable', reason))
+      if (metadata) void saveEditorDraft(metadata)
+        .then(() => { try { saveActiveEditorDraftLocator(draftIdentity!) } catch { /* Persistent locator storage is best-effort. */ } })
+        .catch((reason) => console.warn('[editor draft] metadata persistence unavailable', reason))
     }, 400)
     return () => { if (metadataTimerRef.current !== null) { window.clearTimeout(metadataTimerRef.current); metadataTimerRef.current = null } }
-  }, [currentDraftMetadata, draftReady, draftScopeKey, selectedRoomId, selectedTemplateId])
+  }, [currentDraftMetadata, draftIdentity, draftReady, draftScopeKey, selectedRoomId, selectedTemplateId])
 
   useEffect(() => {
     const flush = () => {
       if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey)) return
       const metadata = currentDraftMetadata()
-      if (metadata) void saveEditorDraft(metadata).catch((reason) => console.warn('[editor draft] lifecycle flush unavailable', reason))
+      if (metadata) void saveEditorDraft(metadata)
+        .then(() => { try { saveActiveEditorDraftLocator(draftIdentity!) } catch { /* Persistent locator storage is best-effort. */ } })
+        .catch((reason) => console.warn('[editor draft] lifecycle flush unavailable', reason))
     }
     const onVisibilityChange = () => { if (document.visibilityState === 'hidden') flush() }
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', flush)
     return () => { document.removeEventListener('visibilitychange', onVisibilityChange); window.removeEventListener('pagehide', flush) }
-  }, [currentDraftMetadata, draftScopeKey])
+  }, [currentDraftMetadata, draftIdentity, draftScopeKey])
 
   useEffect(() => {
     void cleanupAbandonedEditorDrafts(draftScopeKey).catch((reason) => console.warn('[editor draft] cleanup unavailable', reason))
@@ -425,11 +450,14 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     if (metadataTimerRef.current !== null) { window.clearTimeout(metadataTimerRef.current); metadataTimerRef.current = null }
     try { await clearEditorDraft(draftScopeKey) }
     catch (reason) { console.warn('[editor draft] cleanup unavailable', reason) }
-  }, [draftScopeKey])
+    try { if (draftIdentity) clearActiveEditorDraftLocator(draftIdentity) } catch { /* Persistent locator storage is best-effort. */ }
+  }, [draftIdentity, draftScopeKey])
+
+  const detachDraftRecovery = useCallback(() => { setRecoveryIdentity(null) }, [])
 
   return {
     view,
-    draftReady,
+    draftReady: draftReady && (!draftScopeKey || hydratedDraftScope === draftScopeKey),
     setView,
     template,
     templateReady: Boolean(selectedTemplateId && templateDetails[selectedTemplateId]),
@@ -461,6 +489,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     clearPhotoError,
     reportPhotoError,
     clearLocalDraft,
+    detachDraftRecovery,
     maximumPhotos,
     addUploadedPhotos,
     addPhotoToTarget,
