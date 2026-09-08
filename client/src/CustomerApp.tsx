@@ -22,7 +22,13 @@ import { SuccessPage } from './pages/SuccessPage'
 import { TemplateSelectionPage } from './pages/TemplateSelectionPage'
 
 export function CustomerApp() {
-  const booth = useSelfBooth(); const branding = useBranding(); const { pathname, navigate } = usePathname()
+  const branding = useBranding(); const { pathname, navigate } = usePathname()
+  const [customerSession, setCustomerSession] = useState<PhotoLibrarySession | null>(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem('selfbooth.photo-library-session') ?? 'null') as PhotoLibrarySession | null
+    } catch { return null }
+  })
+  const booth = useSelfBooth(customerSession)
   const [orderId, setOrderId] = useState(() => sessionStorage.getItem('selfbooth.last-order-id') ?? '')
   const [downloading, setDownloading] = useState(false)
   const processingOrder = useRef(false)
@@ -34,12 +40,6 @@ export function CustomerApp() {
   const orderItemsRef = useRef<Record<string, PrintOrderItem>>({})
   const uploadedFrameSlotsRef = useRef<Record<string, Array<FilledSlot | null>>>({})
   const debugOrderTiming = import.meta.env.DEV || sessionStorage.getItem('selfbooth.debug-order-timing') === '1'
-  const [customerSession, setCustomerSession] = useState<PhotoLibrarySession | null>(() => {
-    try {
-      return JSON.parse(sessionStorage.getItem('selfbooth.photo-library-session') ?? 'null') as PhotoLibrarySession | null
-    } catch { return null }
-  })
-
   useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError, booth.clearPhotoError)
 
   const roomFrames = booth.roomTemplates.map((template, index) => ({
@@ -54,6 +54,9 @@ export function CustomerApp() {
   const incompleteOrderMessage = 'Please complete at least one frame before ordering.'
 
   const enterRoom = async (boothId: string) => {
+    booth.detachDraftRecovery()
+    setCustomerSession(null)
+    sessionStorage.removeItem('selfbooth.photo-library-session')
     booth.resetSessionPhotos()
     try { await booth.selectRoom(boothId) }
     catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to load this Room’s first frame.'); return }
@@ -139,6 +142,7 @@ export function CustomerApp() {
       if (debugOrderTiming) console.info('[print-order timing]', { draftMs, frames: orderTimings.sort((left, right) => left.frame - right.frame), submitMs, totalMs: performance.now() - orderStartedAt, concurrency: { render: 1, network: networkConcurrency } })
       sessionStorage.setItem('selfbooth.last-order-id', submitted.id)
       setOrderId(submitted.id)
+      await booth.clearLocalDraft()
       navigate('/success')
     } catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to add this image to the Print Order.') }
     finally { assetCache.clear(); processingOrder.current = false; setDownloading(false); setOrderProgress(null) }
@@ -158,17 +162,37 @@ export function CustomerApp() {
   const submitOrder = async () => {
     if (!canOrder) throw new Error(incompleteOrderMessage)
     if (!orderDraft) throw new Error('Add at least one image to the Print Order.')
-    return (await printOrderRepository.submit(orderDraft)).id
+    const submitted = await printOrderRepository.submit(orderDraft)
+    await booth.clearLocalDraft()
+    return submitted.id
+  }
+
+  const finishSuccessfulOrder = (id: string) => {
+    sessionStorage.setItem('selfbooth.last-order-id', id)
+    setOrderId(id)
+    void booth.clearLocalDraft().finally(() => navigate('/success'))
+  }
+
+  const continueFromPhone = (phoneNumber: string) => {
+    if (customerSession?.phoneNumber !== phoneNumber) {
+      setCustomerSession(null)
+      sessionStorage.removeItem('selfbooth.photo-library-session')
+    }
+    const recoveringDraft = booth.setPhoneNumber(phoneNumber)
+    navigate(recoveringDraft ? '/editor' : '/rooms')
   }
 
   useEffect(() => { if (pathname === '/editor' && booth.templateReady && booth.slots.length === 0) booth.openEditor() }, [booth, pathname])
 
-  if (pathname === '/') return <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={(phoneNumber) => { booth.setPhoneNumber(phoneNumber); navigate('/rooms') }} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
+  if (pathname === '/editor' && !booth.draftReady) return null
+  if (pathname === '/editor' && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/editor' && !booth.selectedTemplateId) return <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} />
   if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage canOrder={canOrder} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onNext={saveAndContinue} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSave={booth.completeCurrentFrame} onSelectFrame={booth.selectFrame} onTransform={booth.updateTransform} onFitChange={booth.updateFit} orderProgress={orderProgress} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
-  if (pathname === '/summary' && booth.room) return <RoomSummaryPage completedFrameIds={booth.completedFrameIds} frameSlots={booth.frameSlots} onEdit={(index) => { booth.selectFrame(index); navigate('/editor') }} onRemove={removeOrderItem} onSubmit={submitOrder} onSuccess={(id) => { sessionStorage.setItem('selfbooth.last-order-id', id); setOrderId(id); navigate('/success') }} previewUrls={framePreviews} roomName={booth.room.name} templates={booth.roomTemplates} />
-  if (pathname === '/preview' && booth.room) return <OrderPreviewPage onBack={() => navigate('/editor')} onSuccess={(id) => { sessionStorage.setItem('selfbooth.last-order-id', id); setOrderId(id); navigate('/success') }} phoneNumber={booth.phoneNumber} roomId={booth.room.id} slots={booth.slots} template={booth.template} />
+  if (pathname === '/summary' && booth.room) return <RoomSummaryPage completedFrameIds={booth.completedFrameIds} frameSlots={booth.frameSlots} onEdit={(index) => { booth.selectFrame(index); navigate('/editor') }} onRemove={removeOrderItem} onSubmit={submitOrder} onSuccess={finishSuccessfulOrder} previewUrls={framePreviews} roomName={booth.room.name} templates={booth.roomTemplates} />
+  if (pathname === '/preview' && booth.room) return <OrderPreviewPage onBack={() => navigate('/editor')} onSuccess={finishSuccessfulOrder} phoneNumber={booth.phoneNumber} roomId={booth.room.id} slots={booth.slots} template={booth.template} />
   if (pathname === '/success' && orderId) return <SuccessPage onStartOver={() => { sessionStorage.removeItem('selfbooth.last-order-id'); setOrderId(''); navigate('/') }} orderId={orderId} />
   return <NotFoundPage />
 }
