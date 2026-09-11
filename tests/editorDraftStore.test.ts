@@ -92,6 +92,18 @@ test('replacement metadata retains only the latest photo reference', () => {
   assert.deepEqual([...editorDraftPhotoIds(metadata)], ['photo-2'])
 })
 
+test('All B&W enabled state survives draft hydration with per-slot filters', () => {
+  const photos = [photo(1), photo(2), photo(3)]
+  const frameSlots = { one: [slot(photos[0]!, 0), slot(photos[1]!, 1)], two: [slot(photos[2]!, 2)] }
+  const metadata = createEditorDraftMetadata(identity, {
+    roomId: 'room-a', selectedTemplateId: 'one', currentSlot: 0, frameSlots,
+    completedFrameIds: ['one'], allBwEnabled: true,
+  }, photos.map((asset) => asset.id))
+  const restored = hydrateEditorDraft(metadata, photos)
+
+  assert.equal(restored?.allBwEnabled, true)
+})
+
 test('abandoned draft TTL is a conservative 24 hours', () => {
   assert.equal(editorDraftTtlMs, 24 * 60 * 60 * 1000)
 })
@@ -100,9 +112,9 @@ test('app reinitialization rediscovers and loads the exact IndexedDB draft witho
   const storage = new MemoryStorage()
   const recoveredIdentity = { sessionId: 'reinit-session', boothId: 'room-a', phoneNumber: '84905550123' }
   const photos = Array.from({ length: 9 }, (_, index) => photo(index + 20))
-  const frameSlots = { 'frame-7': photos.map(slot) }
+  const frameSlots = { 'frame-7': photos.map((asset, index) => ({ ...slot(asset, index), filter: 'grayscale' as const })) }
   const metadata = createEditorDraftMetadata(recoveredIdentity, {
-    roomId: 'room-a', selectedTemplateId: 'frame-7', currentSlot: 4, frameSlots, completedFrameIds: ['frame-7'],
+    roomId: 'room-a', selectedTemplateId: 'frame-7', currentSlot: 4, frameSlots, completedFrameIds: ['frame-7'], allBwEnabled: true,
   }, photos.map((asset) => asset.id))
   const scopeKey = editorDraftScopeKey(recoveredIdentity)
 
@@ -125,6 +137,7 @@ test('app reinitialization rediscovers and loads the exact IndexedDB draft witho
   assert.deepEqual(restored?.frameSlots['frame-7']?.map((item) => item?.photo.id), photos.map((asset) => asset.id))
   assert.deepEqual(restored?.frameSlots['frame-7']?.[1]?.transform, frameSlots['frame-7'][1]?.transform)
   assert.equal(restored?.frameSlots['frame-7']?.[1]?.filter, 'grayscale')
+  assert.equal(restored?.allBwEnabled, true)
   restored?.uploadedPhotos.forEach((asset) => { URL.revokeObjectURL(asset.src); if (asset.previewSrc) URL.revokeObjectURL(asset.previewSrc) })
 
   assert.equal(findActiveEditorDraftLocator('84909999999', storage), null)

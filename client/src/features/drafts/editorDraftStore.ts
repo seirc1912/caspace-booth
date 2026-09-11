@@ -45,6 +45,7 @@ export interface EditorDraftMetadata {
   frameSlots: Record<string, Array<StoredSlot | null>>
   completedFrameIds: string[]
   uploadedPhotoIds: string[]
+  allBwEnabled?: boolean
   updatedAt: number
 }
 
@@ -55,6 +56,7 @@ export interface EditorDraftState {
   frameSlots: Record<string, Array<FilledSlot | null>>
   completedFrameIds: string[]
   uploadedPhotos: PhotoAsset[]
+  allBwEnabled: boolean
 }
 
 const requestResult = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
@@ -132,12 +134,15 @@ export function serializeFrameSlots(frameSlots: Record<string, Array<FilledSlot 
   } : null)]))
 }
 
-export function createEditorDraftMetadata(identity: EditorDraftIdentity, state: Omit<EditorDraftState, 'uploadedPhotos'>, uploadedPhotoIds: string[], now = Date.now()): EditorDraftMetadata {
+type EditorDraftMetadataInput = Omit<EditorDraftState, 'uploadedPhotos' | 'allBwEnabled'> & Partial<Pick<EditorDraftState, 'allBwEnabled'>>
+
+export function createEditorDraftMetadata(identity: EditorDraftIdentity, state: EditorDraftMetadataInput, uploadedPhotoIds: string[], now = Date.now()): EditorDraftMetadata {
   return {
     scopeKey: editorDraftScopeKey(identity), sessionId: identity.sessionId, roomId: state.roomId,
     phoneNumber: identity.phoneNumber, selectedTemplateId: state.selectedTemplateId, currentSlot: state.currentSlot,
     frameSlots: serializeFrameSlots(state.frameSlots), completedFrameIds: [...state.completedFrameIds],
-    uploadedPhotoIds: [...uploadedPhotoIds], updatedAt: now,
+    uploadedPhotoIds: [...uploadedPhotoIds], allBwEnabled: state.allBwEnabled === true,
+    updatedAt: now,
   }
 }
 
@@ -157,6 +162,7 @@ export function hydrateEditorDraft(metadata: EditorDraftMetadata, photos: PhotoA
     frameSlots,
     completedFrameIds: metadata.completedFrameIds.filter((id): id is string => typeof id === 'string'),
     uploadedPhotos: metadata.uploadedPhotoIds.map((id) => byId.get(id)).filter((photo): photo is PhotoAsset => Boolean(photo)),
+    allBwEnabled: metadata.allBwEnabled === true,
   }
 }
 
