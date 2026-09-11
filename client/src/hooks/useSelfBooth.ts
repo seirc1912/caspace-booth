@@ -5,7 +5,7 @@ import { loadPublishedRooms, loadPublishedTemplateDetail, loadPublishedTemplateS
 import type { CustomerTemplate, CustomerTemplateSummary } from '../services/catalog/types'
 import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
-import { createInitialPhotoSlot } from '../features/photos/initialPhotoSlot'
+import { applyAllBwFilter, captureAllBwFilterSnapshot, createPhotoSlotForAllBw, restoreAllBwFilter, type AllBwFilterSnapshot } from '../features/photos/allBwFilter'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
@@ -54,6 +54,8 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const [selectedRoomId, setSelectedRoomIdState] = useState(storedJourney.selectedRoomId ?? '')
   const [selectedTemplateId, setSelectedTemplateIdState] = useState(storedJourney.selectedTemplateId ?? '')
   const [frameSlots, setFrameSlots] = useState<Record<string, Array<FilledSlot | null>>>({})
+  const [allBwEnabled, setAllBwEnabled] = useState(false)
+  const [allBwSnapshot, setAllBwSnapshot] = useState<AllBwFilterSnapshot>({})
   const [completedFrameIds, setCompletedFrameIds] = useState<string[]>([])
   const [currentSlot, setCurrentSlot] = useState<number | null>(null)
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([])
@@ -146,7 +148,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     const templateId = firstTemplate.id
     await ensureTemplateDetail(templateId)
     setSelectedRoomIdState(id); setSelectedTemplateIdState(templateId); setCurrentSlot(null)
-    setCompletedFrameIds([]); setFrameSlots({})
+    setCompletedFrameIds([]); setFrameSlots({}); setAllBwEnabled(false); setAllBwSnapshot({})
     persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: templateId })
   }
   const selectTemplate = async (id: string) => {
@@ -188,14 +190,14 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     setSlots((current) => {
       const next = [...current]
       const emptyIndices = template.slots.map((slot, index) => ({ index, x: slot.x, y: slot.y })).filter(({ index }) => !next[index]).sort((left, right) => left.y - right.y || left.x - right.x).map(({ index }) => index)
-      emptyIndices.forEach((slotIndex, photoIndex) => { const photo = photos[photoIndex]; if (photo) next[slotIndex] = createInitialPhotoSlot(photo) })
+      emptyIndices.forEach((slotIndex, photoIndex) => { const photo = photos[photoIndex]; if (photo) next[slotIndex] = createPhotoSlotForAllBw(photo, allBwEnabled) })
       return next
     })
-  }, [setSlots, template.slots])
+  }, [allBwEnabled, setSlots, template.slots])
 
   const replaceSlot = useCallback((index: number, photo: PhotoAsset) => {
-    setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? createInitialPhotoSlot(photo) : slot)))
-  }, [setSlots])
+    setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? createPhotoSlotForAllBw(photo, allBwEnabled) : slot)))
+  }, [allBwEnabled, setSlots])
 
   const updateTransform = useCallback((index: number, transform: Partial<ImageTransform>) => {
     setSlots((current) => current.map((slot, slotIndex) => (
@@ -210,8 +212,21 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   }, [setSlots])
 
   const updateFilter = useCallback((index: number, filter: PhotoFilter) => {
+    if (allBwEnabled) return
     setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? withPhotoFilter(slot, filter) : slot))
-  }, [setSlots])
+  }, [allBwEnabled, setSlots])
+
+  const toggleAllBw = useCallback(() => {
+    if (allBwEnabled) {
+      setFrameSlots((current) => restoreAllBwFilter(current, allBwSnapshot))
+      setAllBwEnabled(false)
+      setAllBwSnapshot({})
+      return
+    }
+    setAllBwSnapshot(captureAllBwFilterSnapshot(frameSlots))
+    setFrameSlots((current) => applyAllBwFilter(current))
+    setAllBwEnabled(true)
+  }, [allBwEnabled, allBwSnapshot, frameSlots])
 
   const removeSlot = useCallback((index: number) => {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? null : slot)))
@@ -230,8 +245,8 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
       visibleOrder.push(visibleOrder.shift()!)
     }
     lastRandomOrder.current = visibleOrder.map((photo) => photo.id).join()
-    setSlots(visibleOrder.map(createInitialPhotoSlot))
-  }, [setSlots, template.slots.length, uploadedPhotos])
+    setSlots(visibleOrder.map((photo) => createPhotoSlotForAllBw(photo, allBwEnabled)))
+  }, [allBwEnabled, setSlots, template.slots.length, uploadedPhotos])
 
   const addUploadedPhotos = useCallback(async (files: File[]) => {
     setPhotoError(null)
@@ -251,9 +266,12 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'The image could not be loaded.'); return }
     if (!mountedRef.current) { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc); return }
     setUploadedPhotos((current) => [...current, photo].slice(0, maximumPhotos))
-    setFrameSlots((current) => assignPhotoToTarget(current, target, photo))
+    setFrameSlots((current) => {
+      const next = assignPhotoToTarget(current, target, photo)
+      return allBwEnabled ? applyAllBwFilter(next) : next
+    })
     setCompletedFrameIds((current) => current.filter((id) => id !== target.templateId))
-  }, [])
+  }, [allBwEnabled])
   const addPhotosToFrame = useCallback(async (target: FramePhotoTarget, files: File[]) => {
     const capacity = target.emptySlotIndices.length
     const candidates = files.filter(supportedPhoto).slice(0, capacity)
@@ -268,11 +286,14 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     }
     if (photos.length) {
       setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
-      setFrameSlots((current) => assignPhotosToFrameTarget(current, target, photos))
+      setFrameSlots((current) => {
+        const next = assignPhotosToFrameTarget(current, target, photos)
+        return allBwEnabled ? applyAllBwFilter(next) : next
+      })
       setCompletedFrameIds((current) => current.filter((id) => id !== target.templateId))
     }
     if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
-  }, [])
+  }, [allBwEnabled])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => {
       const known = new Set(current.map((photo) => photo.id))
@@ -287,7 +308,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
       })
       return []
     })
-    setFrameSlots({}); setCompletedFrameIds([])
+    setFrameSlots({}); setCompletedFrameIds([]); setAllBwEnabled(false); setAllBwSnapshot({})
   }, [])
 
   const deleteUploadedPhoto = useCallback((photoId: string) => {
@@ -312,9 +333,9 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
       if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc)
       return replacement
     }))
-    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? createInitialPhotoSlot(replacement) : slot)])))
+    setFrameSlots((current) => Object.fromEntries(Object.entries(current).map(([id, savedSlots]) => [id, savedSlots.map((slot) => slot?.photo.id === photoId ? createPhotoSlotForAllBw(replacement, allBwEnabled) : slot)])))
     setCompletedFrameIds([])
-  }, [])
+  }, [allBwEnabled])
 
   const moveUploadedPhoto = useCallback((photoId: string, direction: -1 | 1) => {
     setUploadedPhotos((current) => {
@@ -381,6 +402,8 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
         setFrameSlots(draft.frameSlots)
         setCompletedFrameIds(draft.completedFrameIds)
         setUploadedPhotos(draft.uploadedPhotos)
+        setAllBwEnabled(draft.allBwEnabled)
+        setAllBwSnapshot(draft.allBwSnapshot)
         persistJourney({ phoneNumber: draftIdentity.phoneNumber, selectedRoomId: draft.roomId, selectedTemplateId: draft.selectedTemplateId })
       } else if (!customerSession) {
         try { clearActiveEditorDraftLocator(draftIdentity) } catch { /* Persistent locator storage is best-effort. */ }
@@ -411,7 +434,9 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     currentSlot,
     frameSlots,
     completedFrameIds,
-  }, uploadedPhotos.map((photo) => photo.id)) : null, [completedFrameIds, currentSlot, draftIdentity, frameSlots, selectedRoomId, selectedTemplateId, uploadedPhotos])
+    allBwEnabled,
+    allBwSnapshot,
+  }, uploadedPhotos.map((photo) => photo.id)) : null, [allBwEnabled, allBwSnapshot, completedFrameIds, currentSlot, draftIdentity, frameSlots, selectedRoomId, selectedTemplateId, uploadedPhotos])
 
   useEffect(() => {
     if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey) || !selectedRoomId || !selectedTemplateId) return
@@ -468,6 +493,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     roomTemplates,
     roomTemplateSummaries,
     frameSlots,
+    allBwEnabled,
     completedFrameIds,
     currentFrameIndex,
     templates: templateSummaries,
@@ -507,6 +533,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     updateTransform,
     updateFit,
     updateFilter,
+    toggleAllBw,
     removeSlot,
     clearAll: () => setSlots((current) => current.map(() => null)),
     randomFill,
