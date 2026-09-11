@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { applyAllBwFilter, captureAllBwFilterSnapshot, createPhotoSlotForAllBw, restoreAllBwFilter } from '../client/src/features/photos/allBwFilter'
+import { applyAllBwFilter, clearAllBwFilter, createPhotoSlotForAllBw } from '../client/src/features/photos/allBwFilter'
 import type { FilledSlot, PhotoAsset } from '../client/src/types/selfBooth'
 
 const photo = (id: string): PhotoAsset => ({ id, src: `blob:${id}`, alt: id, source: 'phone' })
@@ -17,23 +17,21 @@ test('All B&W applies grayscale to every assigned customer photo across frames',
   assert.equal(result.one?.[1], null)
 })
 
-test('turning All B&W off restores the exact mixed individual filter state', () => {
+test('turning All B&W off makes every assigned photo Original', () => {
   const frames = { one: [slot('a'), slot('b', 'grayscale')], two: [slot('c')] }
-  const snapshot = captureAllBwFilterSnapshot(frames)
-  const restored = restoreAllBwFilter(applyAllBwFilter(frames), snapshot)
+  const restored = clearAllBwFilter(applyAllBwFilter(frames))
 
-  assert.deepEqual(Object.values(restored).flat().map((item) => item?.filter), ['none', 'grayscale', 'none'])
+  assert.deepEqual(Object.values(restored).flat().map((item) => item?.filter), ['none', 'none', 'none'])
 })
 
 test('new and replacement photos added while active are B&W and restore to Original', () => {
   const original = { one: [slot('a', 'grayscale'), null] }
-  const snapshot = captureAllBwFilterSnapshot(original)
   const enabled = applyAllBwFilter(original)
   enabled.one![1] = createPhotoSlotForAllBw(photo('new'), true)
   enabled.one![0] = createPhotoSlotForAllBw(photo('replacement'), true)
 
   assert.deepEqual(enabled.one?.map((item) => item?.filter), ['grayscale', 'grayscale'])
-  assert.deepEqual(restoreAllBwFilter(enabled, snapshot).one?.map((item) => item?.filter), ['none', 'none'])
+  assert.deepEqual(clearAllBwFilter(enabled).one?.map((item) => item?.filter), ['none', 'none'])
 })
 
 test('repeated All B&W toggles do not corrupt filters or transforms', () => {
@@ -41,10 +39,9 @@ test('repeated All B&W toggles do not corrupt filters or transforms', () => {
   const originalTransforms = Object.values(frames).flat().map((item) => item?.transform)
   let current = frames
   for (let count = 0; count < 2; count += 1) {
-    const snapshot = captureAllBwFilterSnapshot(current)
-    current = restoreAllBwFilter(applyAllBwFilter(current), snapshot)
+    current = clearAllBwFilter(applyAllBwFilter(current))
   }
 
-  assert.deepEqual(Object.values(current).flat().map((item) => item?.filter), ['none', 'grayscale', 'none'])
+  assert.deepEqual(Object.values(current).flat().map((item) => item?.filter), ['none', 'none', 'none'])
   assert.deepEqual(Object.values(current).flat().map((item) => item?.transform), originalTransforms)
 })

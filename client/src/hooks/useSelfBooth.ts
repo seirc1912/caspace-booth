@@ -5,7 +5,7 @@ import { loadPublishedRooms, loadPublishedTemplateDetail, loadPublishedTemplateS
 import type { CustomerTemplate, CustomerTemplateSummary } from '../services/catalog/types'
 import type { Room } from '../models/Room'
 import { loadPhotoFile } from '../features/photos/imageLoader'
-import { applyAllBwFilter, captureAllBwFilterSnapshot, createPhotoSlotForAllBw, restoreAllBwFilter, type AllBwFilterSnapshot } from '../features/photos/allBwFilter'
+import { applyAllBwFilter, clearAllBwFilter, createPhotoSlotForAllBw } from '../features/photos/allBwFilter'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
@@ -55,7 +55,6 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const [selectedTemplateId, setSelectedTemplateIdState] = useState(storedJourney.selectedTemplateId ?? '')
   const [frameSlots, setFrameSlots] = useState<Record<string, Array<FilledSlot | null>>>({})
   const [allBwEnabled, setAllBwEnabled] = useState(false)
-  const [allBwSnapshot, setAllBwSnapshot] = useState<AllBwFilterSnapshot>({})
   const [completedFrameIds, setCompletedFrameIds] = useState<string[]>([])
   const [currentSlot, setCurrentSlot] = useState<number | null>(null)
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<string[]>([])
@@ -148,7 +147,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     const templateId = firstTemplate.id
     await ensureTemplateDetail(templateId)
     setSelectedRoomIdState(id); setSelectedTemplateIdState(templateId); setCurrentSlot(null)
-    setCompletedFrameIds([]); setFrameSlots({}); setAllBwEnabled(false); setAllBwSnapshot({})
+    setCompletedFrameIds([]); setFrameSlots({}); setAllBwEnabled(false)
     persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: templateId })
   }
   const selectTemplate = async (id: string) => {
@@ -218,15 +217,13 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
 
   const toggleAllBw = useCallback(() => {
     if (allBwEnabled) {
-      setFrameSlots((current) => restoreAllBwFilter(current, allBwSnapshot))
+      setFrameSlots((current) => clearAllBwFilter(current))
       setAllBwEnabled(false)
-      setAllBwSnapshot({})
       return
     }
-    setAllBwSnapshot(captureAllBwFilterSnapshot(frameSlots))
     setFrameSlots((current) => applyAllBwFilter(current))
     setAllBwEnabled(true)
-  }, [allBwEnabled, allBwSnapshot, frameSlots])
+  }, [allBwEnabled])
 
   const removeSlot = useCallback((index: number) => {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? null : slot)))
@@ -308,7 +305,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
       })
       return []
     })
-    setFrameSlots({}); setCompletedFrameIds([]); setAllBwEnabled(false); setAllBwSnapshot({})
+    setFrameSlots({}); setCompletedFrameIds([]); setAllBwEnabled(false)
   }, [])
 
   const deleteUploadedPhoto = useCallback((photoId: string) => {
@@ -403,7 +400,6 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
         setCompletedFrameIds(draft.completedFrameIds)
         setUploadedPhotos(draft.uploadedPhotos)
         setAllBwEnabled(draft.allBwEnabled)
-        setAllBwSnapshot(draft.allBwSnapshot)
         persistJourney({ phoneNumber: draftIdentity.phoneNumber, selectedRoomId: draft.roomId, selectedTemplateId: draft.selectedTemplateId })
       } else if (!customerSession) {
         try { clearActiveEditorDraftLocator(draftIdentity) } catch { /* Persistent locator storage is best-effort. */ }
@@ -435,8 +431,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     frameSlots,
     completedFrameIds,
     allBwEnabled,
-    allBwSnapshot,
-  }, uploadedPhotos.map((photo) => photo.id)) : null, [allBwEnabled, allBwSnapshot, completedFrameIds, currentSlot, draftIdentity, frameSlots, selectedRoomId, selectedTemplateId, uploadedPhotos])
+  }, uploadedPhotos.map((photo) => photo.id)) : null, [allBwEnabled, completedFrameIds, currentSlot, draftIdentity, frameSlots, selectedRoomId, selectedTemplateId, uploadedPhotos])
 
   useEffect(() => {
     if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey) || !selectedRoomId || !selectedTemplateId) return

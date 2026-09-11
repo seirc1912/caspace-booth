@@ -1,5 +1,4 @@
 import type { FilledSlot, PhotoAsset } from '../../types/selfBooth'
-import type { AllBwFilterSnapshot } from '../photos/allBwFilter'
 
 const databaseName = 'selfbooth-customer-drafts'
 const databaseVersion = 1
@@ -47,7 +46,6 @@ export interface EditorDraftMetadata {
   completedFrameIds: string[]
   uploadedPhotoIds: string[]
   allBwEnabled?: boolean
-  allBwSnapshot?: AllBwFilterSnapshot
   updatedAt: number
 }
 
@@ -59,7 +57,6 @@ export interface EditorDraftState {
   completedFrameIds: string[]
   uploadedPhotos: PhotoAsset[]
   allBwEnabled: boolean
-  allBwSnapshot: AllBwFilterSnapshot
 }
 
 const requestResult = <T>(request: IDBRequest<T>) => new Promise<T>((resolve, reject) => {
@@ -137,7 +134,7 @@ export function serializeFrameSlots(frameSlots: Record<string, Array<FilledSlot 
   } : null)]))
 }
 
-type EditorDraftMetadataInput = Omit<EditorDraftState, 'uploadedPhotos' | 'allBwEnabled' | 'allBwSnapshot'> & Partial<Pick<EditorDraftState, 'allBwEnabled' | 'allBwSnapshot'>>
+type EditorDraftMetadataInput = Omit<EditorDraftState, 'uploadedPhotos' | 'allBwEnabled'> & Partial<Pick<EditorDraftState, 'allBwEnabled'>>
 
 export function createEditorDraftMetadata(identity: EditorDraftIdentity, state: EditorDraftMetadataInput, uploadedPhotoIds: string[], now = Date.now()): EditorDraftMetadata {
   return {
@@ -145,7 +142,7 @@ export function createEditorDraftMetadata(identity: EditorDraftIdentity, state: 
     phoneNumber: identity.phoneNumber, selectedTemplateId: state.selectedTemplateId, currentSlot: state.currentSlot,
     frameSlots: serializeFrameSlots(state.frameSlots), completedFrameIds: [...state.completedFrameIds],
     uploadedPhotoIds: [...uploadedPhotoIds], allBwEnabled: state.allBwEnabled === true,
-    allBwSnapshot: state.allBwSnapshot ?? {}, updatedAt: now,
+    updatedAt: now,
   }
 }
 
@@ -166,7 +163,6 @@ export function hydrateEditorDraft(metadata: EditorDraftMetadata, photos: PhotoA
     completedFrameIds: metadata.completedFrameIds.filter((id): id is string => typeof id === 'string'),
     uploadedPhotos: metadata.uploadedPhotoIds.map((id) => byId.get(id)).filter((photo): photo is PhotoAsset => Boolean(photo)),
     allBwEnabled: metadata.allBwEnabled === true,
-    allBwSnapshot: metadata.allBwSnapshot ?? {},
   }
 }
 
