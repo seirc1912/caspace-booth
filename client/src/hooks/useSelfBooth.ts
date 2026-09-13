@@ -433,6 +433,15 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     allBwEnabled,
   }, uploadedPhotos.map((photo) => photo.id)) : null, [allBwEnabled, completedFrameIds, currentSlot, draftIdentity, frameSlots, selectedRoomId, selectedTemplateId, uploadedPhotos])
 
+  const flushLocalDraft = useCallback(async () => {
+    if (!draftScopeKey || !draftIdentity || suppressedDraftScopesRef.current.has(draftScopeKey)) return
+    await Promise.all(uploadedPhotos.map((photo) => persistPhotoOnce(draftScopeKey, photo)))
+    const metadata = currentDraftMetadata()
+    if (!metadata) return
+    await saveEditorDraft(metadata)
+    saveActiveEditorDraftLocator(draftIdentity)
+  }, [currentDraftMetadata, draftIdentity, draftScopeKey, uploadedPhotos])
+
   useEffect(() => {
     if (!draftScopeKey || hydratedDraftScopeRef.current !== draftScopeKey || suppressedDraftScopesRef.current.has(draftScopeKey) || !selectedRoomId || !selectedTemplateId) return
     if (metadataTimerRef.current !== null) window.clearTimeout(metadataTimerRef.current)
@@ -510,6 +519,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     clearPhotoError,
     reportPhotoError,
     clearLocalDraft,
+    flushLocalDraft,
     detachDraftRecovery,
     maximumPhotos,
     addUploadedPhotos,

@@ -24,13 +24,43 @@ export interface RenderTiming {
   pngBytes: number
 }
 
+export type CompositionAssetType = 'customer-photo' | 'template-background' | 'template-element' | 'brand-logo'
+
+export class CompositionAssetError extends Error {
+  readonly assetType: CompositionAssetType
+  readonly scheme: string
+  readonly stage: 'fetch' | 'decode'
+  readonly status?: number
+  constructor(
+    message: string,
+    assetType: CompositionAssetType,
+    scheme: string,
+    stage: 'fetch' | 'decode',
+    status?: number,
+    options?: ErrorOptions,
+  ) {
+    super(message, options)
+    this.name = 'CompositionAssetError'
+    this.assetType = assetType
+    this.scheme = scheme
+    this.stage = stage
+    this.status = status
+  }
+}
+
+const sourceScheme = (source: string) => source.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase() ?? 'relative'
+const retryDelays = [250, 650]
+const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
+const transientStatus = (status: number) => status === 408 || status === 429 || status >= 500
+
 export class RenderAssetCache {
   private readonly images = new Map<string, Promise<HTMLImageElement>>()
+  private readonly fetchedUrls = new Map<string, string>()
 
-  load(source: string) {
+  load(source: string, assetType: CompositionAssetType) {
     let image = this.images.get(source)
     if (!image) {
-      image = loadImageElement(source)
+      image = loadImageForExport(source, assetType, (url) => this.fetchedUrls.set(source, url))
       this.images.set(source, image)
       void image.catch(() => this.images.delete(source))
     }
@@ -39,12 +69,19 @@ export class RenderAssetCache {
 
   clear() {
     this.images.clear()
+    this.fetchedUrls.forEach((url) => URL.revokeObjectURL(url))
+    this.fetchedUrls.clear()
   }
 
   retainOnly(sources: Iterable<string>) {
     const retained = new Set(sources)
     for (const source of this.images.keys()) {
-      if (!retained.has(source)) this.images.delete(source)
+      if (!retained.has(source)) {
+        this.images.delete(source)
+        const fetchedUrl = this.fetchedUrls.get(source)
+        if (fetchedUrl) URL.revokeObjectURL(fetchedUrl)
+        this.fetchedUrls.delete(source)
+      }
     }
   }
 }
@@ -56,6 +93,13 @@ export const compositionAssetSources = (template: PrintTemplate, slots: Array<Fi
   ...template.variables.map((variable) => variable.type === 'brandLogo' ? branding?.logoUrl : undefined),
 ].filter((source): source is string => Boolean(source)))]
 
+const compositionAssets = (template: PrintTemplate, slots: Array<FilledSlot | null>, branding?: BrandingConfig) => [
+  template.backgroundUrl ? { source: template.backgroundUrl, type: 'template-background' as const } : null,
+  ...slots.map((slot) => slot ? { source: slot.photo.src, type: 'customer-photo' as const } : null),
+  ...template.elements.map((element) => element.visible && element.assetUrl ? { source: element.assetUrl, type: 'template-element' as const } : null),
+  ...template.variables.map((variable) => variable.type === 'brandLogo' && branding?.logoUrl ? { source: branding.logoUrl, type: 'brand-logo' as const } : null),
+].filter((asset): asset is { source: string; type: CompositionAssetType } => Boolean(asset))
+
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 
 const isCrossOriginHttpSource = (source: string) => {
@@ -64,15 +108,15 @@ const isCrossOriginHttpSource = (source: string) => {
   catch { return false }
 }
 
-const loadImageElement = (source: string) => new Promise<HTMLImageElement>((resolve, reject) => {
-  if (typeof source !== 'string' || !source) { reject(new Error('Failed to load source image for export: image source is empty.')); return }
+const decodeImageElement = (source: string, assetType: CompositionAssetType, canonicalScheme = sourceScheme(source)) => new Promise<HTMLImageElement>((resolve, reject) => {
+  if (typeof source !== 'string' || !source) { reject(new CompositionAssetError('Image source is empty.', assetType, canonicalScheme, 'decode')); return }
   const image = new Image()
   let settled = false
   const succeed = () => {
     if (settled) return
     if (!Number.isFinite(image.naturalWidth) || !Number.isFinite(image.naturalHeight) || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
       settled = true
-      reject(new Error('Failed to load source image for export: image has invalid dimensions.'))
+      reject(new CompositionAssetError(`Image has invalid dimensions (${assetType}, ${canonicalScheme}:).`, assetType, canonicalScheme, 'decode'))
       return
     }
     settled = true
@@ -81,7 +125,7 @@ const loadImageElement = (source: string) => new Promise<HTMLImageElement>((reso
   const fail = () => {
     if (settled) return
     settled = true
-    reject(new Error('Failed to load source image for export: the browser could not load or decode the image.'))
+    reject(new CompositionAssetError(`Image decode failed (${assetType}, ${canonicalScheme}:). The source may be revoked, unsupported, or blocked by CORS.`, assetType, canonicalScheme, 'decode'))
   }
   image.decoding = 'async'
   if (isCrossOriginHttpSource(source)) image.crossOrigin = 'anonymous'
@@ -90,7 +134,46 @@ const loadImageElement = (source: string) => new Promise<HTMLImageElement>((reso
   image.src = source
 })
 
-const loadImage = (source: string, cache?: RenderAssetCache) => cache?.load(source) ?? loadImageElement(source)
+export async function fetchRemoteAsset(source: string, assetType: CompositionAssetType) {
+  for (let attempt = 0; ; attempt += 1) {
+    const controller = new AbortController()
+    const timeout = globalThis.setTimeout(() => controller.abort(), 15_000)
+    try {
+      const response = await fetch(source, { mode: 'cors', cache: attempt ? 'reload' : 'default', signal: controller.signal })
+      if (!response.ok) {
+        const error = new CompositionAssetError(`Remote image fetch failed (${assetType}, https:, HTTP ${response.status}).`, assetType, 'https', 'fetch', response.status)
+        if (attempt >= retryDelays.length || !transientStatus(response.status)) throw error
+      } else {
+        const blob = await response.blob()
+        if (!blob.size) throw new CompositionAssetError(`Remote image fetch returned an empty file (${assetType}, https:).`, assetType, 'https', 'fetch', response.status)
+        return blob
+      }
+    } catch (reason) {
+      if (reason instanceof CompositionAssetError && (attempt >= retryDelays.length || reason.status === undefined || !transientStatus(reason.status))) throw reason
+      if (attempt >= retryDelays.length) {
+        const aborted = reason instanceof DOMException && reason.name === 'AbortError'
+        throw new CompositionAssetError(`Remote image ${aborted ? 'timed out' : 'fetch failed'} (${assetType}, https:).`, assetType, 'https', 'fetch', undefined, { cause: reason })
+      }
+    } finally { globalThis.clearTimeout(timeout) }
+    await delay(retryDelays[attempt]!)
+  }
+}
+
+async function loadImageForExport(source: string, assetType: CompositionAssetType, retainFetchedUrl?: (url: string) => void) {
+  if (/^https?:/i.test(source)) {
+    const blob = await fetchRemoteAsset(source, assetType)
+    const fetchedUrl = URL.createObjectURL(blob)
+    retainFetchedUrl?.(fetchedUrl)
+    try {
+      const image = await decodeImageElement(fetchedUrl, assetType, sourceScheme(source))
+      if (!retainFetchedUrl) URL.revokeObjectURL(fetchedUrl)
+      return image
+    } catch (reason) { if (!retainFetchedUrl) URL.revokeObjectURL(fetchedUrl); throw reason }
+  }
+  return decodeImageElement(source, assetType)
+}
+
+const loadImage = (source: string, assetType: CompositionAssetType, cache?: RenderAssetCache) => cache?.load(source, assetType) ?? loadImageForExport(source, assetType)
 
 const canvasBlob = (canvas: HTMLCanvasElement, type: 'image/png' | 'image/jpeg', quality?: number) => new Promise<Blob>((resolve, reject) => {
   try { canvas.toBlob((blob) => blob && blob.size > 0 ? resolve(blob) : reject(new Error('Failed to render print image: the browser returned an empty image.')), type, quality) }
@@ -176,7 +259,7 @@ async function drawElement(context: CanvasRenderingContext2D, element: TemplateE
   context.translate(-element.width / 2, -element.height / 2)
   if (element.shadowBlur) { context.shadowColor = element.shadowColor ?? '#000000'; context.shadowBlur = element.shadowBlur; context.shadowOffsetX = element.shadowX ?? 0; context.shadowOffsetY = element.shadowY ?? 0 }
   if ((element.type === 'image' || element.type === 'logo' || element.type === 'sticker' || element.type === 'overlay') && element.assetUrl) {
-    const image = await loadImage(element.assetUrl, cache)
+    const image = await loadImage(element.assetUrl, 'template-element', cache)
     const scale = Math.min(element.width / image.naturalWidth, element.height / image.naturalHeight)
     const width = image.naturalWidth * scale; const height = image.naturalHeight * scale
     context.drawImage(image, (element.width - width) / 2, (element.height - height) / 2, width, height)
@@ -199,8 +282,8 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   validateCanvas(template)
   const startedAt = performance.now()
   const format = options.format ?? 'png'
-  const assetSources = compositionAssetSources(template, slots, options.branding)
-  await Promise.all(assetSources.map((source) => loadImage(source, options.assetCache)))
+  const assets = compositionAssets(template, slots, options.branding)
+  await Promise.all(assets.map((asset) => loadImage(asset.source, asset.type, options.assetCache)))
   const assetsReadyAt = performance.now()
   const canvas = document.createElement('canvas')
   canvas.width = template.canvas.width; canvas.height = template.canvas.height
@@ -210,7 +293,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   options.onProgress?.(5)
   if (format === 'jpg') { context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height) }
   if (template.backgroundColor && template.backgroundColor !== 'transparent') { context.fillStyle = template.backgroundColor; context.fillRect(0, 0, canvas.width, canvas.height) }
-  if (template.backgroundUrl) { const background = await loadImage(template.backgroundUrl, options.assetCache); context.drawImage(background, 0, 0, canvas.width, canvas.height) }
+  if (template.backgroundUrl) { const background = await loadImage(template.backgroundUrl, 'template-background', options.assetCache); context.drawImage(background, 0, 0, canvas.width, canvas.height) }
 
   const layers = [
     ...template.slots.map((definition, index) => ({ kind: 'slot' as const, zIndex: definition.zIndex, definition, index })),
@@ -222,7 +305,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
     if (layer.kind === 'slot') {
       const definition = layer.definition; const slot = slots[layer.index]
       if (slot && definition.visible !== false) {
-        const image = await loadImage(slot.photo.src, options.assetCache)
+        const image = await loadImage(slot.photo.src, 'customer-photo', options.assetCache)
         let source: CanvasImageSource = image
         if (slot.filter === 'grayscale') {
           let grayscale = grayscaleSources.get(slot.photo.src)
@@ -241,7 +324,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
       }
     } else if (layer.kind === 'variable') {
       const variable = layer.variable
-      if (variable.type === 'brandLogo' && options.branding?.logoUrl) { const image = await loadImage(options.branding.logoUrl, options.assetCache); context.drawImage(image, variable.x, variable.y, variable.width, variable.height) }
+      if (variable.type === 'brandLogo' && options.branding?.logoUrl) { const image = await loadImage(options.branding.logoUrl, 'brand-logo', options.assetCache); context.drawImage(image, variable.x, variable.y, variable.width, variable.height) }
       else drawText(context, variableValue(variable, options.branding), variable.x, variable.y, variable.width, variable.height, variable.fontSize, variable.color, variable.align)
     } else await drawElement(context, layer.element, options.assetCache)
     options.onProgress?.(10 + Math.round((layerIndex + 1) / Math.max(1, layers.length) * 75))

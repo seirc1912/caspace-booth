@@ -138,6 +138,9 @@ export interface PhotoAsset {
   id: string
   src: string
   previewSrc?: string
+  /** Canonical browser-owned image data. Object URLs are only disposable views of this Blob. */
+  blob?: Blob
+  previewBlob?: Blob
   alt: string
   source: 'selfbooth' | 'phone'
 }

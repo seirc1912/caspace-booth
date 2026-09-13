@@ -183,7 +183,10 @@ export async function persistPhotoOnce(scopeKey: string, photo: PhotoAsset) {
   return withDatabase(async (database) => {
     const check = database.transaction(photoStoreName, 'readonly')
     if (await requestResult(check.objectStore(photoStoreName).getKey(key))) return false
-    const [blob, previewBlob] = await Promise.all([urlBlob(photo.src), photo.previewSrc && photo.previewSrc !== photo.src ? urlBlob(photo.previewSrc) : undefined])
+    const [blob, previewBlob] = await Promise.all([
+      photo.blob ?? urlBlob(photo.src),
+      photo.previewBlob ?? (photo.previewSrc && photo.previewSrc !== photo.src ? urlBlob(photo.previewSrc) : undefined),
+    ])
     const transaction = database.transaction(photoStoreName, 'readwrite')
     const store = transaction.objectStore(photoStoreName)
     if (!await requestResult(store.getKey(key))) store.put({ key, scopeKey, photoId: photo.id, blob, previewBlob, alt: photo.alt, source: photo.source, updatedAt: Date.now() } satisfies StoredPhoto)
@@ -217,6 +220,8 @@ export async function loadEditorDraft(identity: EditorDraftIdentity): Promise<Ed
       id: record.photoId,
       src: URL.createObjectURL(record.blob),
       previewSrc: URL.createObjectURL(record.previewBlob ?? record.blob),
+      blob: record.blob,
+      previewBlob: record.previewBlob,
       alt: record.alt,
       source: record.source,
     } satisfies PhotoAsset] : [])
