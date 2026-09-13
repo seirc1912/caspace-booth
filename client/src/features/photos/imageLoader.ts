@@ -45,7 +45,7 @@ export function loadPhotoFile(file: File): Promise<PhotoAsset> {
         previewCanvas.width = 1; previewCanvas.height = 1
         releaseImage()
         URL.revokeObjectURL(src)
-        resolve({ id: `phone-${photoId()}`, src: exportSrc, previewSrc: URL.createObjectURL(previewBlob), alt: file.name || 'Uploaded photo', source: 'phone' })
+        resolve({ id: `phone-${photoId()}`, src: exportSrc, previewSrc: URL.createObjectURL(previewBlob), blob: exportBlob, previewBlob, alt: file.name || 'Uploaded photo', source: 'phone' })
       } catch (reason) {
         releaseImage()
         URL.revokeObjectURL(src)
