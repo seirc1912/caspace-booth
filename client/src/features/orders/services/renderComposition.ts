@@ -53,16 +53,37 @@ const retryDelays = [250, 650]
 const delay = (ms: number) => new Promise((resolve) => globalThis.setTimeout(resolve, ms))
 const transientStatus = (status: number) => status === 408 || status === 429 || status >= 500
 
+export class RemoteExportAssetCache {
+  private readonly blobs = new Map<string, Promise<Blob>>()
+
+  load(source: string, assetType: CompositionAssetType) {
+    let blob = this.blobs.get(source)
+    if (!blob) {
+      const request = fetchRemoteAsset(source, assetType)
+      blob = request
+      this.blobs.set(source, request)
+      void request.catch(() => { if (this.blobs.get(source) === request) this.blobs.delete(source) })
+    }
+    return blob
+  }
+
+  clear() { this.blobs.clear() }
+}
+
 export class RenderAssetCache {
   private readonly images = new Map<string, Promise<HTMLImageElement>>()
   private readonly fetchedUrls = new Map<string, string>()
+  private readonly remoteAssets?: RemoteExportAssetCache
+
+  constructor(remoteAssets?: RemoteExportAssetCache) { this.remoteAssets = remoteAssets }
 
   load(source: string, assetType: CompositionAssetType) {
     let image = this.images.get(source)
     if (!image) {
-      image = loadImageForExport(source, assetType, (url) => this.fetchedUrls.set(source, url))
-      this.images.set(source, image)
-      void image.catch(() => this.images.delete(source))
+      const request = loadImageForExport(source, assetType, (url) => this.fetchedUrls.set(source, url), this.remoteAssets)
+      image = request
+      this.images.set(source, request)
+      void request.catch(() => { if (this.images.get(source) === request) this.images.delete(source) })
     }
     return image
   }
@@ -99,6 +120,11 @@ const compositionAssets = (template: PrintTemplate, slots: Array<FilledSlot | nu
   ...template.elements.map((element) => element.visible && element.assetUrl ? { source: element.assetUrl, type: 'template-element' as const } : null),
   ...template.variables.map((variable) => variable.type === 'brandLogo' && branding?.logoUrl ? { source: branding.logoUrl, type: 'brand-logo' as const } : null),
 ].filter((asset): asset is { source: string; type: CompositionAssetType } => Boolean(asset))
+
+export const prefetchTemplateExportAssets = async (template: PrintTemplate, branding: BrandingConfig | undefined, cache: RemoteExportAssetCache) => {
+  const assets = compositionAssets(template, [], branding).filter((asset) => /^https?:/i.test(asset.source))
+  for (const asset of assets) await cache.load(asset.source, asset.type)
+}
 
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 
@@ -159,9 +185,9 @@ export async function fetchRemoteAsset(source: string, assetType: CompositionAss
   }
 }
 
-async function loadImageForExport(source: string, assetType: CompositionAssetType, retainFetchedUrl?: (url: string) => void) {
+async function loadImageForExport(source: string, assetType: CompositionAssetType, retainFetchedUrl?: (url: string) => void, remoteAssets?: RemoteExportAssetCache) {
   if (/^https?:/i.test(source)) {
-    const blob = await fetchRemoteAsset(source, assetType)
+    const blob = await (remoteAssets?.load(source, assetType) ?? fetchRemoteAsset(source, assetType))
     const fetchedUrl = URL.createObjectURL(blob)
     retainFetchedUrl?.(fetchedUrl)
     try {
