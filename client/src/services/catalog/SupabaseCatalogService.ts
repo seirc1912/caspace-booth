@@ -123,6 +123,11 @@ export async function saveAdminTemplate(record: AdminTemplateRecord, displayOrde
   return toAdminTemplate(unwrap(data as TemplateRow | null, error))
 }
 
+export async function reorderAdminTemplate(id: string, position: number) {
+  const { error } = await supabase.rpc('admin_reorder_template', { p_token: requireToken(), p_id: id, p_position: position })
+  if (error) throw new Error(error.message)
+}
+
 const dataUrlPattern = /^data:(image\/[a-z0-9.+-]+);base64,/i
 const templateAssetBucket = 'template-assets'
 

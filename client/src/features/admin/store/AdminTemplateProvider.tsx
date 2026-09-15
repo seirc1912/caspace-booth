@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { AdminTemplateRecord, AdminTemplateSummary, TemplateStatus } from '../types'
 import { AdminTemplateContext } from './AdminTemplateContext'
-import { deleteAdminTemplate, loadAdminTemplateDetail, loadAdminTemplateSummaries, saveAdminTemplate } from '../../../services/catalog/SupabaseCatalogService'
+import { deleteAdminTemplate, loadAdminTemplateDetail, loadAdminTemplateSummaries, reorderAdminTemplate, saveAdminTemplate } from '../../../services/catalog/SupabaseCatalogService'
 import { migrateLegacyCatalogOnce } from '../../../services/catalog/LegacyCatalogMigration'
+import { reorderTemplatesInRoom } from '../model/templateOrder'
 
 const uid = () => globalThis.crypto.randomUUID()
 
@@ -63,17 +64,16 @@ export function AdminTemplateProvider({ children }: { children: ReactNode }) {
       details.current.delete(id)
       setTemplates((current) => current.filter((item) => item.id !== id))
     },
-    reorder: async (id: string, direction: -1 | 1) => {
-      const index = templates.findIndex((template) => template.id === id)
-      const swap = index + direction
-      if (index < 0 || swap < 0 || swap >= templates.length) return
-      const reordered = [...templates]
-      ;[reordered[index], reordered[swap]] = [reordered[swap]!, reordered[index]!]
-      for (const [displayOrder, summary] of reordered.entries()) {
-        const detail = await (details.current.get(summary.id) ? Promise.resolve(details.current.get(summary.id)!) : loadAdminTemplateDetail(summary.id))
-        await saveAdminTemplate(detail, displayOrder)
+    reorder: async (id: string, position: number) => {
+      const previous = templates
+      setTemplates(reorderTemplatesInRoom(previous, id, position))
+      try {
+        await reorderAdminTemplate(id, position)
+        await refresh()
+      } catch (error) {
+        setTemplates(previous)
+        throw error
       }
-      await refresh()
     },
   }), [refresh, templates])
 
