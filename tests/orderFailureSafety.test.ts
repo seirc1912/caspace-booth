@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearEditorDraft, createEditorDraftMetadata, editorDraftScopeKey, loadEditorDraft, persistPhotoOnce, saveEditorDraft } from '../client/src/features/drafts/editorDraftStore'
 import { createOrderPhotoSnapshot, runFailureSafeOrder } from '../client/src/features/orders/services/orderPhotoSnapshot'
-import { fetchRemoteAsset } from '../client/src/features/orders/services/renderComposition'
+import { fetchRemoteAsset, prefetchTemplateExportAssets, RemoteExportAssetCache } from '../client/src/features/orders/services/renderComposition'
 import type { FilledSlot, PhotoAsset, PrintTemplate } from '../client/src/types/selfBooth'
 
 const identity = { sessionId: 'failure-session', boothId: 'failure-room', phoneNumber: '84901112222' }
@@ -34,6 +34,36 @@ test('remote transient fetch has a bounded initial attempt plus two retries', as
   globalThis.fetch = (async () => { calls += 1; return new Response('', { status: 503 }) }) as typeof fetch
   try { await assert.rejects(fetchRemoteAsset('https://assets.example/frame.png', 'template-background'), /HTTP 503|fetch failed/); assert.equal(calls, 3) }
   finally { globalThis.fetch = originalFetch }
+})
+
+test('selected-frame prefetch and Order share one canonical remote Blob request', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = (async () => { calls += 1; return new Response(new Blob(['background'], { type: 'image/png' }), { status: 200 }) }) as typeof fetch
+  const cache = new RemoteExportAssetCache()
+  const remoteTemplate = { ...template, backgroundUrl: 'https://assets.example/background.png' }
+  try {
+    await Promise.all([
+      prefetchTemplateExportAssets(remoteTemplate, undefined, cache),
+      cache.load(remoteTemplate.backgroundUrl, 'template-background'),
+    ])
+    await cache.load(remoteTemplate.backgroundUrl, 'template-background')
+    assert.equal(calls, 1)
+  } finally { cache.clear(); globalThis.fetch = originalFetch }
+})
+
+test('a failed cached remote request is evicted so a later Order can retry', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  globalThis.fetch = (async () => { calls += 1; return new Response(calls <= 3 ? '' : 'recovered', { status: calls <= 3 ? 503 : 200 }) }) as typeof fetch
+  const cache = new RemoteExportAssetCache()
+  try {
+    await assert.rejects(cache.load('https://assets.example/recover.png', 'template-background'))
+    await Promise.resolve()
+    const blob = await cache.load('https://assets.example/recover.png', 'template-background')
+    assert.ok(blob instanceof Blob)
+    assert.equal(calls, 4)
+  } finally { cache.clear(); globalThis.fetch = originalFetch }
 })
 
 test('F partial upload failure preserves state and retry reuses idempotent frame uploads', async () => {

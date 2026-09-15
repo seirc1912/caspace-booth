@@ -7,6 +7,7 @@ import { CustomerPhotoLayer } from './CustomerPhotoLayer'
 
 interface TemplateCanvasProps {
   template: PrintTemplate
+  backgroundUrl?: string | null
   slots: Array<FilledSlot | null>
   activeSlot: number | null
   cropSlot?: number | null
@@ -22,7 +23,7 @@ interface TemplateCanvasProps {
   readonly?: boolean
 }
 
-export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onReplace, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
+export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cropSlot = null, onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onReplace, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
   return (
     <TemplateSurface
       className="rounded-[1.75rem] shadow-xl shadow-stone-900/10"
@@ -55,6 +56,7 @@ export function TemplateCanvas({ template, slots, activeSlot, cropSlot = null, o
           </div>
         )
       }}
+      backgroundUrl={backgroundUrl}
       template={template}
     />
   )
