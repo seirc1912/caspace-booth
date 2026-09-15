@@ -8,7 +8,7 @@ export interface AdminTemplateStoreValue {
   duplicate: (id: string) => Promise<string | null>
   setStatus: (id: string, status: TemplateStatus) => Promise<void>
   remove: (id: string) => Promise<void>
-  reorder: (id: string, direction: -1 | 1) => Promise<void>
+  reorder: (id: string, position: number) => Promise<void>
 }
 
 export const AdminTemplateContext = createContext<AdminTemplateStoreValue | null>(null)

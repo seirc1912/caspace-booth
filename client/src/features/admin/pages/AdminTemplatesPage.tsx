@@ -3,6 +3,8 @@ import { usePathname } from "../../../hooks/usePathname";
 import { useAdminTemplates } from "../store/AdminTemplateContext";
 import { useRooms } from "../store/RoomContext";
 import type { TemplateStatus } from "../types";
+import type { AdminTemplateSummary } from "../types";
+import { parseTemplatePosition } from "../model/templateOrder";
 
 const updatedTime = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -16,7 +18,9 @@ export function AdminTemplatesPage() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"all" | TemplateStatus>("all");
   const [roomId, setRoomId] = useState("all");
-  const [sort, setSort] = useState<"updated" | "name">("updated");
+  const [sort, setSort] = useState<"order" | "updated" | "name">("order");
+  const [savingOrderId, setSavingOrderId] = useState<string | null>(null);
+  const roomOrder = useMemo(() => new Map(rooms.map((room, index) => [room.id, index])), [rooms]);
   const records = useMemo(
     () =>
       store.templates
@@ -27,11 +31,13 @@ export function AdminTemplatesPage() {
             (roomId === "all" || record.roomId === roomId),
         )
         .sort((a, b) =>
-          sort === "name"
+          sort === "order"
+            ? (roomOrder.get(a.roomId) ?? Number.MAX_SAFE_INTEGER) - (roomOrder.get(b.roomId) ?? Number.MAX_SAFE_INTEGER) || a.displayOrder - b.displayOrder
+            : sort === "name"
             ? a.name.localeCompare(b.name)
             : b.updatedAt.localeCompare(a.updatedAt),
         ),
-    [query, roomId, sort, status, store.templates],
+    [query, roomId, roomOrder, sort, status, store.templates],
   );
   const rename = (id: string) => {
     const source = store.templates.find((item) => item.id === id);
@@ -43,6 +49,15 @@ export function AdminTemplatesPage() {
     if (source) void store.loadDetail(id).then((detail) => store.save({ ...detail, roomId: nextRoomId, updatedAt: new Date().toISOString() })).catch(showError);
   };
   const showError = (error: unknown) => window.alert(error instanceof Error ? error.message : 'The template operation failed.')
+  const savePosition = async (record: AdminTemplateSummary, value: string) => {
+    const roomSize = store.templates.filter((template) => template.roomId === record.roomId).length;
+    const position = parseTemplatePosition(value, roomSize);
+    if (position === null) throw new Error(`Order must be a whole number from 1 to ${roomSize}.`);
+    if (position === record.displayOrder) return;
+    setSavingOrderId(record.id);
+    try { await store.reorder(record.id, position); }
+    finally { setSavingOrderId(null); }
+  };
 
   return (
     <div>
@@ -101,6 +116,7 @@ export function AdminTemplatesPage() {
         >
           <option value="updated">Recently updated</option>
           <option value="name">Name A–Z</option>
+          <option value="order">Display order</option>
         </select>
       </div>
       {records.length === 0 ? (
@@ -110,9 +126,7 @@ export function AdminTemplatesPage() {
       ) : (
         <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {records.map((record) => {
-            const position = store.templates.findIndex(
-              (item) => item.id === record.id,
-            );
+            const roomSize = store.templates.filter((item) => item.roomId === record.roomId).length;
             return (
               <article
                 className="overflow-hidden rounded-2xl bg-white shadow-sm"
@@ -161,6 +175,7 @@ export function AdminTemplatesPage() {
                       </option>
                     ))}
                   </select>
+                  <TemplateOrderInput disabled={savingOrderId === record.id} key={`${record.id}:${record.displayOrder}`} onSave={(value) => savePosition(record, value)} record={record} />
                   <div className="mt-3 grid grid-cols-2 gap-2">
                     <button
                       className="min-h-10 rounded-lg bg-stone-950 text-sm font-semibold text-white"
@@ -195,16 +210,16 @@ export function AdminTemplatesPage() {
                     </button>
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
-                      disabled={position === 0}
-                      onClick={() => { void store.reorder(record.id, -1).catch(showError) }}
+                      disabled={savingOrderId === record.id || record.displayOrder <= 1}
+                      onClick={() => { void store.reorder(record.id, record.displayOrder - 1).catch(showError) }}
                       type="button"
                     >
                       Move up
                     </button>
                     <button
                       className="min-h-10 rounded-lg bg-stone-100 text-sm font-semibold"
-                      disabled={position === store.templates.length - 1}
-                      onClick={() => { void store.reorder(record.id, 1).catch(showError) }}
+                      disabled={savingOrderId === record.id || record.displayOrder >= roomSize}
+                      onClick={() => { void store.reorder(record.id, record.displayOrder + 1).catch(showError) }}
                       type="button"
                     >
                       Move down
@@ -235,4 +250,13 @@ export function AdminTemplatesPage() {
       )}
     </div>
   );
+}
+
+function TemplateOrderInput({ disabled, onSave, record }: { disabled: boolean; onSave: (value: string) => Promise<void>; record: AdminTemplateSummary }) {
+  const [value, setValue] = useState(String(record.displayOrder));
+  const commit = async () => {
+    try { await onSave(value); }
+    catch (error) { setValue(String(record.displayOrder)); window.alert(error instanceof Error ? error.message : 'Template order could not be saved.'); }
+  };
+  return <label className="mt-3 flex items-center gap-2 text-xs font-semibold text-stone-600">Order<input aria-label={`Order for ${record.name}`} className="min-h-10 w-20 rounded-lg border border-stone-200 px-3 text-sm" disabled={disabled} inputMode="numeric" min="1" onBlur={() => void commit()} onChange={(event) => setValue(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }} step="1" type="number" value={value} /></label>;
 }
