@@ -5,18 +5,20 @@ import { TemplateElementLayer } from './TemplateElementLayer'
 
 interface TemplateSurfaceProps {
   className?: string
+  backgroundUrl?: string | null
   renderSlot: (slot: TemplateSlot, index: number) => ReactNode
   template: PrintTemplate
 }
 
-export function TemplateSurface({ className = '', renderSlot, template }: TemplateSurfaceProps) {
+export function TemplateSurface({ backgroundUrl, className = '', renderSlot, template }: TemplateSurfaceProps) {
+  const resolvedBackgroundUrl = backgroundUrl === undefined ? template.backgroundUrl : backgroundUrl
   return (
     <div
       className={`relative w-full overflow-hidden bg-cover bg-center [container-type:inline-size] ${className}`}
       style={{
         aspectRatio: `${template.canvas.width} / ${template.canvas.height}`,
         backgroundColor: template.backgroundColor,
-        ...(template.backgroundUrl ? { backgroundImage: `url(${template.backgroundUrl})` } : {}),
+        ...(resolvedBackgroundUrl ? { backgroundImage: `url(${resolvedBackgroundUrl})` } : {}),
       }}
     >
       {template.slots.map((slot, index) => slot.visible === false ? null : (
