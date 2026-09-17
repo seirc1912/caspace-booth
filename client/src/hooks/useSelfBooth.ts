@@ -139,17 +139,6 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
       .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.') })
     return () => { active = false }
   }, [selectedTemplateId, templateDetails, templateSummaries])
-  useEffect(() => {
-    if (!selectedTemplateId || !templateDetails[selectedTemplateId]) return
-    const currentIndex = roomTemplateSummaries.findIndex((item) => item.id === selectedTemplateId)
-    const next = roomTemplateSummaries[currentIndex + 1]
-    if (!next || templateDetails[next.id]) return
-    let active = true
-    void loadPublishedTemplateDetail(next.id)
-      .then((detail) => { if (active) setTemplateDetails((current) => current[next.id] ? current : { ...current, [next.id]: detail }) })
-      .catch(() => { /* Navigation still performs a foreground retry. */ })
-    return () => { active = false }
-  }, [roomTemplateSummaries, selectedTemplateId, templateDetails])
   const selectRoom = async (id: string) => {
     const summaries = templateSummaries.length ? templateSummaries : await loadPublishedTemplateSummaries()
     if (!templateSummaries.length) setTemplateSummaries(summaries)
@@ -179,23 +168,13 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const selectFrame = useCallback(async (index: number) => {
     const next = roomTemplateSummaries[index]
     if (!next) return false
-    const previousId = selectedTemplateId
+    try { await ensureTemplateDetail(next.id) }
+    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
     setSelectedTemplateIdState(next.id)
     setCurrentSlot(null)
     persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
-    const startedAt = performance.now()
-    try {
-      await ensureTemplateDetail(next.id)
-      if (import.meta.env.DEV || sessionStorage.getItem('selfbooth.debug-order-timing') === '1') console.info('[frame switch timing]', { templateId: next.id, readyMs: performance.now() - startedAt })
-    }
-    catch (reason) {
-      setSelectedTemplateIdState(previousId)
-      persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: previousId })
-      setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.')
-      return false
-    }
     return true
-  }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId, selectedTemplateId])
+  }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId])
 
   const completeCurrentFrame = useCallback(() => {
     if (!selectedTemplateId || !slots.some(Boolean)) return false
