@@ -7,6 +7,7 @@ import { saveComposition } from './features/orders/services/saveComposition'
 import { printOrderRepository } from './features/orders/services/orderServiceInstance'
 import { compositionAssetSources, CompositionAssetError, prefetchTemplateExportAssets, RemoteExportAssetCache, RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
 import { createOrderPhotoSnapshot, runFailureSafeOrder, type OrderPhotoSnapshot } from './features/orders/services/orderPhotoSnapshot'
+import { flushOrderDraftBestEffort } from './features/orders/services/orderDraftFlush'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
@@ -93,7 +94,7 @@ export function CustomerApp() {
     let orderSnapshot: OrderPhotoSnapshot | null = null
     try {
       setOrderProgress('Creating print order…')
-      await booth.flushLocalDraft()
+      await flushOrderDraftBestEffort(booth.flushLocalDraft)
       orderSnapshot = await createOrderPhotoSnapshot(completedFrames, branding)
       const orderFrames = orderSnapshot.frames
       const draftStartedAt = performance.now()
