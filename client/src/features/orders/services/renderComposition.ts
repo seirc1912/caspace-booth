@@ -19,6 +19,7 @@ interface RenderOptions {
 
 export interface RenderTiming {
   assetPreparationMs: number
+  grayscaleProcessingMs: number
   renderMs: number
   pngEncodingMs: number
   pngBytes: number
@@ -55,10 +56,14 @@ const transientStatus = (status: number) => status === 408 || status === 429 || 
 
 export class RemoteExportAssetCache {
   private readonly blobs = new Map<string, Promise<Blob>>()
+  private requests = 0
+  private hits = 0
 
   load(source: string, assetType: CompositionAssetType) {
     let blob = this.blobs.get(source)
+    if (blob) this.hits += 1
     if (!blob) {
+      this.requests += 1
       const request = fetchRemoteAsset(source, assetType)
       blob = request
       this.blobs.set(source, request)
@@ -67,7 +72,9 @@ export class RemoteExportAssetCache {
     return blob
   }
 
-  clear() { this.blobs.clear() }
+  stats() { return { entries: this.blobs.size, hits: this.hits, requests: this.requests } }
+
+  clear() { this.blobs.clear(); this.requests = 0; this.hits = 0 }
 }
 
 export class RenderAssetCache {
@@ -309,13 +316,14 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   const startedAt = performance.now()
   const format = options.format ?? 'png'
   const assets = compositionAssets(template, slots, options.branding)
-  await Promise.all(assets.map((asset) => loadImage(asset.source, asset.type, options.assetCache)))
+  for (const asset of assets) await loadImage(asset.source, asset.type, options.assetCache)
   const assetsReadyAt = performance.now()
   const canvas = document.createElement('canvas')
   canvas.width = template.canvas.width; canvas.height = template.canvas.height
   const context = canvas.getContext('2d', { alpha: format === 'png' })
   if (!context) throw new Error('Canvas rendering is unavailable on this device.')
   const grayscaleSources = new Map<string, HTMLCanvasElement>()
+  let grayscaleProcessingMs = 0
   options.onProgress?.(5)
   if (format === 'jpg') { context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height) }
   if (template.backgroundColor && template.backgroundColor !== 'transparent') { context.fillStyle = template.backgroundColor; context.fillRect(0, 0, canvas.width, canvas.height) }
@@ -335,7 +343,12 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
         let source: CanvasImageSource = image
         if (slot.filter === 'grayscale') {
           let grayscale = grayscaleSources.get(slot.photo.src)
-          if (!grayscale) { grayscale = grayscalePhotoSource(image); grayscaleSources.set(slot.photo.src, grayscale) }
+          if (!grayscale) {
+            const grayscaleStartedAt = performance.now()
+            grayscale = grayscalePhotoSource(image)
+            grayscaleProcessingMs += performance.now() - grayscaleStartedAt
+            grayscaleSources.set(slot.photo.src, grayscale)
+          }
           source = grayscale
         }
         context.save(); context.globalAlpha = definition.opacity ?? 1
@@ -357,9 +370,11 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   }
   options.onProgress?.(90)
   const renderedAt = performance.now()
+  grayscaleSources.forEach((source) => { source.width = 1; source.height = 1 })
+  grayscaleSources.clear()
   const print = await canvasBlob(canvas, format === 'png' ? 'image/png' : 'image/jpeg', format === 'jpg' ? options.quality ?? 0.95 : undefined)
   const encodedAt = performance.now()
-  options.onTiming?.({ assetPreparationMs: assetsReadyAt - startedAt, renderMs: renderedAt - assetsReadyAt, pngEncodingMs: encodedAt - renderedAt, pngBytes: print.size })
+  options.onTiming?.({ assetPreparationMs: assetsReadyAt - startedAt, grayscaleProcessingMs, renderMs: renderedAt - assetsReadyAt, pngEncodingMs: encodedAt - renderedAt, pngBytes: print.size })
   if (options.createPreview === false) {
     canvas.width = 1; canvas.height = 1; options.onProgress?.(100)
     return { print, preview: null, width: template.canvas.width, height: template.canvas.height, format }

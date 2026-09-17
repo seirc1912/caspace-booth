@@ -21,6 +21,8 @@ import { RoomSelectionPage } from './pages/RoomSelectionPage'
 import { RoomSummaryPage } from './pages/RoomSummaryPage'
 import { SuccessPage } from './pages/SuccessPage'
 import { TemplateSelectionPage } from './pages/TemplateSelectionPage'
+import { PageShell } from './components/layout/PageShell'
+import { EditorDisplayAssetCache } from './features/templates/editorDisplayAssets'
 
 export function CustomerApp() {
   const branding = useBranding(); const { pathname, navigate } = usePathname()
@@ -41,6 +43,7 @@ export function CustomerApp() {
   const orderItemsRef = useRef<Record<string, PrintOrderItem>>({})
   const uploadedFrameSlotsRef = useRef<Record<string, Array<FilledSlot | null>>>({})
   const [remoteExportAssets] = useState(() => new RemoteExportAssetCache())
+  const [editorDisplayAssets] = useState(() => new EditorDisplayAssetCache())
   const [editorBackground, setEditorBackground] = useState<{ canonical: string; local: string } | null>(null)
   const debugOrderTiming = import.meta.env.DEV || sessionStorage.getItem('selfbooth.debug-order-timing') === '1'
   useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError, booth.clearPhotoError)
@@ -93,8 +96,12 @@ export function CustomerApp() {
     let orderSnapshot: OrderPhotoSnapshot | null = null
     try {
       setOrderProgress('Creating print order…')
+      const draftFlushStartedAt = performance.now()
       await booth.flushLocalDraft()
+      const draftFlushMs = performance.now() - draftFlushStartedAt
+      const snapshotStartedAt = performance.now()
       orderSnapshot = await createOrderPhotoSnapshot(completedFrames, branding)
+      const snapshotMs = performance.now() - snapshotStartedAt
       const orderFrames = orderSnapshot.frames
       const draftStartedAt = performance.now()
       const draft = orderDraftRef.current ?? await printOrderRepository.createDraft(booth.phoneNumber, booth.room.id)
@@ -155,7 +162,7 @@ export function CustomerApp() {
         },
       )
       const submitMs = performance.now() - submitStartedAt
-      if (debugOrderTiming) console.info('[print-order timing]', { draftMs, frames: orderTimings.sort((left, right) => left.frame - right.frame), submitMs, totalMs: performance.now() - orderStartedAt, concurrency: { render: 1, network: networkConcurrency } })
+      if (debugOrderTiming) console.info('[print-order timing]', { draftFlushMs, snapshotMs, draftMs, frames: orderTimings.sort((left, right) => left.frame - right.frame), submitMs, totalMs: performance.now() - orderStartedAt, remoteAssets: remoteExportAssets.stats(), concurrency: { render: 1, network: networkConcurrency } })
       navigate('/success')
     } catch (reason) {
       const assetError = reason instanceof CompositionAssetError ? reason : reason instanceof Error && reason.cause instanceof CompositionAssetError ? reason.cause : null
@@ -202,29 +209,42 @@ export function CustomerApp() {
 
   useEffect(() => { if (pathname === '/editor' && booth.templateReady && booth.slots.length === 0) booth.openEditor() }, [booth, pathname])
   useEffect(() => {
-    if (pathname !== '/editor' || !booth.templateReady) return
+    if (pathname !== '/editor' || !booth.templateReady) {
+      editorDisplayAssets.retainOnly([])
+      return
+    }
     let active = true
-    let localBackground: string | null = null
-    const canonicalBackground = booth.template.backgroundUrl
-    const timer = window.setTimeout(() => {
-      const background = canonicalBackground && /^https?:/i.test(canonicalBackground)
-        ? remoteExportAssets.load(canonicalBackground, 'template-background').then((blob) => {
-          if (!active) return
-          localBackground = URL.createObjectURL(blob)
-          setEditorBackground({ canonical: canonicalBackground, local: localBackground })
+    let prefetchTimer: number | null = null
+    const current = booth.template
+    const next = booth.roomTemplates[booth.currentFrameIndex + 1]
+    editorDisplayAssets.retainOnly([current.id, ...(next ? [next.id] : [])])
+    const startedAt = performance.now()
+    void editorDisplayAssets.load(current).then((asset) => {
+      if (!active) return
+      setEditorBackground(asset && current.backgroundUrl ? { canonical: current.backgroundUrl, local: asset.objectUrl } : null)
+      if (debugOrderTiming) console.info('[editor frame timing]', { templateId: current.id, displayAssetMs: performance.now() - startedAt, displayBytes: asset?.bytes ?? 0 })
+      prefetchTimer = window.setTimeout(() => {
+        if (!active) return
+        const prefetch = async () => {
+          if (next) await editorDisplayAssets.load(next)
+          await prefetchTemplateExportAssets(current, branding, remoteExportAssets)
+          if (next) await prefetchTemplateExportAssets(next, branding, remoteExportAssets)
+        }
+        void prefetch().catch((reason) => {
+          if (debugOrderTiming) console.warn('[template asset prefetch]', { templateId: current.id, name: current.name, message: reason instanceof Error ? reason.message : String(reason) })
         })
-        : Promise.resolve()
-      void Promise.all([background, prefetchTemplateExportAssets(booth.template, branding, remoteExportAssets)]).catch((reason) => {
-        if (debugOrderTiming) console.warn('[template export prefetch]', { templateId: booth.template.id, name: booth.template.name, message: reason instanceof Error ? reason.message : String(reason) })
-      })
-    }, 0)
+      }, 500)
+    }).catch((reason) => {
+      if (!active) return
+      setEditorBackground(current.backgroundUrl ? { canonical: current.backgroundUrl, local: current.backgroundUrl } : null)
+      if (debugOrderTiming) console.warn('[editor display asset]', { templateId: current.id, message: reason instanceof Error ? reason.message : String(reason) })
+    })
     return () => {
       active = false
-      window.clearTimeout(timer)
-      if (localBackground) URL.revokeObjectURL(localBackground)
+      if (prefetchTimer !== null) window.clearTimeout(prefetchTimer)
     }
-  }, [booth.template, booth.templateReady, branding, debugOrderTiming, pathname, remoteExportAssets])
-  useEffect(() => () => remoteExportAssets.clear(), [remoteExportAssets])
+  }, [booth.currentFrameIndex, booth.roomTemplates, booth.template, booth.templateReady, branding, debugOrderTiming, editorDisplayAssets, pathname, remoteExportAssets])
+  useEffect(() => () => { editorDisplayAssets.clear(); remoteExportAssets.clear() }, [editorDisplayAssets, remoteExportAssets])
 
   if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
@@ -232,6 +252,7 @@ export function CustomerApp() {
   if (pathname === '/editor' && !booth.draftReady) return null
   if (pathname === '/editor' && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/editor' && !booth.selectedTemplateId) return <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} />
+  if (pathname === '/editor' && booth.selectedTemplateId && !booth.templateReady) return <PageShell><div className="grid min-h-[60dvh] place-items-center" role="status"><p className="font-bold text-stone-500">Loading frame…</p></div></PageShell>
   if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} canOrder={canOrder} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onNext={saveAndContinue} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSave={booth.completeCurrentFrame} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} onFitChange={booth.updateFit} orderProgress={orderProgress} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
   if (pathname === '/summary' && booth.room) return <RoomSummaryPage completedFrameIds={booth.completedFrameIds} frameSlots={booth.frameSlots} onEdit={(index) => { booth.selectFrame(index); navigate('/editor') }} onRemove={removeOrderItem} onSubmit={submitOrder} onSuccess={finishSuccessfulOrder} previewUrls={framePreviews} roomName={booth.room.name} templates={booth.roomTemplates} />
   if (pathname === '/preview' && booth.room) return <OrderPreviewPage onBack={() => navigate('/editor')} onSuccess={finishSuccessfulOrder} phoneNumber={booth.phoneNumber} roomId={booth.room.id} slots={booth.slots} template={booth.template} />

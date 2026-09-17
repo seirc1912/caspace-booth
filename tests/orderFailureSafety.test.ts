@@ -49,6 +49,7 @@ test('selected-frame prefetch and Order share one canonical remote Blob request'
     ])
     await cache.load(remoteTemplate.backgroundUrl, 'template-background')
     assert.equal(calls, 1)
+    assert.deepEqual(cache.stats(), { entries: 1, hits: 2, requests: 1 })
   } finally { cache.clear(); globalThis.fetch = originalFetch }
 })
 

@@ -145,7 +145,7 @@ async function uploadDataUrl(templateId: string, field: string, value: string) {
   const path = `${templateId}/${field}-${crypto.randomUUID()}.${assetExtension(blob.type)}`
   const token = requireToken()
   const { error } = await supabase.storage.from(templateAssetBucket).upload(path, blob, {
-    contentType: blob.type, upsert: false, metadata: { adminToken: token },
+    cacheControl: '31536000', contentType: blob.type, upsert: false, metadata: { adminToken: token },
   })
   if (error) throw new Error(`Template asset upload failed: ${error.message}`)
   return supabase.storage.from(templateAssetBucket).getPublicUrl(path).data.publicUrl
@@ -167,7 +167,7 @@ export async function uploadTemplateAsset(templateId: string, field: string, fil
   if (!file.type.startsWith('image/')) throw new Error('Only image assets are supported.')
   const path = `${templateId}/${field}-${crypto.randomUUID()}.${assetExtension(file.type)}`
   const { error } = await supabase.storage.from(templateAssetBucket).upload(path, file, {
-    contentType: file.type, upsert: false, metadata: { adminToken: requireToken() },
+    cacheControl: '31536000', contentType: file.type, upsert: false, metadata: { adminToken: requireToken() },
   })
   if (error) throw new Error(`Template asset upload failed: ${error.message}`)
   return supabase.storage.from(templateAssetBucket).getPublicUrl(path).data.publicUrl
