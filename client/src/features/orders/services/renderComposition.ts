@@ -1,7 +1,7 @@
 import type { BrandingConfig } from '../../../types/branding'
 import type { FilledSlot, PrintTemplate, TemplateElement, TemplateVariable } from '../../../types/selfBooth'
 import { basePhotoFitScale } from '../../photos/photoFit'
-import { drawWithPhotoFilter, grayscaleRgbaPixels } from '../../photos/photoFilter'
+import { grayscaleRgbaPixels } from '../../photos/photoFilter'
 import { fillPhotoSlotBacking } from '../../photos/photoSlotBacking'
 
 export type ImageExportFormat = 'png' | 'jpg'
@@ -19,7 +19,6 @@ interface RenderOptions {
 
 export interface RenderTiming {
   assetPreparationMs: number
-  grayscaleProcessingMs: number
   renderMs: number
   pngEncodingMs: number
   pngBytes: number
@@ -56,16 +55,11 @@ const transientStatus = (status: number) => status === 408 || status === 429 || 
 
 export class RemoteExportAssetCache {
   private readonly blobs = new Map<string, Promise<Blob>>()
-  private requests = 0
-  private hits = 0
-  private bytes = 0
 
   load(source: string, assetType: CompositionAssetType) {
     let blob = this.blobs.get(source)
-    if (blob) this.hits += 1
     if (!blob) {
-      this.requests += 1
-      const request = fetchRemoteAsset(source, assetType).then((value) => { this.bytes += value.size; return value })
+      const request = fetchRemoteAsset(source, assetType)
       blob = request
       this.blobs.set(source, request)
       void request.catch(() => { if (this.blobs.get(source) === request) this.blobs.delete(source) })
@@ -73,9 +67,7 @@ export class RemoteExportAssetCache {
     return blob
   }
 
-  stats() { return { entries: this.blobs.size, hits: this.hits, requests: this.requests, bytes: this.bytes } }
-
-  clear() { this.blobs.clear(); this.requests = 0; this.hits = 0; this.bytes = 0 }
+  clear() { this.blobs.clear() }
 }
 
 export class RenderAssetCache {
@@ -122,7 +114,7 @@ export const compositionAssetSources = (template: PrintTemplate, slots: Array<Fi
   ...template.variables.map((variable) => variable.type === 'brandLogo' ? branding?.logoUrl : undefined),
 ].filter((source): source is string => Boolean(source)))]
 
-export const compositionAssets = (template: PrintTemplate, slots: Array<FilledSlot | null>, branding?: BrandingConfig) => [
+const compositionAssets = (template: PrintTemplate, slots: Array<FilledSlot | null>, branding?: BrandingConfig) => [
   template.backgroundUrl ? { source: template.backgroundUrl, type: 'template-background' as const } : null,
   ...slots.map((slot) => slot ? { source: slot.photo.src, type: 'customer-photo' as const } : null),
   ...template.elements.map((element) => element.visible && element.assetUrl ? { source: element.assetUrl, type: 'template-element' as const } : null),
@@ -132,50 +124,6 @@ export const compositionAssets = (template: PrintTemplate, slots: Array<FilledSl
 export const prefetchTemplateExportAssets = async (template: PrintTemplate, branding: BrandingConfig | undefined, cache: RemoteExportAssetCache) => {
   const assets = compositionAssets(template, [], branding).filter((asset) => /^https?:/i.test(asset.source))
   for (const asset of assets) await cache.load(asset.source, asset.type)
-}
-
-export interface RemoteAssetPreflightFailure {
-  templateId: string
-  templateName: string
-  assetType: CompositionAssetType
-  source: string
-}
-
-export class RemoteAssetPreflightError extends Error {
-  readonly failure: RemoteAssetPreflightFailure
-  constructor(failure: RemoteAssetPreflightFailure, options?: ErrorOptions) {
-    super(`Template asset preflight failed (${failure.assetType}, ${failure.templateId}).`, options)
-    this.name = 'RemoteAssetPreflightError'
-    this.failure = failure
-  }
-}
-
-/** Fetches each canonical compressed template asset once, without decoding it. */
-export async function preflightOrderRemoteAssets(
-  frames: Array<{ template: PrintTemplate }>,
-  branding: BrandingConfig | undefined,
-  cache: RemoteExportAssetCache,
-  concurrency = 2,
-) {
-  const unique = new Map<string, { templateId: string; templateName: string; assetType: CompositionAssetType; source: string }>()
-  for (const frame of frames) {
-    for (const asset of compositionAssets(frame.template, [], branding)) {
-      if (/^https?:/i.test(asset.source) && !unique.has(asset.source)) unique.set(asset.source, {
-        templateId: frame.template.id, templateName: frame.template.name, assetType: asset.type, source: asset.source,
-      })
-    }
-  }
-  const assets = [...unique.values()]
-  let next = 0
-  const worker = async () => {
-    while (next < assets.length) {
-      const asset = assets[next++]!
-      try { await cache.load(asset.source, asset.assetType) }
-      catch (reason) { throw new RemoteAssetPreflightError(asset, { cause: reason }) }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), assets.length) }, worker))
-  return { assets: assets.length, bytes: cache.stats().bytes }
 }
 
 const errorMessage = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
@@ -286,14 +234,6 @@ function grayscalePhotoSource(image: HTMLImageElement) {
   return canvas
 }
 
-function supportsCanvasGrayscale(context: CanvasRenderingContext2D) {
-  const previous = context.filter
-  context.filter = 'grayscale(1)'
-  const supported = context.filter === 'grayscale(1)'
-  context.filter = previous
-  return supported
-}
-
 function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, source: CanvasImageSource, slot: FilledSlot, x: number, y: number, width: number, height: number, mask: 'rectangle' | 'rounded' | 'circle' | 'ellipse', radius: number) {
   const transform = slot.transform
   const baseScale = basePhotoFitScale(
@@ -369,15 +309,13 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   const startedAt = performance.now()
   const format = options.format ?? 'png'
   const assets = compositionAssets(template, slots, options.branding)
-  for (const asset of assets) await loadImage(asset.source, asset.type, options.assetCache)
+  await Promise.all(assets.map((asset) => loadImage(asset.source, asset.type, options.assetCache)))
   const assetsReadyAt = performance.now()
   const canvas = document.createElement('canvas')
   canvas.width = template.canvas.width; canvas.height = template.canvas.height
   const context = canvas.getContext('2d', { alpha: format === 'png' })
   if (!context) throw new Error('Canvas rendering is unavailable on this device.')
   const grayscaleSources = new Map<string, HTMLCanvasElement>()
-  let grayscaleProcessingMs = 0
-  const canvasGrayscale = supportsCanvasGrayscale(context)
   options.onProgress?.(5)
   if (format === 'jpg') { context.fillStyle = '#ffffff'; context.fillRect(0, 0, canvas.width, canvas.height) }
   if (template.backgroundColor && template.backgroundColor !== 'transparent') { context.fillStyle = template.backgroundColor; context.fillRect(0, 0, canvas.width, canvas.height) }
@@ -395,14 +333,9 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
       if (slot && definition.visible !== false) {
         const image = await loadImage(slot.photo.src, 'customer-photo', options.assetCache)
         let source: CanvasImageSource = image
-        if (slot.filter === 'grayscale' && !canvasGrayscale) {
+        if (slot.filter === 'grayscale') {
           let grayscale = grayscaleSources.get(slot.photo.src)
-          if (!grayscale) {
-            const grayscaleStartedAt = performance.now()
-            grayscale = grayscalePhotoSource(image)
-            grayscaleProcessingMs += performance.now() - grayscaleStartedAt
-            grayscaleSources.set(slot.photo.src, grayscale)
-          }
+          if (!grayscale) { grayscale = grayscalePhotoSource(image); grayscaleSources.set(slot.photo.src, grayscale) }
           source = grayscale
         }
         context.save(); context.globalAlpha = definition.opacity ?? 1
@@ -410,9 +343,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
         context.rotate(definition.rotation * Math.PI / 180)
         context.translate(-(definition.x + definition.width / 2), -(definition.y + definition.height / 2))
         if (definition.shadow?.blur) { context.shadowColor = definition.shadow.color; context.shadowBlur = definition.shadow.blur; context.shadowOffsetX = definition.shadow.offsetX; context.shadowOffsetY = definition.shadow.offsetY }
-        drawWithPhotoFilter(context, slot.filter === 'grayscale' && canvasGrayscale ? 'grayscale' : 'none', () => {
-          drawPhoto(context, image, source, slot, definition.x, definition.y, definition.width, definition.height, definition.mask ?? 'rectangle', definition.borderRadius)
-        })
+        drawPhoto(context, image, source, slot, definition.x, definition.y, definition.width, definition.height, definition.mask ?? 'rectangle', definition.borderRadius)
         context.shadowColor = 'transparent'
         if (definition.borderWidth) { framePath(context, definition.x, definition.y, definition.width, definition.height, definition.mask ?? 'rectangle', definition.borderRadius); context.strokeStyle = definition.borderColor ?? '#000000'; context.lineWidth = definition.borderWidth; context.stroke() }
         context.restore()
@@ -426,13 +357,9 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
   }
   options.onProgress?.(90)
   const renderedAt = performance.now()
-  grayscaleSources.forEach((source) => { source.width = 1; source.height = 1 })
-  grayscaleSources.clear()
-  let print: Blob
-  try { print = await canvasBlob(canvas, format === 'png' ? 'image/png' : 'image/jpeg', format === 'jpg' ? options.quality ?? 0.95 : undefined) }
-  catch (reason) { canvas.width = 1; canvas.height = 1; throw reason }
+  const print = await canvasBlob(canvas, format === 'png' ? 'image/png' : 'image/jpeg', format === 'jpg' ? options.quality ?? 0.95 : undefined)
   const encodedAt = performance.now()
-  options.onTiming?.({ assetPreparationMs: assetsReadyAt - startedAt, grayscaleProcessingMs, renderMs: renderedAt - assetsReadyAt, pngEncodingMs: encodedAt - renderedAt, pngBytes: print.size })
+  options.onTiming?.({ assetPreparationMs: assetsReadyAt - startedAt, renderMs: renderedAt - assetsReadyAt, pngEncodingMs: encodedAt - renderedAt, pngBytes: print.size })
   if (options.createPreview === false) {
     canvas.width = 1; canvas.height = 1; options.onProgress?.(100)
     return { print, preview: null, width: template.canvas.width, height: template.canvas.height, format }
