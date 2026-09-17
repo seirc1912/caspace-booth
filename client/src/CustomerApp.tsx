@@ -5,8 +5,9 @@ import type { PrintOrderDraft, PrintOrderItem } from './features/orders/reposito
 import { completedFramesForOrder } from './features/orders/completedFrames'
 import { saveComposition } from './features/orders/services/saveComposition'
 import { printOrderRepository } from './features/orders/services/orderServiceInstance'
-import { compositionAssetSources, CompositionAssetError, prefetchTemplateExportAssets, RemoteExportAssetCache, RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
+import { CompositionAssetError, preflightOrderRemoteAssets, prefetchTemplateExportAssets, RemoteAssetPreflightError, RemoteExportAssetCache, RenderAssetCache, renderComposition, type RenderTiming } from './features/orders/services/renderComposition'
 import { createOrderPhotoSnapshot, runFailureSafeOrder, type OrderPhotoSnapshot } from './features/orders/services/orderPhotoSnapshot'
+import { OrderPipelineError, runOrderPipeline } from './features/orders/services/orderPipeline'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
@@ -92,8 +93,8 @@ export function CustomerApp() {
     setDownloading(true)
     const orderStartedAt = performance.now()
     const orderTimings: Array<{ frame: number; render: RenderTiming; uploadMs: number; itemRpcMs: number }> = []
-    const assetCache = new RenderAssetCache(remoteExportAssets)
     let orderSnapshot: OrderPhotoSnapshot | null = null
+    const attemptId = crypto.randomUUID()
     try {
       setOrderProgress('Creating print order…')
       const draftFlushStartedAt = performance.now()
@@ -117,60 +118,78 @@ export function CustomerApp() {
       }
       setOrderItems({ ...orderItemsRef.current })
       const pendingFrames = orderFrames.filter((frame) => !orderItemsRef.current[frame.template.id] || uploadedFrameSlotsRef.current[frame.template.id] !== frame.sourceSlots)
-      let completed = orderFrames.length - pendingFrames.length
-      const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-      const networkConcurrency = mobile ? 1 : 2
-      const activeUploads = new Set<Promise<void>>()
-      try {
-        for (let pendingIndex = 0; pendingIndex < pendingFrames.length; pendingIndex += 1) {
-          const frame = pendingFrames[pendingIndex]!
-          if (activeUploads.size >= networkConcurrency) await Promise.race(activeUploads)
-          setOrderProgress(`Preparing prints ${completed + 1}/${orderFrames.length}…`)
+      const alreadyCompleted = orderFrames.length - pendingFrames.length
+      let submitStartedAt = 0
+      let submitMs = 0
+      await runOrderPipeline({
+        attemptId,
+        frames: pendingFrames,
+        initialCompletedCount: alreadyCompleted,
+        totalCount: orderFrames.length,
+        preflight: async () => { await preflightOrderRemoteAssets(orderFrames, branding, remoteExportAssets, 2) },
+        render: async (frame) => {
+          const assetCache = new RenderAssetCache(remoteExportAssets)
           let timing: RenderTiming | undefined
-          let rendered
-          try { rendered = await renderComposition(frame.template, frame.slots, { branding, createPreview: false, assetCache, onTiming: (value) => { timing = value } }) }
-          catch (reason) { throw new Error(`Failed to render print image: ${reason instanceof Error ? reason.message : String(reason)}`, { cause: reason }) }
-          const nextFrame = pendingFrames[pendingIndex + 1]
-          assetCache.retainOnly(nextFrame ? compositionAssetSources(nextFrame.template, nextFrame.slots, branding) : [])
-          setOrderProgress(`Uploading prints ${completed + 1}/${orderFrames.length}…`)
-          const upload = (async () => {
-            let networkTiming: { uploadMs: number; itemRpcMs: number } | undefined
-            const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, rendered.print, frame.index, (value) => { networkTiming = value })
-            orderItemsRef.current = { ...orderItemsRef.current, [frame.template.id]: item }
-            uploadedFrameSlotsRef.current = { ...uploadedFrameSlotsRef.current, [frame.template.id]: frame.sourceSlots }
-            setOrderItems(orderItemsRef.current)
-            completed += 1
-            if (timing && networkTiming) orderTimings.push({ frame: frame.index + 1, render: timing, ...networkTiming })
-          })()
-          activeUploads.add(upload)
-          void upload.then(() => activeUploads.delete(upload), () => activeUploads.delete(upload))
-        }
-        await Promise.all(activeUploads)
-      } catch (reason) {
-        await Promise.allSettled(activeUploads)
-        throw reason
-      }
-      setOrderProgress('Finalizing order…')
-      const submitStartedAt = performance.now()
-      await runFailureSafeOrder(
-        () => printOrderRepository.submit(draft),
-        async (confirmed) => {
-          printOrderRepository.releaseDraft(draft)
-          sessionStorage.setItem('selfbooth.last-order-id', confirmed.id)
-          setOrderId(confirmed.id)
-          await booth.clearLocalDraft()
+          try {
+            const output = await renderComposition(frame.template, frame.slots, { branding, createPreview: false, assetCache, onTiming: (value) => { timing = value } })
+            return { assetCache, output, timing }
+          } catch (reason) { assetCache.clear(); throw reason }
         },
-      )
-      const submitMs = performance.now() - submitStartedAt
-      if (debugOrderTiming) console.info('[print-order timing]', { draftFlushMs, snapshotMs, draftMs, frames: orderTimings.sort((left, right) => left.frame - right.frame), submitMs, totalMs: performance.now() - orderStartedAt, remoteAssets: remoteExportAssets.stats(), concurrency: { render: 1, network: networkConcurrency } })
+        upload: async (frame, rendered) => {
+          let networkTiming: { uploadMs: number; itemRpcMs: number } | undefined
+          const item = await printOrderRepository.addItem(draft, booth.phoneNumber, frame.template.id, rendered.output.print, frame.index, (value) => { networkTiming = value })
+          orderItemsRef.current = { ...orderItemsRef.current, [frame.template.id]: item }
+          uploadedFrameSlotsRef.current = { ...uploadedFrameSlotsRef.current, [frame.template.id]: frame.sourceSlots }
+          setOrderItems(orderItemsRef.current)
+          if (rendered.timing && networkTiming) orderTimings.push({ frame: frame.index + 1, render: rendered.timing, ...networkTiming })
+        },
+        releaseFrame: (_frame, rendered) => rendered?.assetCache.clear(),
+        submit: async () => {
+          submitStartedAt = performance.now()
+          const confirmed = await runFailureSafeOrder(
+            () => printOrderRepository.submit(draft),
+            async (result) => {
+              printOrderRepository.releaseDraft(draft)
+              remoteExportAssets.clear()
+              sessionStorage.setItem('selfbooth.last-order-id', result.id)
+              setOrderId(result.id)
+              await booth.clearLocalDraft()
+            },
+          )
+          submitMs = performance.now() - submitStartedAt
+          return confirmed
+        },
+        onEvent: (event) => {
+          const completed = event.completedCount
+          if (event.stage === 'preflight') setOrderProgress('Preparing assets…')
+          else if (event.stage === 'render') setOrderProgress(`Preparing print ${completed + 1}/${orderFrames.length}…`)
+          else if (event.stage === 'upload') setOrderProgress(`Uploading print ${completed + 1}/${orderFrames.length}…`)
+          else setOrderProgress('Finalizing order…')
+        },
+      })
+      if (debugOrderTiming) console.info('[print-order timing]', { attemptId, draftFlushMs, snapshotMs, draftMs, frames: orderTimings.sort((left, right) => left.frame - right.frame), submitMs, totalMs: performance.now() - orderStartedAt, remoteAssets: remoteExportAssets.stats(), concurrency: { render: 1, upload: 1 } })
       navigate('/success')
     } catch (reason) {
-      const assetError = reason instanceof CompositionAssetError ? reason : reason instanceof Error && reason.cause instanceof CompositionAssetError ? reason.cause : null
-      if (assetError) console.error('[print-order asset failure]', { assetType: assetError.assetType, scheme: assetError.scheme, stage: assetError.stage, status: assetError.status, abort: assetError.cause instanceof DOMException && assetError.cause.name === 'AbortError' })
-      else console.error('[print-order failure]', { name: reason instanceof Error ? reason.name : 'UnknownError', message: reason instanceof Error ? reason.message : String(reason) })
+      const pipelineError = reason instanceof OrderPipelineError ? reason : null
+      const root = pipelineError?.cause
+      const preflightError = root instanceof RemoteAssetPreflightError ? root : null
+      const assetError = root instanceof CompositionAssetError ? root : root instanceof Error && root.cause instanceof CompositionAssetError ? root.cause : null
+      console.error('[print-order failure]', {
+        attemptId, ...(pipelineError?.diagnostics ?? {}),
+        templateId: pipelineError?.diagnostics.frame?.template.id,
+        templateName: pipelineError?.diagnostics.frame?.template.name,
+        canvas: pipelineError?.diagnostics.frame?.template.canvas,
+        photoCount: pipelineError?.diagnostics.frame?.slots.filter(Boolean).length,
+        asset: preflightError?.failure.source,
+        assetType: preflightError?.failure.assetType ?? assetError?.assetType,
+        httpStatus: assetError?.status,
+        errorClass: reason instanceof Error ? reason.name : 'UnknownError',
+        message: reason instanceof Error ? reason.message : String(reason),
+        elapsedMs: performance.now() - orderStartedAt,
+      })
       booth.reportPhotoError('Order chưa hoàn tất. Ảnh của bạn vẫn được giữ lại. Vui lòng thử lại.')
     }
-    finally { assetCache.clear(); orderSnapshot?.release(); processingOrder.current = false; setDownloading(false); setOrderProgress(null) }
+    finally { orderSnapshot?.release(); processingOrder.current = false; setDownloading(false); setOrderProgress(null) }
   }
 
   const removeOrderItem = async (templateId: string) => {
