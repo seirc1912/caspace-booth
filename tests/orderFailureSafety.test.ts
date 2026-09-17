@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearEditorDraft, createEditorDraftMetadata, editorDraftScopeKey, loadEditorDraft, persistPhotoOnce, saveEditorDraft } from '../client/src/features/drafts/editorDraftStore'
 import { createOrderPhotoSnapshot, runFailureSafeOrder } from '../client/src/features/orders/services/orderPhotoSnapshot'
+import { flushOrderDraftBestEffort } from '../client/src/features/orders/services/orderDraftFlush'
 import { fetchRemoteAsset, prefetchTemplateExportAssets, RemoteExportAssetCache } from '../client/src/features/orders/services/renderComposition'
 import type { FilledSlot, PhotoAsset, PrintTemplate } from '../client/src/types/selfBooth'
 
@@ -11,6 +12,44 @@ const sourceBlob = new Blob(['customer-photo'], { type: 'image/jpeg' })
 const photo: PhotoAsset = { id: 'photo-1', src: 'blob:live-photo', blob: sourceBlob, alt: 'Customer photo', source: 'phone' }
 const filled: FilledSlot = { photo, transform: { zoom: 1.2, rotation: 3, x: 0.1, y: -0.1 }, fit: 'cover', filter: 'grayscale' }
 const template = { id: 'frame-1', slots: [{ id: 'slot-1' }], canvas: { width: 100, height: 100 }, elements: [], variables: [] } as unknown as PrintTemplate
+
+test('draft flush success continues into the existing Order path', async () => {
+  const events: string[] = []
+  await flushOrderDraftBestEffort(async () => { events.push('draft-flushed') })
+  events.push('snapshot', 'render', 'order')
+  assert.deepEqual(events, ['draft-flushed', 'snapshot', 'render', 'order'])
+})
+
+test('draft flush rejection warns safely and still reaches the existing Order path', async () => {
+  const events: string[] = []
+  const warnings: Array<{ message: string; errorClass: string }> = []
+  await flushOrderDraftBestEffort(
+    async () => { events.push('draft-failed'); throw new DOMException('private browsing detail', 'InvalidStateError') },
+    (message, diagnostic) => warnings.push({ message, errorClass: diagnostic.errorClass }),
+  )
+  const snapshot = await createOrderPhotoSnapshot([{ template, index: 0, slots: [filled] }], {} as never, {
+    readBlob: async () => { throw new Error('canonical Blob should be used') },
+    createObjectURL: () => 'blob:best-effort-order',
+    revokeObjectURL: () => undefined,
+  })
+  try { events.push('snapshot', 'render', 'order') } finally { snapshot.release() }
+  assert.deepEqual(events, ['draft-failed', 'snapshot', 'render', 'order'])
+  assert.deepEqual(warnings, [{
+    message: '[print-order] draft persistence unavailable; continuing with in-memory photos',
+    errorClass: 'InvalidStateError',
+  }])
+})
+
+test('invalid canonical customer Blob still fails snapshot after best-effort draft flush', async () => {
+  await flushOrderDraftBestEffort(async () => { throw new Error('IndexedDB unavailable') }, () => undefined)
+  const invalidPhoto = { ...photo, blob: new Blob([]) }
+  const invalidSlot = { ...filled, photo: invalidPhoto }
+  await assert.rejects(createOrderPhotoSnapshot([{ template, index: 0, slots: [invalidSlot] }], {} as never, {
+    readBlob: async () => { throw new Error('empty canonical Blob must not fall back') },
+    createObjectURL: () => 'blob:invalid',
+    revokeObjectURL: () => undefined,
+  }), /missing or empty/)
+})
 
 async function failureAt(stage: string) {
   const editor = { photos: [photo], slots: [filled], draftPresent: true }
