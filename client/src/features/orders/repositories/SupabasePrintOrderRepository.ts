@@ -1,5 +1,6 @@
 import { getAdminToken, supabase } from '../../../services/catalog/SupabaseCatalogService'
 import type { PrintOrderDraft, PrintOrderItem, PrintOrderRepository, PrintOrderStatus, PrintQueueOrder } from './PrintOrderRepository'
+import { withTransientOrderRetry } from '../services/transientRetry'
 
 const bucket = 'print-orders'
 const unwrap = <T>(data: T | null, error: { message: string } | null): T => {
@@ -17,25 +18,18 @@ const imageUrl = (path: string) => supabase.storage.from(bucket).getPublicUrl(pa
 const message = (reason: unknown) => reason instanceof Error ? reason.message : String(reason)
 const stageError = (stage: string, reason: unknown) => new Error(`${stage}: ${message(reason)}`, { cause: reason })
 const uploadedPathsByOrder = new Map<string, Set<string>>()
-const retryDelays = [350, 800]
-const wait = (milliseconds: number) => new Promise((resolve) => window.setTimeout(resolve, milliseconds))
-const isTransient = (reason: unknown) => {
-  const value = reason as { status?: number; statusCode?: number; message?: string }
-  const status = value?.status ?? value?.statusCode
-  const detail = (value?.message ?? message(reason)).toLowerCase()
-  if (status === 408 || status === 429 || (status !== undefined && status >= 500)) return true
-  if (status !== undefined && status >= 400 && status < 500) return false
-  return /network|fetch|timeout|timed out|connection|temporar|unavailable|gateway|rate limit/.test(detail)
+const operationTimeoutMs = 30_000
+const withTimeout = async <T>(operation: Promise<T>) => {
+  let timeout: number | undefined
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => { timeout = window.setTimeout(() => reject(new Error(`Operation timed out after ${operationTimeoutMs}ms.`)), operationTimeoutMs) }),
+    ])
+  } finally { if (timeout !== undefined) window.clearTimeout(timeout) }
 }
 async function withTransientRetry<T>(operation: () => Promise<T>) {
-  for (let attempt = 0; ; attempt += 1) {
-    try { return await operation() }
-    catch (reason) {
-      if (attempt >= retryDelays.length || !isTransient(reason)) throw reason
-      const delay = retryDelays[attempt]!
-      await wait(delay + Math.round(Math.random() * delay * 0.25))
-    }
-  }
+  return withTransientOrderRetry(operation, { timeout: withTimeout })
 }
 
 interface ItemRow { id: string; order_id: string; template_id: string; template_name?: string; storage_path: string; display_order: number; created_at: string }
@@ -64,6 +58,7 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
       if (!uploadedPaths.has(path)) await withTransientRetry(async () => {
         const upload = await supabase.storage.from(bucket).upload(path, uploadBody, { contentType: 'image/png', upsert: true, metadata: { orderToken: draft.editToken } })
         if (upload.error) throw upload.error
+        if (upload.data.path !== path) throw new Error('Storage confirmed an unexpected upload path.')
         uploadedPaths.add(path)
       })
     } catch (reason) { throw stageError('Failed to upload print image', reason) }

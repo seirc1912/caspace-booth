@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { clearEditorDraft, createEditorDraftMetadata, editorDraftScopeKey, loadEditorDraft, persistPhotoOnce, saveEditorDraft } from '../client/src/features/drafts/editorDraftStore'
 import { createOrderPhotoSnapshot, runFailureSafeOrder } from '../client/src/features/orders/services/orderPhotoSnapshot'
-import { fetchRemoteAsset, prefetchTemplateExportAssets, RemoteExportAssetCache } from '../client/src/features/orders/services/renderComposition'
+import { fetchRemoteAsset, preflightOrderRemoteAssets, prefetchTemplateExportAssets, RemoteAssetPreflightError, RemoteExportAssetCache } from '../client/src/features/orders/services/renderComposition'
 import type { FilledSlot, PhotoAsset, PrintTemplate } from '../client/src/types/selfBooth'
 
 const identity = { sessionId: 'failure-session', boothId: 'failure-room', phoneNumber: '84901112222' }
@@ -49,6 +49,7 @@ test('selected-frame prefetch and Order share one canonical remote Blob request'
     ])
     await cache.load(remoteTemplate.backgroundUrl, 'template-background')
     assert.equal(calls, 1)
+    assert.deepEqual(cache.stats(), { entries: 1, hits: 2, requests: 1, bytes: 10 })
   } finally { cache.clear(); globalThis.fetch = originalFetch }
 })
 
@@ -63,6 +64,43 @@ test('a failed cached remote request is evicted so a later Order can retry', asy
     const blob = await cache.load('https://assets.example/recover.png', 'template-background')
     assert.ok(blob instanceof Blob)
     assert.equal(calls, 4)
+  } finally { cache.clear(); globalThis.fetch = originalFetch }
+})
+
+test('13-frame remote preflight deduplicates assets and bounds fetch concurrency', async () => {
+  const originalFetch = globalThis.fetch
+  let calls = 0
+  let active = 0
+  let peak = 0
+  globalThis.fetch = (async () => {
+    calls += 1; active += 1; peak = Math.max(peak, active)
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    active -= 1
+    return new Response(new Blob(['template']), { status: 200 })
+  }) as typeof fetch
+  const cache = new RemoteExportAssetCache()
+  const orderFrames = Array.from({ length: 13 }, (_, index) => ({ template: {
+    ...template, id: `frame-${index}`, name: `Frame ${index}`,
+    backgroundUrl: `https://assets.example/background-${index % 4}.png`,
+  } }))
+  try {
+    const result = await preflightOrderRemoteAssets(orderFrames, undefined, cache, 2)
+    assert.equal(result.assets, 4)
+    assert.equal(calls, 4)
+    assert.ok(peak <= 2)
+  } finally { cache.clear(); globalThis.fetch = originalFetch }
+})
+
+test('remote preflight identifies the exact template asset before rendering', async () => {
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => new Response('', { status: 404 })) as typeof fetch
+  const cache = new RemoteExportAssetCache()
+  const remoteTemplate = { ...template, name: 'Broken Frame', backgroundUrl: 'https://assets.example/missing.png' }
+  try {
+    await assert.rejects(preflightOrderRemoteAssets([{ template: remoteTemplate }], undefined, cache), (reason: unknown) => reason instanceof RemoteAssetPreflightError
+      && reason.failure.templateId === 'frame-1'
+      && reason.failure.templateName === 'Broken Frame'
+      && reason.failure.source.endsWith('/missing.png'))
   } finally { cache.clear(); globalThis.fetch = originalFetch }
 })
 
@@ -106,6 +144,21 @@ test('H attempt-owned object URLs remain valid until rendering settles', async (
   snapshot.release()
   snapshot.release()
   assert.deepEqual(revoked, ['blob:order-snapshot'])
+})
+
+test('all canonical customer Blobs are verified before any frame rendering can begin', async () => {
+  const missingPhoto = { ...photo, id: 'photo-missing', src: 'blob:missing', blob: undefined }
+  const missingSlot = { ...filled, photo: missingPhoto }
+  let createdUrls = 0
+  await assert.rejects(createOrderPhotoSnapshot([
+    { template, index: 0, slots: [filled] },
+    { template: { ...template, id: 'frame-2' }, index: 1, slots: [missingSlot] },
+  ], {} as never, {
+    readBlob: async () => { throw new Error('canonical photo unavailable') },
+    createObjectURL: () => { createdUrls += 1; return `blob:snapshot-${createdUrls}` },
+    revokeObjectURL: () => undefined,
+  }), /canonical photo unavailable/)
+  assert.equal(createdUrls, 0)
 })
 
 test('I failed order leaves a nine-photo IndexedDB draft restorable after reload', async () => {

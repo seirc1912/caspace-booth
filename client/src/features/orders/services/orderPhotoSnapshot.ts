@@ -48,34 +48,39 @@ export async function createOrderPhotoSnapshot(
   dependencies: SnapshotDependencies = defaultDependencies,
 ): Promise<OrderPhotoSnapshot> {
   const attemptUrls: string[] = []
-  const photos = new Map<string, Promise<{ blob: Blob; src: string }>>()
+  const photoBlobs = new Map<string, Blob>()
+  const photos = new Map<string, { blob: Blob; src: string }>()
   try {
-    const snapshotFrames = await Promise.all(frames.map(async (frame) => ({
+    const uniquePhotos = new Map<string, FilledSlot['photo']>()
+    frames.forEach((frame) => frame.slots.forEach((slot) => { if (slot && !uniquePhotos.has(slot.photo.id)) uniquePhotos.set(slot.photo.id, slot.photo) }))
+    for (const photo of uniquePhotos.values()) {
+      const blob = photo.blob ?? await dependencies.readBlob(photo.src)
+      if (!(blob instanceof Blob) || blob.size <= 0) throw new Error(`Customer photo Blob is missing or empty (${photo.id}).`)
+      photoBlobs.set(photo.id, blob)
+    }
+    for (const photo of uniquePhotos.values()) {
+      const blob = photoBlobs.get(photo.id)!
+      const src = dependencies.createObjectURL(blob)
+      attemptUrls.push(src)
+      photos.set(photo.id, { blob, src })
+    }
+    const snapshotFrames = frames.map((frame) => ({
       template: structuredClone(frame.template),
       index: frame.index,
       sourceSlots: frame.slots,
-      slots: await Promise.all(frame.slots.map(async (slot) => {
+      slots: frame.slots.map((slot) => {
         if (!slot) return null
-        let retained = photos.get(slot.photo.id)
-        if (!retained) {
-          retained = (async () => {
-            const blob = slot.photo.blob ?? await dependencies.readBlob(slot.photo.src)
-            if (!(blob instanceof Blob) || blob.size <= 0) throw new Error('Customer photo Blob is missing or empty.')
-            const src = dependencies.createObjectURL(blob)
-            attemptUrls.push(src)
-            return { blob, src }
-          })()
-          photos.set(slot.photo.id, retained)
-        }
-        const { blob, src } = await retained
+        const retained = photos.get(slot.photo.id)
+        if (!retained) throw new Error(`Customer photo snapshot is missing (${slot.photo.id}).`)
+        const { blob, src } = retained
         return {
           photo: { ...slot.photo, src, previewSrc: undefined, blob, previewBlob: undefined },
           transform: { ...slot.transform },
           fit: slot.fit,
           filter: slot.filter,
         }
-      })),
-    })))
+      }),
+    }))
     let released = false
     return {
       frames: snapshotFrames,
