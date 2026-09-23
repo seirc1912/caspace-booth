@@ -13,6 +13,7 @@ import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
 import { startPhotoLibrarySession, useSessionPhotos } from './features/photos/useSessionPhotos'
 import type { PhotoLibrarySession } from './features/photos/useSessionPhotos'
+import { prefetchAdjacentTemplateDetails } from './features/templates/templateDetailLookahead'
 import type { FilledSlot } from './types/selfBooth'
 import { ComposerPage } from './pages/ComposerPage'
 import { HomePage } from './pages/HomePage'
@@ -225,6 +226,24 @@ export function CustomerApp() {
       if (localBackground) URL.revokeObjectURL(localBackground)
     }
   }, [booth.template, booth.templateReady, branding, debugOrderTiming, pathname, remoteExportAssets])
+  useEffect(() => {
+    if (pathname !== '/editor' || !booth.templateReady) return
+    let active = true
+    const timer = window.setTimeout(() => {
+      void prefetchAdjacentTemplateDetails(
+        booth.roomTemplateSummaries,
+        booth.template.id,
+        booth.ensureTemplateDetail,
+        async (nextTemplate) => {
+          if (!active) return
+          await prefetchTemplateExportAssets(nextTemplate, branding, remoteExportAssets)
+        },
+      ).catch((reason) => {
+        if (debugOrderTiming) console.warn('[frame lookahead prefetch]', { templateId: booth.template.id, message: reason instanceof Error ? reason.message : String(reason) })
+      })
+    }, 0)
+    return () => { active = false; window.clearTimeout(timer) }
+  }, [booth.ensureTemplateDetail, booth.roomTemplateSummaries, booth.template.id, booth.templateReady, branding, debugOrderTiming, pathname, remoteExportAssets])
   useEffect(() => () => remoteExportAssets.clear(), [remoteExportAssets])
 
   if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />

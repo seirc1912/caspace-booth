@@ -46,6 +46,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const [rooms, setRooms] = useState<Room[]>([])
   const [templateSummaries, setTemplateSummaries] = useState<CustomerTemplateSummary[]>([])
   const [templateDetails, setTemplateDetails] = useState<Record<string, CustomerTemplate>>({})
+  const templateDetailsRef = useRef<Record<string, CustomerTemplate>>({})
   const [roomsLoading, setRoomsLoading] = useState(true)
   const [roomsError, setRoomsError] = useState<string | null>(null)
   const storedJourney = useMemo(() => { try { return JSON.parse(sessionStorage.getItem(journeyStorageKey) ?? '{}') as { phoneNumber?: string; selectedRoomId?: string; selectedTemplateId?: string } } catch { return {} } }, [])
@@ -125,20 +126,21 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     return Boolean(recovery)
   }
   const ensureTemplateDetail = useCallback(async (id: string) => {
-    const existing = templateDetails[id]
+    const existing = templateDetailsRef.current[id]
     if (existing) return existing
     const detail = await loadPublishedTemplateDetail(id)
+    templateDetailsRef.current = templateDetailsRef.current[id] ? templateDetailsRef.current : { ...templateDetailsRef.current, [id]: detail }
     setTemplateDetails((current) => current[id] ? current : { ...current, [id]: detail })
     return detail
-  }, [templateDetails])
+  }, [])
   useEffect(() => {
     if (!selectedTemplateId || !templateSummaries.some((item) => item.id === selectedTemplateId) || templateDetails[selectedTemplateId]) return
     let active = true
-    void loadPublishedTemplateDetail(selectedTemplateId)
-      .then((detail) => { if (active) setTemplateDetails((current) => current[selectedTemplateId] ? current : { ...current, [selectedTemplateId]: detail }) })
+    void ensureTemplateDetail(selectedTemplateId)
+      .then(() => undefined)
       .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.') })
     return () => { active = false }
-  }, [selectedTemplateId, templateDetails, templateSummaries])
+  }, [ensureTemplateDetail, selectedTemplateId, templateDetails, templateSummaries])
   const selectRoom = async (id: string) => {
     const summaries = templateSummaries.length ? templateSummaries : await loadPublishedTemplateSummaries()
     if (!templateSummaries.length) setTemplateSummaries(summaries)
@@ -391,6 +393,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
           draft.uploadedPhotos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
           return
         }
+        templateDetailsRef.current = templateDetailsRef.current[draft.selectedTemplateId] ? templateDetailsRef.current : { ...templateDetailsRef.current, [draft.selectedTemplateId]: detail }
         setTemplateDetails((current) => current[draft.selectedTemplateId] ? current : { ...current, [draft.selectedTemplateId]: detail })
         setPhoneNumberState(draftIdentity.phoneNumber)
         setSelectedRoomIdState(draft.roomId)
@@ -508,6 +511,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     selectedTemplateId,
     selectTemplate,
     selectFrame,
+    ensureTemplateDetail,
     completeCurrentFrame,
     uncompleteFrame,
     slots,
