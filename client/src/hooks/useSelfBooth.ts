@@ -10,6 +10,7 @@ import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
+import { selectFrameAfterLoad } from '../features/templates/frameSelection'
 import {
   cleanupAbandonedEditorDrafts,
   clearActiveEditorDraftLocator,
@@ -46,6 +47,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const [rooms, setRooms] = useState<Room[]>([])
   const [templateSummaries, setTemplateSummaries] = useState<CustomerTemplateSummary[]>([])
   const [templateDetails, setTemplateDetails] = useState<Record<string, CustomerTemplate>>({})
+  const templateDetailsRef = useRef<Record<string, CustomerTemplate>>({})
   const [roomsLoading, setRoomsLoading] = useState(true)
   const [roomsError, setRoomsError] = useState<string | null>(null)
   const storedJourney = useMemo(() => { try { return JSON.parse(sessionStorage.getItem(journeyStorageKey) ?? '{}') as { phoneNumber?: string; selectedRoomId?: string; selectedTemplateId?: string } } catch { return {} } }, [])
@@ -125,20 +127,21 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     return Boolean(recovery)
   }
   const ensureTemplateDetail = useCallback(async (id: string) => {
-    const existing = templateDetails[id]
+    const existing = templateDetailsRef.current[id]
     if (existing) return existing
     const detail = await loadPublishedTemplateDetail(id)
+    templateDetailsRef.current = templateDetailsRef.current[id] ? templateDetailsRef.current : { ...templateDetailsRef.current, [id]: detail }
     setTemplateDetails((current) => current[id] ? current : { ...current, [id]: detail })
     return detail
-  }, [templateDetails])
+  }, [])
   useEffect(() => {
     if (!selectedTemplateId || !templateSummaries.some((item) => item.id === selectedTemplateId) || templateDetails[selectedTemplateId]) return
     let active = true
-    void loadPublishedTemplateDetail(selectedTemplateId)
-      .then((detail) => { if (active) setTemplateDetails((current) => current[selectedTemplateId] ? current : { ...current, [selectedTemplateId]: detail }) })
+    void ensureTemplateDetail(selectedTemplateId)
+      .then(() => undefined)
       .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.') })
     return () => { active = false }
-  }, [selectedTemplateId, templateDetails, templateSummaries])
+  }, [ensureTemplateDetail, selectedTemplateId, templateDetails, templateSummaries])
   const selectRoom = async (id: string) => {
     const summaries = templateSummaries.length ? templateSummaries : await loadPublishedTemplateSummaries()
     if (!templateSummaries.length) setTemplateSummaries(summaries)
@@ -151,11 +154,15 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: templateId })
   }
   const selectTemplate = async (id: string) => {
-    try { await ensureTemplateDetail(id) }
-    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
-    setSelectedTemplateIdState(id); setCurrentSlot(null)
-    persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
-    return true
+    return selectFrameAfterLoad({
+      id,
+      loadDetail: ensureTemplateDetail,
+      commit: () => {
+        setSelectedTemplateIdState(id); setCurrentSlot(null)
+        persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
+      },
+      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap the Frame button to retry.`),
+    })
   }
 
   const openEditor = useCallback(() => {
@@ -168,12 +175,16 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const selectFrame = useCallback(async (index: number) => {
     const next = roomTemplateSummaries[index]
     if (!next) return false
-    try { await ensureTemplateDetail(next.id) }
-    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
-    setSelectedTemplateIdState(next.id)
-    setCurrentSlot(null)
-    persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
-    return true
+    return selectFrameAfterLoad({
+      id: next.id,
+      loadDetail: ensureTemplateDetail,
+      commit: () => {
+        setSelectedTemplateIdState(next.id)
+        setCurrentSlot(null)
+        persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
+      },
+      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap Frame ${index + 1} to retry.`),
+    })
   }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId])
 
   const completeCurrentFrame = useCallback(() => {
@@ -391,6 +402,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
           draft.uploadedPhotos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
           return
         }
+        templateDetailsRef.current = templateDetailsRef.current[draft.selectedTemplateId] ? templateDetailsRef.current : { ...templateDetailsRef.current, [draft.selectedTemplateId]: detail }
         setTemplateDetails((current) => current[draft.selectedTemplateId] ? current : { ...current, [draft.selectedTemplateId]: detail })
         setPhoneNumberState(draftIdentity.phoneNumber)
         setSelectedRoomIdState(draft.roomId)
@@ -508,6 +520,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     selectedTemplateId,
     selectTemplate,
     selectFrame,
+    ensureTemplateDetail,
     completeCurrentFrame,
     uncompleteFrame,
     slots,
