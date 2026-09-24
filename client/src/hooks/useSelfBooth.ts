@@ -10,6 +10,7 @@ import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
+import { selectFrameAfterLoad } from '../features/templates/frameSelection'
 import {
   cleanupAbandonedEditorDrafts,
   clearActiveEditorDraftLocator,
@@ -153,11 +154,15 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     persistJourney({ phoneNumber, selectedRoomId: id, selectedTemplateId: templateId })
   }
   const selectTemplate = async (id: string) => {
-    try { await ensureTemplateDetail(id) }
-    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
-    setSelectedTemplateIdState(id); setCurrentSlot(null)
-    persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
-    return true
+    return selectFrameAfterLoad({
+      id,
+      loadDetail: ensureTemplateDetail,
+      commit: () => {
+        setSelectedTemplateIdState(id); setCurrentSlot(null)
+        persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
+      },
+      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap the Frame button to retry.`),
+    })
   }
 
   const openEditor = useCallback(() => {
@@ -170,12 +175,16 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const selectFrame = useCallback(async (index: number) => {
     const next = roomTemplateSummaries[index]
     if (!next) return false
-    try { await ensureTemplateDetail(next.id) }
-    catch (reason) { setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.'); return false }
-    setSelectedTemplateIdState(next.id)
-    setCurrentSlot(null)
-    persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
-    return true
+    return selectFrameAfterLoad({
+      id: next.id,
+      loadDetail: ensureTemplateDetail,
+      commit: () => {
+        setSelectedTemplateIdState(next.id)
+        setCurrentSlot(null)
+        persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
+      },
+      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap Frame ${index + 1} to retry.`),
+    })
   }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId])
 
   const completeCurrentFrame = useCallback(() => {

@@ -49,3 +49,9 @@ export async function saveComposition(input: DownloadCompositionInput) {
   const delivery = await deliverImageFile(prepared.blob, prepared.filename)
   return { filename: prepared.filename, bytes: prepared.bytes, width: prepared.width, height: prepared.height, delivery }
 }
+
+export async function runPerFrameSave<T extends { delivery: FileDelivery }>(save: () => Promise<T>, onSaved: (result: T) => void) {
+  const result = await save()
+  if (result.delivery !== 'cancelled') onSaved(result)
+  return result
+}

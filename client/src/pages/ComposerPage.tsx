@@ -16,8 +16,6 @@ interface ComposerPageProps {
   slots: Array<FilledSlot | null>
   currentSlot: number | null
   onBack: () => void
-  onSave: () => void
-  onNext: () => void
   onCurrentSlotChange: (index: number | null) => void
   onRemove: (index: number) => void
   onPickPhoto: (target: DirectPhotoTarget, file: File) => void
@@ -33,19 +31,18 @@ interface ComposerPageProps {
   frameIndex?: number
   frameCount?: number
   completedFrameIds?: string[]
-  canOrder?: boolean
   frameIds?: string[]
   onSelectFrame?: (index: number) => void
   onDownload?: () => void
   downloading?: boolean
-  orderProgress?: string | null
   onPrevious?: () => void
+  saveConfirmation?: string | null
 }
 
 interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover'; filter: PhotoFilter }
 const resetTransform: ImageTransform = { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
 
-export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBack, onSave, onNext, onCurrentSlotChange, onRemove, onPickPhoto, onPickFramePhotos, onTransform, onFitChange, onFilterChange, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], canOrder, frameIds = [], onSelectFrame, onDownload, downloading, onPrevious, orderProgress }: ComposerPageProps) {
+export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBack, onCurrentSlotChange, onRemove, onPickPhoto, onPickFramePhotos, onTransform, onFitChange, onFilterChange, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading, onPrevious, saveConfirmation }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
   const bottomControls = useRef<HTMLDivElement>(null)
   const photoInput = useRef<HTMLInputElement>(null)
@@ -122,7 +119,8 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
       <div className="grid gap-3">{template.slots.length > 1 ? <button className="min-h-12 w-full rounded-2xl bg-stone-950 px-4 text-sm font-black text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-35" disabled={remainingSlotCount === 0} onClick={openFramePhotoPicker} type="button">{remainingSlotCount === 0 ? 'All Photos Added' : remainingSlotCount === 1 ? 'Add 1 Photo' : `Add ${remainingSlotCount} Photos`}</button> : null}<TemplateCanvas activeSlot={currentSlot} backgroundUrl={backgroundUrl} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onActiveSlotChange={selectFrame} onAdd={openPhotoPicker} onBeginCrop={beginCrop} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, resetTransform); onFitChange(index, 'contain') }} onReplace={openPhotoPicker} onTransform={onTransform} slots={slots} template={template} /></div>
       <aside className="hidden rounded-[1.75rem] bg-white p-5 shadow-sm md:block"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Add photos to this frame.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Use the main Add Photos button to fill empty slots at once. Tap Add Image inside a slot for one photo, or Replace to change it later.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Your existing frames and edits stay in place while you choose from Photos.</div></aside>
     </div>
-    <div className="fixed inset-x-0 bottom-0 z-20 bg-white md:contents" ref={bottomControls}>{crop ? <CropToolbar onCancel={cancelCrop} onDone={finishCrop} onPositionXChange={(x) => onTransform(crop.index, { x })} onPositionYChange={(y) => onTransform(crop.index, { y })} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} positionX={slots[crop.index]?.transform.x ?? 0} positionY={slots[crop.index]?.transform.y ?? 0} zoom={slots[crop.index]?.transform.zoom ?? 1} /> : null}<EditorToolbar allBwEnabled={allBwEnabled} canContinue={slots.every(Boolean)} canOrder={canOrder} downloading={downloading} filter={selectedSlot?.filter ?? 'none'} filterDisabled={!selectedSlot} nextLabel="Order" onDownload={onDownload} onFilterChange={(filter) => { if (currentSlot !== null && selectedSlot) onFilterChange(currentSlot, filter) }} onNext={onNext} onPrevious={onPrevious} onSave={() => { onSave(); onCurrentSlotChange(null); setCrop(null) }} onSkip={skipFrame} onToggleAllBw={onToggleAllBw} previousDisabled={frameIndex === 0} progressLabel={orderProgress} saved={completedFrameIds.includes(template.id)} skipDisabled={frameIndex >= frameCount - 1} /></div>
+    <div className="fixed inset-x-0 bottom-0 z-20 bg-white md:contents" ref={bottomControls}>{crop ? <CropToolbar onCancel={cancelCrop} onDone={finishCrop} onPositionXChange={(x) => onTransform(crop.index, { x })} onPositionYChange={(y) => onTransform(crop.index, { y })} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} positionX={slots[crop.index]?.transform.x ?? 0} positionY={slots[crop.index]?.transform.y ?? 0} zoom={slots[crop.index]?.transform.zoom ?? 1} /> : null}<EditorToolbar allBwEnabled={allBwEnabled} canContinue={slots.every(Boolean)} downloading={downloading} filter={selectedSlot?.filter ?? 'none'} filterDisabled={!selectedSlot} onDownload={onDownload} onFilterChange={(filter) => { if (currentSlot !== null && selectedSlot) onFilterChange(currentSlot, filter) }} onPrevious={onPrevious} onSkip={skipFrame} onToggleAllBw={onToggleAllBw} previousDisabled={frameIndex === 0} skipDisabled={frameIndex >= frameCount - 1} /></div>
+    {saveConfirmation ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto max-w-sm rounded-2xl bg-emerald-600 px-4 py-3 text-center text-sm font-bold text-white shadow-2xl" role="status">{saveConfirmation}</div> : null}
     {photoError ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl" role="alert"><span>{photoError}</span><button className="min-h-10 shrink-0 rounded-xl bg-white/15 px-3 font-bold" onClick={onClearPhotoError} type="button">Dismiss</button></div> : null}
   </PageShell>
 }
