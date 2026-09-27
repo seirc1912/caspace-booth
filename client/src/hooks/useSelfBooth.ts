@@ -8,6 +8,7 @@ import { loadPhotoFile } from '../features/photos/imageLoader'
 import { applyAllBwFilter, clearAllBwFilter, createPhotoSlotForAllBw } from '../features/photos/allBwFilter'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
+import { assignPhotosAcrossRoom, collectAutoFillPhotoResults, invalidateCompletedRoomFrames, resolveRoomTemplateDetails, roomHasAssignedPhotos, totalRoomSlotCount } from '../features/photos/autoFillAllFrames'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
 import { selectFrameAfterLoad } from '../features/templates/frameSelection'
@@ -48,6 +49,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const [templateSummaries, setTemplateSummaries] = useState<CustomerTemplateSummary[]>([])
   const [templateDetails, setTemplateDetails] = useState<Record<string, CustomerTemplate>>({})
   const templateDetailsRef = useRef<Record<string, CustomerTemplate>>({})
+  const templateDetailPromisesRef = useRef(new Map<string, Promise<CustomerTemplate>>())
   const [roomsLoading, setRoomsLoading] = useState(true)
   const [roomsError, setRoomsError] = useState<string | null>(null)
   const storedJourney = useMemo(() => { try { return JSON.parse(sessionStorage.getItem(journeyStorageKey) ?? '{}') as { phoneNumber?: string; selectedRoomId?: string; selectedTemplateId?: string } } catch { return {} } }, [])
@@ -72,6 +74,8 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const persistedPhotoKeysRef = useRef(new Set<string>())
   const persistingPhotoKeysRef = useRef(new Set<string>())
   const [photoError, setPhotoError] = useState<string | null>(null)
+  const [autoFillPhotoCount, setAutoFillPhotoCount] = useState<number | null>(null)
+  const [autoFillPreparing, setAutoFillPreparing] = useState(false)
   const lastRandomOrder = useRef('')
   const draftIdentity = useMemo<EditorDraftIdentity | null>(() => recoveryIdentity ?? (customerSession ? {
     sessionId: customerSession.sessionId,
@@ -106,6 +110,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const room = useMemo(() => rooms.find((item) => item.id === selectedRoomId) ?? null, [rooms, selectedRoomId])
   const roomTemplateSummaries = useMemo(() => templateSummaries.filter((item) => item.roomId === selectedRoomId), [templateSummaries, selectedRoomId])
   const roomTemplates = useMemo(() => roomTemplateSummaries.map((item) => templateDetails[item.id]).filter((item): item is CustomerTemplate => Boolean(item)), [roomTemplateSummaries, templateDetails])
+  const autoFillHasExistingPhotos = useMemo(() => roomHasAssignedPhotos(frameSlots, roomTemplateSummaries.map((item) => item.id)), [frameSlots, roomTemplateSummaries])
   const currentFrameIndex = Math.max(0, roomTemplateSummaries.findIndex((item) => item.id === selectedTemplateId))
   const slots = frameSlots[selectedTemplateId] ?? template.slots.map(() => null)
   const setSlots = useCallback((updater: SetStateAction<Array<FilledSlot | null>>) => {
@@ -129,10 +134,15 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
   const ensureTemplateDetail = useCallback(async (id: string) => {
     const existing = templateDetailsRef.current[id]
     if (existing) return existing
-    const detail = await loadPublishedTemplateDetail(id)
-    templateDetailsRef.current = templateDetailsRef.current[id] ? templateDetailsRef.current : { ...templateDetailsRef.current, [id]: detail }
-    setTemplateDetails((current) => current[id] ? current : { ...current, [id]: detail })
-    return detail
+    const pending = templateDetailPromisesRef.current.get(id)
+    if (pending) return pending
+    const request = loadPublishedTemplateDetail(id).then((detail) => {
+      templateDetailsRef.current = templateDetailsRef.current[id] ? templateDetailsRef.current : { ...templateDetailsRef.current, [id]: detail }
+      setTemplateDetails((current) => current[id] ? current : { ...current, [id]: detail })
+      return detail
+    }).finally(() => templateDetailPromisesRef.current.delete(id))
+    templateDetailPromisesRef.current.set(id, request)
+    return request
   }, [])
   useEffect(() => {
     if (!selectedTemplateId || !templateSummaries.some((item) => item.id === selectedTemplateId) || templateDetails[selectedTemplateId]) return
@@ -186,6 +196,20 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
       onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap Frame ${index + 1} to retry.`),
     })
   }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId])
+
+  useEffect(() => {
+    let active = true
+    if (!selectedRoomId || !roomTemplateSummaries.length) {
+      queueMicrotask(() => { if (active) { setAutoFillPhotoCount(null); setAutoFillPreparing(false) } })
+      return () => { active = false }
+    }
+    queueMicrotask(() => { if (active) { setAutoFillPhotoCount(null); setAutoFillPreparing(true) } })
+    void resolveRoomTemplateDetails(roomTemplateSummaries, templateDetailsRef.current, ensureTemplateDetail)
+      .then((details) => { if (active) setAutoFillPhotoCount(totalRoomSlotCount(details)) })
+      .catch(() => { if (active) setAutoFillPhotoCount(null) })
+      .finally(() => { if (active) setAutoFillPreparing(false) })
+    return () => { active = false }
+  }, [ensureTemplateDetail, roomTemplateSummaries, selectedRoomId])
 
   const completeCurrentFrame = useCallback(() => {
     if (!selectedTemplateId || !slots.some(Boolean)) return false
@@ -302,6 +326,36 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     }
     if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
   }, [allBwEnabled])
+  const autoFillAllFrames = useCallback(async (files: File[]) => {
+    const templates = roomTemplateSummaries.map((summary) => templateDetailsRef.current[summary.id]).filter((detail): detail is CustomerTemplate => Boolean(detail))
+    const required = totalRoomSlotCount(templates)
+    if (!required || templates.length !== roomTemplateSummaries.length) {
+      setPhotoError('Auto Fill is still preparing. Please try again.')
+      return
+    }
+    setPhotoError(null)
+    const candidates = files.filter(supportedPhoto).slice(0, required)
+    const results = await loadPhotos(candidates)
+    const { photos, failure } = collectAutoFillPhotoResults(results)
+    if (!mountedRef.current) {
+      photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
+      return
+    }
+    if (!photos.length) {
+      setPhotoError(failure?.reason instanceof Error ? failure.reason.message : 'No supported photos could be loaded.')
+      return
+    }
+    const nextFrameSlots = assignPhotosAcrossRoom(frameSlots, templates, photos, allBwEnabled)
+    if (nextFrameSlots === frameSlots) {
+      photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
+      setPhotoError('Auto Fill could not prepare these photos. Please try again.')
+      return
+    }
+    setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
+    setFrameSlots(nextFrameSlots)
+    setCompletedFrameIds((current) => invalidateCompletedRoomFrames(current, templates.map((item) => item.id)))
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
+  }, [allBwEnabled, frameSlots, roomTemplateSummaries])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => {
       const known = new Set(current.map((photo) => photo.id))
@@ -508,6 +562,9 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     room,
     roomTemplates,
     roomTemplateSummaries,
+    autoFillPhotoCount,
+    autoFillPreparing,
+    autoFillHasExistingPhotos,
     frameSlots,
     allBwEnabled,
     completedFrameIds,
@@ -538,6 +595,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     addUploadedPhotos,
     addPhotoToTarget,
     addPhotosToFrame,
+    autoFillAllFrames,
     addUploadedAssets,
     resetSessionPhotos,
     deleteUploadedPhoto,

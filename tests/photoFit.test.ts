@@ -31,13 +31,14 @@ test('user zoom is relative to the initial slot-specific fit', () => {
   }
 })
 
-test('the configured zoom range allows real zoom out below 100%', () => {
+test('the configured zoom range remains free below and above the 150% initial value', () => {
   assert.ok(minimumUserPhotoZoom < 1)
   assert.ok(maximumUserPhotoZoom > 1)
   assert.equal(clampUserPhotoZoom(0.8), 0.8)
   assert.equal(clampUserPhotoZoom(0.6), 0.6)
   assert.equal(clampUserPhotoZoom(1), 1)
   assert.equal(clampUserPhotoZoom(1.5), 1.5)
+  assert.equal(clampUserPhotoZoom(2), 2)
 })
 
 test('contain and cover each apply exactly one base fit scale', () => {

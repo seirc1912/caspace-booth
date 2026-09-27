@@ -120,3 +120,14 @@ test('customer editor has no Order action or Print Order execution while backend
   assert.match(toolbar, /aria-label="Save Photo"/)
   assert.match(backend, /PrintOrderRepository/)
 })
+
+test('mobile Auto Fill, dynamic current-frame Add Photos, and Auto Fit remain equal controls on one row', () => {
+  const composer = readFileSync(new URL('../client/src/pages/ComposerPage.tsx', import.meta.url), 'utf8')
+  assert.match(composer, /grid grid-cols-3 gap-2/)
+  assert.equal((composer.match(/min-h-12 w-full rounded-2xl/g) ?? []).length >= 3, true)
+  assert.match(composer, /onClick=\{\(\) => setAutoFillDialogOpen\(true\)\}/)
+  assert.match(composer, /onClick=\{openAddImagePicker\}/)
+  assert.match(composer, /\{remainingSlotCount\} \{remainingSlotCount === 1 \? 'Photo' : 'Photos'\}/)
+  assert.match(composer, /onClick=\{toggleAutoFit\}/)
+  assert.match(composer, /disabled=\{!selectedSlot\}/)
+})
