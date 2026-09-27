@@ -8,7 +8,7 @@ import { loadPhotoFile } from '../features/photos/imageLoader'
 import { applyAllBwFilter, clearAllBwFilter, createPhotoSlotForAllBw } from '../features/photos/allBwFilter'
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
-import { assignPhotosAcrossRoom, invalidateCompletedRoomFrames, resolveRoomTemplateDetails, roomHasAssignedPhotos, totalRoomSlotCount } from '../features/photos/autoFillAllFrames'
+import { assignPhotosAcrossRoom, collectAutoFillPhotoResults, invalidateCompletedRoomFrames, resolveRoomTemplateDetails, roomHasAssignedPhotos, totalRoomSlotCount } from '../features/photos/autoFillAllFrames'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
 import { selectFrameAfterLoad } from '../features/templates/frameSelection'
@@ -336,14 +336,13 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     setPhotoError(null)
     const candidates = files.filter(supportedPhoto).slice(0, required)
     const results = await loadPhotos(candidates)
-    const photos = results.filter((result): result is PromiseFulfilledResult<PhotoAsset> => result.status === 'fulfilled').map((result) => result.value)
+    const { photos, failure } = collectAutoFillPhotoResults(results)
     if (!mountedRef.current) {
       photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
       return
     }
-    if (photos.length !== required) {
-      photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
-      setPhotoError(`Please select ${required - photos.length} more photo${required - photos.length === 1 ? '' : 's'}.`)
+    if (!photos.length) {
+      setPhotoError(failure?.reason instanceof Error ? failure.reason.message : 'No supported photos could be loaded.')
       return
     }
     const nextFrameSlots = assignPhotosAcrossRoom(frameSlots, templates, photos, allBwEnabled)
@@ -355,6 +354,7 @@ export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
     setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
     setFrameSlots(nextFrameSlots)
     setCompletedFrameIds((current) => invalidateCompletedRoomFrames(current, templates.map((item) => item.id)))
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
   }, [allBwEnabled, frameSlots, roomTemplateSummaries])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => {

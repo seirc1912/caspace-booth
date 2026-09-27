@@ -24,13 +24,24 @@ export function totalRoomSlotCount(templates: CustomerTemplate[]) {
   return templates.reduce((total, template) => total + template.slots.length, 0)
 }
 
-export function shufflePhotosOnce(photos: PhotoAsset[], random = Math.random) {
-  const shuffled = [...photos]
+export function collectAutoFillPhotoResults(results: PromiseSettledResult<PhotoAsset>[]) {
+  return {
+    photos: results.filter((result): result is PromiseFulfilledResult<PhotoAsset> => result.status === 'fulfilled').map((result) => result.value),
+    failure: results.find((result): result is PromiseRejectedResult => result.status === 'rejected'),
+  }
+}
+
+function shuffleOnce<T>(items: T[], random = Math.random) {
+  const shuffled = [...items]
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const target = Math.floor(random() * (index + 1))
     ;[shuffled[index], shuffled[target]] = [shuffled[target]!, shuffled[index]!]
   }
   return shuffled
+}
+
+export function shufflePhotosOnce(photos: PhotoAsset[], random = Math.random) {
+  return shuffleOnce(photos, random)
 }
 
 export function assignPhotosAcrossRoom(
@@ -40,13 +51,18 @@ export function assignPhotosAcrossRoom(
   allBwEnabled: boolean,
   random = Math.random,
 ) {
-  const required = totalRoomSlotCount(templates)
-  if (required < 1 || photos.length !== required) return frameSlots
-  const shuffled = shufflePhotosOnce(photos, random)
-  let photoIndex = 0
+  const capacity = totalRoomSlotCount(templates)
+  if (capacity < 1 || photos.length < 1) return frameSlots
+  const shuffledPhotos = shufflePhotosOnce(photos.slice(0, capacity), random)
+  const shuffledSlotIndexes = shuffleOnce(Array.from({ length: capacity }, (_, index) => index), random)
+  const assignments = new Map(shuffledSlotIndexes.slice(0, shuffledPhotos.length).map((slotIndex, index) => [slotIndex, shuffledPhotos[index]!]))
+  let slotIndex = 0
   const next = { ...frameSlots }
   for (const template of templates) {
-    next[template.id] = template.slots.map(() => createPhotoSlotForAllBw(shuffled[photoIndex++]!, allBwEnabled))
+    next[template.id] = template.slots.map(() => {
+      const photo = assignments.get(slotIndex++)
+      return photo ? createPhotoSlotForAllBw(photo, allBwEnabled) : null
+    })
   }
   return next
 }
