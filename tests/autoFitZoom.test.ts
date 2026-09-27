@@ -11,11 +11,11 @@ const slot: FilledSlot = {
   filter: 'grayscale',
 }
 
-test('Auto Fit toggles 150% to 220% and approximately 220% back to 150%', () => {
-  assert.deepEqual(createAutoFitZoomUpdate(1.5), { zoom: 2.2 })
-  assert.deepEqual(createAutoFitZoomUpdate(1.8), { zoom: 2.2 })
-  assert.deepEqual(createAutoFitZoomUpdate(2.2), { zoom: 1.5 })
-  assert.deepEqual(createAutoFitZoomUpdate(2.2005), { zoom: 1.5 })
+test('Auto Fit toggles 150% to 230% and approximately 230% back to 150%', () => {
+  assert.deepEqual(createAutoFitZoomUpdate(1.5), { zoom: 2.3 })
+  assert.deepEqual(createAutoFitZoomUpdate(1.8), { zoom: 2.3 })
+  assert.deepEqual(createAutoFitZoomUpdate(2.3), { zoom: 1.5 })
+  assert.deepEqual(createAutoFitZoomUpdate(2.3005), { zoom: 1.5 })
 })
 
 test('Auto Fit returns a zoom-only transform patch', () => {

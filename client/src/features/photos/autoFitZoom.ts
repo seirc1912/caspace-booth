@@ -2,7 +2,7 @@ import type { ImageTransform } from '../../types/selfBooth'
 
 export const autoFitZoom = {
   default: 1.5,
-  close: 2.2,
+  close: 2.3,
 } as const
 
 const autoFitTolerance = 0.001
