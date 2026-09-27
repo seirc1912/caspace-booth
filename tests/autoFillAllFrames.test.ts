@@ -63,6 +63,10 @@ test('All B&W uses the existing slot creation semantics', () => {
   const result = assignPhotosAcrossRoom({}, [template('one', 2)], [photo(1), photo(2)], true, () => 0.5)
   assert.deepEqual(result.one?.map((slot) => slot?.filter), ['grayscale', 'grayscale'])
   assert.deepEqual(result.one?.map((slot) => slot?.fit), ['contain', 'contain'])
+  assert.deepEqual(result.one?.map((slot) => slot?.transform), [
+    { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+    { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+  ])
 })
 
 test('Auto Fill invalidates only stale completion state for Room frames', () => {

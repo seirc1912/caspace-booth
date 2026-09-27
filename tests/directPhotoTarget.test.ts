@@ -23,7 +23,7 @@ test('direct selection assigns only the captured frame and slot', () => {
   assert.equal(next['frame-2']?.[1]?.photo.id, 'selected')
 })
 
-test('replacement receives a fresh centered 100% contain transform', () => {
+test('replacement receives a fresh centered 150% contain transform without inheriting edits', () => {
   const next = assignPhotoToTarget(
     { frame: [filled('old', 1.75)] },
     { templateId: 'frame', slotIndex: 0, slotCount: 1 },
@@ -34,7 +34,7 @@ test('replacement receives a fresh centered 100% contain transform', () => {
     photo: photo('replacement'),
     fit: 'contain',
     filter: 'none',
-    transform: { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+    transform: { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
   })
 })
 

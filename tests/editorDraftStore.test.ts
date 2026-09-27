@@ -104,6 +104,20 @@ test('All B&W enabled state survives draft hydration with per-slot filters', () 
   assert.equal(restored?.allBwEnabled, true)
 })
 
+test('existing draft zoom values remain unchanged by the new assignment default', () => {
+  const photos = [photo(41), photo(42), photo(43)]
+  const frameSlots = { one: [slot(photos[0]!, 0), slot(photos[1]!, 1), slot(photos[2]!, 2)] }
+  frameSlots.one[0]!.transform.zoom = 0.8
+  frameSlots.one[1]!.transform.zoom = 1
+  frameSlots.one[2]!.transform.zoom = 2
+  const metadata = createEditorDraftMetadata(identity, {
+    roomId: 'room-a', selectedTemplateId: 'one', currentSlot: 0, frameSlots,
+    completedFrameIds: [], allBwEnabled: false,
+  }, photos.map((asset) => asset.id))
+  const restored = hydrateEditorDraft(metadata, photos)
+  assert.deepEqual(restored?.frameSlots.one?.map((item) => item?.transform.zoom), [0.8, 1, 2])
+})
+
 test('abandoned draft TTL is a conservative 24 hours', () => {
   assert.equal(editorDraftTtlMs, 24 * 60 * 60 * 1000)
 })
