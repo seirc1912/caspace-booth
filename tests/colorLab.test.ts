@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fitWithinSource } from '../client/src/features/colorLab/export'
 import { applyColorLabPreset, type PixelBuffer } from '../client/src/features/colorLab/processor'
+import { fitColorLabDimensions, requireSafeDimensions } from '../client/src/features/colorLab/dimensions'
 
 function pixels(values: number[][], width = values.length): PixelBuffer {
   return { width, height: values.length / width, data: new Uint8ClampedArray(values.flatMap(([r, g, b, a = 255]) => [r, g, b, a])) }
@@ -59,4 +60,24 @@ test('HD dimensions preserve aspect ratio and never upscale', () => {
   assert.deepEqual(fitWithinSource(4032, 3024, 4096), { width: 4032, height: 3024 })
   assert.deepEqual(fitWithinSource(8064, 6048, 4096), { width: 4096, height: 3072 })
   assert.equal(4096 / 3072, 8064 / 6048)
+})
+
+test('landscape, portrait, preview, thumbnail, and Dreamy Dust dimensions are finite positive integers', () => {
+  assert.deepEqual(fitColorLabDimensions(4032, 3024, 1600, 'preview'), { width: 1600, height: 1200 })
+  assert.deepEqual(fitColorLabDimensions(3024, 4032, 1600, 'preview'), { width: 1200, height: 1600 })
+  assert.deepEqual(fitColorLabDimensions(4032, 3024, 180, 'thumbnail'), { width: 180, height: 135 })
+  assert.deepEqual(fitColorLabDimensions(3024, 4032, 180, 'Dreamy Dust thumbnail'), { width: 135, height: 180 })
+})
+
+test('invalid dimensions fail before NaN or Infinity can reach a canvas API', () => {
+  for (const [width, height] of [[Number.NaN, 100], [100, Number.NaN], [Number.POSITIVE_INFINITY, 100], [0, 100], [-1, 100]]) {
+    assert.throws(() => requireSafeDimensions(width, height, 'regression source'), /invalid regression source dimensions/)
+  }
+  assert.throws(() => fitColorLabDimensions(100, 100, Number.NaN, 'thumbnail'), /invalid thumbnail limit/)
+})
+
+test('processor rejects invalid geometry before Red Film or Dreamy Dust processing', () => {
+  const invalid = { width: Number.NaN, height: 1, data: new Uint8ClampedArray(4) }
+  assert.throws(() => applyColorLabPreset(invalid, 'red-film', 100, 1), /invalid processor dimensions/)
+  assert.throws(() => applyColorLabPreset(invalid, 'dreamy-dust', 82, 1), /invalid processor dimensions/)
 })

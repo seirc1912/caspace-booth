@@ -3,6 +3,7 @@ import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
 import { canvasToBlob, deliverColorLabImage, renderColorLabImage } from '../features/colorLab/export'
 import { colorLabPresets, type ColorLabPresetId } from '../features/colorLab/presets'
+import { requireSafeDimensions } from '../features/colorLab/dimensions'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 import type { PhotoAsset } from '../types/selfBooth'
 
@@ -16,10 +17,13 @@ interface LoadedColorLabPhoto {
   outputType: 'image/png' | 'image/jpeg'
 }
 
-function decodeImage(src: string) {
+function decodeImage(src: string, stage: string) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const image = new Image()
-    image.onload = () => resolve(image)
+    image.onload = () => {
+      try { requireSafeDimensions(image.naturalWidth, image.naturalHeight, stage); resolve(image) }
+      catch (reason) { reject(reason) }
+    }
     image.onerror = () => reject(new Error('This photo could not be decoded.'))
     image.src = src
   })
@@ -49,14 +53,19 @@ export function ColorLabPage() {
     setProcessing(true); setError(null)
     try {
       const asset = await loadPhotoFile(file)
-      const [previewImage, exportImage] = await Promise.all([decodeImage(asset.previewSrc ?? asset.src), decodeImage(asset.src)])
-      const next: LoadedColorLabPhoto = { asset, previewImage, exportImage, width: exportImage.naturalWidth, height: exportImage.naturalHeight, seed: seedForAsset(asset), outputType: file.type === 'image/png' || /\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg' }
+      const [previewImage, exportImage] = await Promise.all([decodeImage(asset.previewSrc ?? asset.src, 'preview source'), decodeImage(asset.src, 'HD source')])
+      const exportDimensions = requireSafeDimensions(exportImage.naturalWidth, exportImage.naturalHeight, 'HD source')
+      requireSafeDimensions(previewImage.naturalWidth, previewImage.naturalHeight, 'preview source')
+      const next: LoadedColorLabPhoto = { asset, previewImage, exportImage, width: exportDimensions.width, height: exportDimensions.height, seed: seedForAsset(asset), outputType: file.type === 'image/png' || /\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg' }
       setPhoto((current) => {
         if (current) { URL.revokeObjectURL(current.asset.src); if (current.asset.previewSrc) URL.revokeObjectURL(current.asset.previewSrc) }
         return next
       })
       setPresetId('original'); setIntensity(100); setThumbnails({})
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'This photo could not be opened.') }
+    } catch (reason) {
+      console.warn('[color-lab] image preparation failed', { stage: 'decode-or-dimensions', fileType: file.type || 'unknown', message: reason instanceof Error ? reason.message : String(reason) })
+      setError(reason instanceof Error ? reason.message : 'This photo could not be opened.')
+    }
     finally { setProcessing(false) }
   }
 

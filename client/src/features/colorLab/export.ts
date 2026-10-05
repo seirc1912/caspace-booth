@@ -1,12 +1,12 @@
 import { applyColorLabPreset } from './processor'
 import type { ColorLabPresetId } from './presets'
+import { fitColorLabDimensions } from './dimensions'
 
-export function fitWithinSource(width: number, height: number, maxEdge: number) {
-  const scale = Math.min(1, maxEdge / Math.max(width, height))
-  return { width: Math.max(1, Math.round(width * scale)), height: Math.max(1, Math.round(height * scale)) }
+export function fitWithinSource(width: number, height: number, maxEdge?: number) {
+  return fitColorLabDimensions(width, height, maxEdge, 'render')
 }
 
-export async function renderColorLabImage(image: CanvasImageSource, sourceWidth: number, sourceHeight: number, presetId: ColorLabPresetId, intensity: number, seed: number, maxEdge = Number.POSITIVE_INFINITY) {
+export async function renderColorLabImage(image: CanvasImageSource, sourceWidth: number, sourceHeight: number, presetId: ColorLabPresetId, intensity: number, seed: number, maxEdge?: number) {
   const dimensions = fitWithinSource(sourceWidth, sourceHeight, maxEdge)
   const canvas = document.createElement('canvas')
   canvas.width = dimensions.width; canvas.height = dimensions.height

@@ -1,4 +1,5 @@
 import { getColorLabPreset, type ColorLabPresetId } from './presets'
+import { requireSafeDimensions } from './dimensions'
 
 export interface PixelBuffer {
   data: Uint8ClampedArray
@@ -38,15 +39,17 @@ function brightNeighbour(source: Uint8ClampedArray, width: number, height: numbe
 }
 
 export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1): PixelBuffer {
+  const dimensions = requireSafeDimensions(source.width, source.height, 'processor')
+  if (source.data.length !== dimensions.width * dimensions.height * 4) throw new Error('Color Lab image decode failed: invalid processor pixel buffer')
   const output = new Uint8ClampedArray(source.data)
   const intensity = clamp01(intensityPercent / 100)
-  if (presetId === 'original' || intensity === 0) return { ...source, data: output }
+  if (presetId === 'original' || intensity === 0) return { ...dimensions, data: output }
   const preset = getColorLabPreset(presetId)
   const original = source.data
 
   for (let pixel = 0; pixel < original.length; pixel += 4) {
-    const x = (pixel / 4) % source.width
-    const y = Math.floor(pixel / 4 / source.width)
+    const x = (pixel / 4) % dimensions.width
+    const y = Math.floor(pixel / 4 / dimensions.width)
     const r0 = original[pixel]! / 255
     const g0 = original[pixel + 1]! / 255
     const b0 = original[pixel + 2]! / 255
@@ -74,9 +77,9 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
     }
 
     if (preset.bloom > 0 && luminance > 0.18) {
-      const bloomR = brightNeighbour(original, source.width, source.height, x, y, 0)
-      const bloomG = brightNeighbour(original, source.width, source.height, x, y, 1)
-      const bloomB = brightNeighbour(original, source.width, source.height, x, y, 2)
+      const bloomR = brightNeighbour(original, dimensions.width, dimensions.height, x, y, 0)
+      const bloomG = brightNeighbour(original, dimensions.width, dimensions.height, x, y, 1)
+      const bloomB = brightNeighbour(original, dimensions.width, dimensions.height, x, y, 2)
       r += bloomR * preset.bloom * 0.95
       g += bloomG * preset.bloom * 0.78
       b += bloomB * preset.bloom * 0.58
@@ -102,5 +105,5 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
     output[pixel + 2] = Math.round((b0 + (clamp01(b) - b0) * intensity) * 255)
     output[pixel + 3] = original[pixel + 3]!
   }
-  return { width: source.width, height: source.height, data: output }
+  return { ...dimensions, data: output }
 }
