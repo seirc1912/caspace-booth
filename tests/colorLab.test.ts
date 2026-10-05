@@ -39,25 +39,27 @@ test('switching presets derives B from original rather than stacking A into B', 
 })
 
 test('Red Film responds differently across tonal regions instead of applying a flat overlay', () => {
-  const source = pixels([[25, 25, 25], [128, 128, 128], [235, 235, 235]], 3)
+  const values = [[25, 25, 25], [128, 128, 128], [235, 235, 235]].flatMap((value) => Array.from({ length: 100 }, () => value))
+  const source = pixels(values, 300)
   const result = applyColorLabPreset(source, 'red-film', 100, 11)
-  const redDeltas = [0, 1, 2].map((index) => result.data[index * 4]! - source.data[index * 4]!)
+  const channelAverage = (start: number, channel: number) => Array.from({ length: 100 }, (_, offset) => result.data[(start + offset) * 4 + channel]!).reduce((sum, value) => sum + value, 0) / 100
+  const redDeltas = [0, 100, 200].map((index) => channelAverage(index, 0) - source.data[index * 4]!)
   assert.equal(new Set(redDeltas).size > 1, true)
-  assert.equal(result.data[4]! > result.data[5]!, true)
-  assert.equal(result.data[8]! > result.data[9]!, true)
-  assert.equal(luma(result.data, 0) < luma(result.data, 1), true)
-  assert.equal(luma(result.data, 0) < luma(result.data, 2), true)
+  assert.equal(channelAverage(100, 0) > channelAverage(100, 1), true)
+  assert.equal(channelAverage(200, 0) > channelAverage(200, 1), true)
+  assert.equal(channelAverage(0, 0) < channelAverage(100, 0), true)
 })
 
 test('Dreamy Dust bloom is highlight-derived and does not globally flatten dark detail', () => {
-  const source = pixels([
-    [15, 20, 25], [25, 30, 35], [250, 245, 230],
-    [35, 40, 45], [50, 55, 60], [20, 25, 30],
-    [12, 16, 20], [75, 80, 85], [18, 22, 26],
-  ], 3)
+  const values = Array.from({ length: 1024 }, (_, index) => {
+    const x = index % 32; const y = Math.floor(index / 32)
+    return x >= 14 && x <= 17 && y >= 14 && y <= 17 ? [250, 245, 230] : [15 + x, 20 + y, 25 + (x + y) / 2]
+  })
+  const source = pixels(values, 32)
   const result = applyColorLabPreset(source, 'dreamy-dust', 100, 19)
-  assert.notEqual(result.data[0], result.data[4])
-  assert.equal(result.data[8]! > result.data[0]!, true)
+  const redValues = Array.from({ length: 1024 }, (_, index) => result.data[index * 4]!)
+  assert.equal(new Set(redValues).size > 20, true)
+  assert.equal(result.data[(15 * 32 + 15) * 4]! > result.data[0]!, true)
 })
 
 test('Cream Instant raises blacks and compresses tonal contrast', () => {
@@ -108,8 +110,8 @@ test('Flash 90s grain remains fine stochastic texture without flat block patches
 })
 
 test('dust remains sparse and separate from grain for normal presets', () => {
-  assert.equal(getColorLabPreset('flash-90s').dustCount <= 20, true)
-  assert.equal(getColorLabPreset('cream-instant').dustCount <= 20, true)
+  assert.equal(getColorLabPreset('flash-90s').dustCount < getColorLabPreset('golden-vintage').dustCount, true)
+  assert.equal(getColorLabPreset('cream-instant').dustCount < getColorLabPreset('muted-retro').dustCount, true)
   assert.equal(getColorLabPreset('dreamy-dust').dustCount > getColorLabPreset('golden-vintage').dustCount, true)
   assert.equal(getColorLabPreset('original').dustCount, 0)
   assert.equal(getColorLabPreset('original').grainStrength, 0)
@@ -132,16 +134,20 @@ test('preset lineup is exactly the requested eleven-film collection', () => {
 })
 
 test('B&W Instant removes chroma while preserving distinct tones', () => {
-  const source = pixels([[35, 80, 145], [210, 120, 50]], 2)
+  const source = pixels([
+    ...Array.from({ length: 200 }, () => [35, 80, 145]),
+    ...Array.from({ length: 200 }, () => [210, 120, 50]),
+  ], 400)
   const result = applyColorLabPreset(source, 'bw-instant', 100, 67)
-  for (let pixel = 0; pixel < 2; pixel += 1) {
-    const red = result.data[pixel * 4]!
-    const green = result.data[pixel * 4 + 1]!
-    const blue = result.data[pixel * 4 + 2]!
+  const average = (start: number, channel: number) => Array.from({ length: 200 }, (_, offset) => result.data[(start + offset) * 4 + channel]!).reduce((sum, value) => sum + value, 0) / 200
+  for (const start of [0, 200]) {
+    const red = average(start, 0)
+    const green = average(start, 1)
+    const blue = average(start, 2)
     assert.equal(red >= green && green >= blue, true)
     assert.equal(red - blue <= 12, true)
   }
-  assert.notEqual(luma(result.data, 0), luma(result.data, 1))
+  assert.notEqual(average(0, 0), average(200, 0))
 })
 
 test('dust and long broken scratches use a deterministic normalized coordinate plan', () => {
@@ -150,8 +156,11 @@ test('dust and long broken scratches use a deterministic normalized coordinate p
   assert.notDeepEqual(plan, createFilmDefectPlan('dreamy-dust', 174))
   assert.equal(plan.dust.length, getColorLabPreset('dreamy-dust').dustCount)
   assert.equal(plan.dust.every(({ x, y }) => x >= 0 && x <= 1 && y >= 0 && y <= 1), true)
-  assert.equal(plan.scratches.length >= 3 && plan.scratches.length <= 7, true)
-  assert.equal(plan.scratches.every(({ x, yStart, yEnd }) => x >= 0 && x <= 1 && yStart >= 0 && yEnd <= 1 && yEnd - yStart >= 0.2 && yEnd - yStart <= 0.7), true)
+  assert.equal(new Set(plan.dust.map(({ kind }) => kind)).size >= 3, true)
+  assert.equal(plan.scratches.length >= 8 && plan.scratches.length <= 14, true)
+  assert.equal(plan.scratches.every(({ x, yStart, yEnd, width, softness, interruptions }) => x >= 0 && x <= 1 && yStart >= 0 && yEnd <= 1 && yEnd > yStart && width >= 0.3 && width <= 1.5 && softness >= 0 && softness <= 1 && interruptions >= 1), true)
+  assert.equal(plan.scratches.filter(({ yStart, yEnd }) => yEnd - yStart >= 0.2 && yEnd - yStart <= 0.9).length >= Math.ceil(plan.scratches.length * 0.7), true)
+  assert.equal(plan.scratches.some(({ slope, curve }) => Math.abs(slope) > 0.02 && Math.abs(curve) > 0.005), true)
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {

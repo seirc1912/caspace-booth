@@ -61,7 +61,14 @@ function filmTone(value: number, contrast: number, blackLift: number, compressio
 export interface FilmDust {
   x: number
   y: number
+  size: number
+  aspect: number
+  angle: number
   strength: number
+  softness: number
+  kind: 'dot' | 'dash' | 'fiber' | 'particle'
+  light: boolean
+  detailSeed: number
 }
 
 export interface FilmScratch {
@@ -69,8 +76,12 @@ export interface FilmScratch {
   yStart: number
   yEnd: number
   slope: number
+  curve: number
   wobble: number
   phase: number
+  width: number
+  softness: number
+  interruptions: number
   opacity: number
   light: boolean
   breakSeed: number
@@ -79,24 +90,48 @@ export interface FilmScratch {
 function buildDustPlan(count: number, seed: number): FilmDust[] {
   return Array.from({ length: count }, (_, index) => {
     const light = hash(seed + index * 173 + 47) < 0.67
+    const kindRoll = hash(seed + index * 229 + 83)
+    const kind: FilmDust['kind'] = kindRoll < 0.55 ? 'dot' : kindRoll < 0.75 ? 'dash' : kindRoll < 0.9 ? 'fiber' : 'particle'
+    const rareLargerParticle = kind === 'particle' && hash(seed + index * 241 + 91) > 0.72
     return {
       x: hash(seed + index * 101 + 11),
       y: hash(seed + index * 137 + 23),
-      strength: (light ? 1 : -1) * (0.18 + hash(seed + index * 211 + 71) * 0.22),
+      size: rareLargerParticle ? 2.2 + hash(seed + index * 251 + 97) * 1.4 : 0.55 + hash(seed + index * 251 + 97) * 1.45,
+      aspect: kind === 'fiber' ? 2.5 + hash(seed + index * 263 + 103) * 3.5 : kind === 'dash' ? 1.5 + hash(seed + index * 263 + 103) * 1.7 : 0.7 + hash(seed + index * 263 + 103) * 0.6,
+      angle: hash(seed + index * 277 + 107) * Math.PI,
+      strength: 0.16 + hash(seed + index * 211 + 71) * (rareLargerParticle ? 0.2 : 0.3),
+      softness: rareLargerParticle ? 0.55 : hash(seed + index * 281 + 109) * 0.35,
+      kind,
+      light,
+      detailSeed: seed + index * 283,
     }
   })
 }
 
 function materializeDust(width: number, height: number, plan: FilmDust[]) {
-  const dust = new Map<number, number>()
-  const radius = Math.max(0, Math.round(Math.max(width, height) / 1800) - 1)
+  const dust = new Map<number, readonly [number, number, number]>()
+  const resolutionScale = Math.max(0.6, Math.max(width, height) / 1600)
   for (const point of plan) {
     const x = Math.min(width - 1, Math.floor(point.x * width))
     const y = Math.min(height - 1, Math.floor(point.y * height))
-    for (let offsetY = -radius; offsetY <= radius; offsetY += 1) {
-      for (let offsetX = -radius; offsetX <= radius; offsetX += 1) {
+    const radiusX = Math.max(0.45, point.size * point.aspect * resolutionScale)
+    const radiusY = Math.max(0.45, point.size * resolutionScale)
+    const extent = Math.ceil(Math.max(radiusX, radiusY) + 1)
+    const cosine = Math.cos(point.angle); const sine = Math.sin(point.angle)
+    for (let offsetY = -extent; offsetY <= extent; offsetY += 1) {
+      for (let offsetX = -extent; offsetX <= extent; offsetX += 1) {
         const px = x + offsetX; const py = y + offsetY
-        if (px >= 0 && px < width && py >= 0 && py < height) dust.set(py * width + px, point.strength)
+        if (px < 0 || px >= width || py < 0 || py >= height) continue
+        const rotatedX = offsetX * cosine + offsetY * sine
+        const rotatedY = -offsetX * sine + offsetY * cosine
+        const distance = Math.hypot(rotatedX / radiusX, rotatedY / radiusY)
+        if (distance > 1 || hash(point.detailSeed + offsetX * 43 + offsetY * 71) < distance * 0.12) continue
+        const edge = Math.pow(1 - distance, 0.7 + point.softness * 2.2)
+        const signed = (point.light ? 1 : -1) * point.strength * edge
+        const tint: readonly [number, number, number] = point.light ? [1, 0.96, 0.84] : [0.78, 0.67, 0.56]
+        const key = py * width + px
+        const current = dust.get(key) ?? [0, 0, 0]
+        dust.set(key, [current[0] + signed * tint[0], current[1] + signed * tint[1], current[2] + signed * tint[2]])
       }
     }
   }
@@ -116,37 +151,62 @@ function buildScratches(minimum: number, maximum: number, opacity: number, seed:
   if (maximum <= 0 || opacity <= 0) return []
   const count = minimum + Math.floor(hash(seed + 809) * (maximum - minimum + 1))
   return Array.from({ length: count }, (_, index) => {
-    const yStart = 0.03 + hash(seed + index * 251 + 17) * 0.68
+    const isLong = index < Math.ceil(count * 0.72)
+    const length = isLong ? 0.2 + hash(seed + index * 293 + 41) * 0.7 : 0.08 + hash(seed + index * 293 + 41) * 0.16
+    const yStart = 0.02 + hash(seed + index * 251 + 17) * Math.max(0.01, 0.96 - length)
     return {
       x: 0.04 + hash(seed + index * 271 + 29) * 0.92,
       yStart,
-      yEnd: Math.min(0.98, yStart + 0.2 + hash(seed + index * 293 + 41) * 0.5),
-      slope: (hash(seed + index * 307 + 53) - 0.5) * 0.09,
-      wobble: 0.0008 + hash(seed + index * 331 + 67) * 0.0022,
+      yEnd: Math.min(0.98, yStart + length),
+      slope: (hash(seed + index * 307 + 53) - 0.5) * 0.13,
+      curve: (hash(seed + index * 317 + 59) - 0.5) * 0.055,
+      wobble: 0.0007 + hash(seed + index * 331 + 67) * 0.003,
       phase: hash(seed + index * 347 + 79) * Math.PI * 2,
-      opacity: opacity * (0.45 + hash(seed + index * 359 + 97) * 0.55),
-      light: hash(seed + index * 379 + 109) < 0.64,
+      width: 0.3 + hash(seed + index * 349 + 89) * 1.2,
+      softness: hash(seed + index * 353 + 91),
+      interruptions: 1 + Math.floor(hash(seed + index * 357 + 93) * 4),
+      opacity: opacity * (0.62 + hash(seed + index * 359 + 97) * 0.58),
+      light: hash(seed + index * 379 + 109) < 0.62,
       breakSeed: seed + index * 397,
     }
   })
 }
 
-function scratchAt(scratches: FilmScratch[], x: number, y: number, width: number, height: number) {
-  const nx = (x + 0.5) / width
-  const ny = (y + 0.5) / height
-  const hairlineWidth = Math.max(0.65, width / 1600) / width
-  let amount = 0
+function materializeScratches(width: number, height: number, scratches: FilmScratch[]) {
+  const marks = new Map<number, number>()
   for (const scratch of scratches) {
-    if (ny < scratch.yStart || ny > scratch.yEnd) continue
-    const progress = (ny - scratch.yStart) / Math.max(0.001, scratch.yEnd - scratch.yStart)
-    const scratchX = scratch.x + scratch.slope * progress + Math.sin(progress * Math.PI * 5 + scratch.phase) * scratch.wobble
-    const distance = Math.abs(nx - scratchX)
-    if (distance > hairlineWidth) continue
-    if (hash(scratch.breakSeed + Math.floor(progress * 43) * 419) < 0.18) continue
-    const edge = 1 - distance / hairlineWidth
-    amount += (scratch.light ? 1 : -1) * scratch.opacity * edge
+    const firstY = Math.max(0, Math.floor(scratch.yStart * height))
+    const lastY = Math.min(height - 1, Math.ceil(scratch.yEnd * height))
+    for (let y = firstY; y <= lastY; y += 1) {
+      const ny = (y + 0.5) / height
+      const progress = (ny - scratch.yStart) / Math.max(0.001, scratch.yEnd - scratch.yStart)
+      if (progress < 0 || progress > 1) continue
+      const gapCell = Math.floor(progress * (scratch.interruptions * 5 + 8))
+      if (hash(scratch.breakSeed + gapCell * 419) < 0.2) continue
+      const curvature = scratch.curve * 4 * progress * (1 - progress)
+      const normalizedX = scratch.x + scratch.slope * progress + curvature + Math.sin(progress * Math.PI * 5 + scratch.phase) * scratch.wobble
+      const centerX = normalizedX * width - 0.5
+      const widthVariation = 0.76 + Math.sin(progress * Math.PI * 13 + scratch.phase) * 0.18 + hash(scratch.breakSeed + Math.floor(progress * 67)) * 0.12
+      const radius = Math.max(0.3, scratch.width * widthVariation * width / 1600)
+      const firstX = Math.max(0, Math.floor(centerX - radius))
+      const lastX = Math.min(width - 1, Math.ceil(centerX + radius))
+      const taper = Math.min(1, progress * 16, (1 - progress) * 16)
+      const opacityVariation = 0.62 + hash(scratch.breakSeed + Math.floor(progress * 97) * 431) * 0.52
+      for (let x = firstX; x <= lastX; x += 1) {
+        const distance = Math.abs(x + 0.5 - centerX)
+        if (distance > radius) continue
+        const edge = Math.pow(1 - distance / radius, 1.65 - scratch.softness * 0.9)
+        const amount = (scratch.light ? 1 : -1) * scratch.opacity * edge * taper * opacityVariation
+        const key = y * width + x
+        marks.set(key, (marks.get(key) ?? 0) + amount)
+      }
+    }
   }
-  return amount
+  return marks
+}
+
+function compositeDefect(channel: number, amount: number) {
+  return amount >= 0 ? channel + (1 - channel) * amount : channel + channel * amount
 }
 
 export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1): PixelBuffer {
@@ -162,7 +222,7 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
   const softnessRadius = preset.softness >= 0.24 ? 2 : 1
   const defects = createFilmDefectPlan(presetId, seed)
   const dust = materializeDust(dimensions.width, dimensions.height, defects.dust)
-  const scratches = defects.scratches
+  const scratches = materializeScratches(dimensions.width, dimensions.height, defects.scratches)
 
   for (let pixel = 0; pixel < original.length; pixel += 4) {
     const x = (pixel / 4) % dimensions.width
@@ -219,10 +279,12 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
     const grain = (fine * 1.65 + microCluster * Math.min(0.18, preset.grainSize * 0.07)) * preset.grainStrength * (0.32 + (1 - sourceLuminance) * 0.8)
     r += grain * 1.03; g += grain; b += grain * 0.94
 
-    const dustAmount = dust.get(pixel / 4) ?? 0
-    r += dustAmount; g += dustAmount * 0.95; b += dustAmount * 0.86
-    const scratchAmount = scratchAt(scratches, x, y, dimensions.width, dimensions.height)
-    r += scratchAmount; g += scratchAmount * 0.96; b += scratchAmount * 0.9
+    const dustAmount = dust.get(pixel / 4) ?? [0, 0, 0]
+    r = compositeDefect(r, dustAmount[0]); g = compositeDefect(g, dustAmount[1]); b = compositeDefect(b, dustAmount[2])
+    const scratchAmount = scratches.get(pixel / 4) ?? 0
+    r = compositeDefect(r, scratchAmount)
+    g = compositeDefect(g, scratchAmount * 0.96)
+    b = compositeDefect(b, scratchAmount * 0.88)
 
     if (preset.vignette > 0) {
       const nx = (x + 0.5) / dimensions.width - 0.5
