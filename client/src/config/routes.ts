@@ -1,5 +1,6 @@
 export const customerRoutes = Object.freeze({
   home: '/',
+  colorLab: '/color-lab',
   templates: '/templates',
   editor: '/editor',
   preview: '/preview',
