@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fitWithinSource } from '../client/src/features/colorLab/export'
-import { applyColorLabPreset, type PixelBuffer } from '../client/src/features/colorLab/processor'
+import { applyColorLabPreset, createFilmDefectPlan, type PixelBuffer } from '../client/src/features/colorLab/processor'
 import { fitColorLabDimensions, requireSafeDimensions } from '../client/src/features/colorLab/dimensions'
-import { getColorLabPreset } from '../client/src/features/colorLab/presets'
+import { colorLabPresets, getColorLabPreset } from '../client/src/features/colorLab/presets'
 
 function pixels(values: number[][], width = values.length): PixelBuffer {
   return { width, height: values.length / width, data: new Uint8ClampedArray(values.flatMap(([r, g, b, a = 255]) => [r, g, b, a])) }
@@ -25,16 +25,16 @@ test('presets never mutate original image data', () => {
 })
 
 test('intensity zero returns original and intensity 100 returns the full grade', () => {
-  const zero = applyColorLabPreset(sample, 'classic-600', 0, 7)
-  const full = applyColorLabPreset(sample, 'classic-600', 100, 7)
+  const zero = applyColorLabPreset(sample, 'golden-vintage', 0, 7)
+  const full = applyColorLabPreset(sample, 'golden-vintage', 100, 7)
   assert.deepEqual([...zero.data], [...sample.data])
   assert.notDeepEqual([...full.data], [...sample.data])
 })
 
 test('switching presets derives B from original rather than stacking A into B', () => {
-  applyColorLabPreset(sample, 'classic-600', 100, 7)
-  const directB = applyColorLabPreset(sample, 'pink-fade', 100, 7)
-  const selectedB = applyColorLabPreset(sample, 'pink-fade', 100, 7)
+  applyColorLabPreset(sample, 'dark-instant', 100, 7)
+  const directB = applyColorLabPreset(sample, 'pink-instant', 100, 7)
+  const selectedB = applyColorLabPreset(sample, 'pink-instant', 100, 7)
   assert.deepEqual([...selectedB.data], [...directB.data])
 })
 
@@ -43,8 +43,10 @@ test('Red Film responds differently across tonal regions instead of applying a f
   const result = applyColorLabPreset(source, 'red-film', 100, 11)
   const redDeltas = [0, 1, 2].map((index) => result.data[index * 4]! - source.data[index * 4]!)
   assert.equal(new Set(redDeltas).size > 1, true)
-  assert.equal(result.data[1]! < result.data[0]!, true)
-  assert.equal(result.data[5]! < result.data[4]!, true)
+  assert.equal(result.data[4]! > result.data[5]!, true)
+  assert.equal(result.data[8]! > result.data[9]!, true)
+  assert.equal(luma(result.data, 0) < luma(result.data, 1), true)
+  assert.equal(luma(result.data, 0) < luma(result.data, 2), true)
 })
 
 test('Dreamy Dust bloom is highlight-derived and does not globally flatten dark detail', () => {
@@ -58,18 +60,18 @@ test('Dreamy Dust bloom is highlight-derived and does not globally flatten dark 
   assert.equal(result.data[8]! > result.data[0]!, true)
 })
 
-test('Milk Fade raises blacks and compresses tonal contrast', () => {
+test('Cream Instant raises blacks and compresses tonal contrast', () => {
   const source = pixels([[4, 4, 4], [128, 128, 128], [248, 248, 248]], 3)
-  const result = applyColorLabPreset(source, 'milk-fade', 100, 23)
+  const result = applyColorLabPreset(source, 'cream-instant', 100, 23)
   assert.equal(luma(result.data, 0) > luma(source.data, 0), true)
   assert.equal(luma(result.data, 2) - luma(result.data, 0) < luma(source.data, 2) - luma(source.data, 0), true)
 })
 
-test('Cold Flash and SX-70 have measurably different tonal responses', () => {
-  const cold = applyColorLabPreset(sample, 'cold-flash', 100, 29)
-  const warm = applyColorLabPreset(sample, 'sx70-warm', 100, 29)
-  assert.notDeepEqual([...cold.data], [...warm.data])
-  assert.equal(luma(cold.data, 3) - luma(cold.data, 0) > luma(warm.data, 3) - luma(warm.data, 0), true)
+test('Flash 90s and Cream Instant have measurably different tonal responses', () => {
+  const flash = applyColorLabPreset(sample, 'flash-90s', 100, 29)
+  const cream = applyColorLabPreset(sample, 'cream-instant', 100, 29)
+  assert.notDeepEqual([...flash.data], [...cream.data])
+  assert.equal(luma(flash.data, 3) - luma(flash.data, 0) > luma(cream.data, 3) - luma(cream.data, 0), true)
 })
 
 test('grain, dust, and scratches are deterministic per image and preset seed', () => {
@@ -91,9 +93,9 @@ test('bloom spreads from highlights without inventing glow in an all-dark source
   assert.equal(Math.abs(luma(lit.data, 0) - luma(dark.data, 0)) < 1, true)
 })
 
-test('Classic 600 grain remains fine stochastic texture without flat block patches', () => {
+test('Flash 90s grain remains fine stochastic texture without flat block patches', () => {
   const source = pixels(Array.from({ length: 256 }, () => [180, 120, 145]), 16)
-  const result = applyColorLabPreset(source, 'classic-600', 100, 53)
+  const result = applyColorLabPreset(source, 'flash-90s', 100, 53)
   const redValues = Array.from({ length: 256 }, (_, index) => result.data[index * 4]!)
   assert.equal(new Set(redValues).size > 8, true)
   for (let blockY = 0; blockY < 4; blockY += 1) {
@@ -106,11 +108,50 @@ test('Classic 600 grain remains fine stochastic texture without flat block patch
 })
 
 test('dust remains sparse and separate from grain for normal presets', () => {
-  assert.equal(getColorLabPreset('classic-600').dustStrength <= 0.0002, true)
-  assert.equal(getColorLabPreset('cold-flash').dustStrength <= 0.0002, true)
-  assert.equal(getColorLabPreset('dreamy-dust').dustStrength > getColorLabPreset('classic-600').dustStrength, true)
-  assert.equal(getColorLabPreset('original').dustStrength, 0)
+  assert.equal(getColorLabPreset('flash-90s').dustCount <= 20, true)
+  assert.equal(getColorLabPreset('cream-instant').dustCount <= 20, true)
+  assert.equal(getColorLabPreset('dreamy-dust').dustCount > getColorLabPreset('golden-vintage').dustCount, true)
+  assert.equal(getColorLabPreset('original').dustCount, 0)
   assert.equal(getColorLabPreset('original').grainStrength, 0)
+})
+
+test('preset lineup is exactly the requested eleven-film collection', () => {
+  assert.deepEqual(colorLabPresets.map(({ id, name }) => ({ id, name })), [
+    { id: 'original', name: 'Original' },
+    { id: 'bw-instant', name: 'B&W Instant' },
+    { id: 'dark-instant', name: 'Dark Instant' },
+    { id: 'flash-90s', name: 'Flash 90s' },
+    { id: 'cream-instant', name: 'Cream Instant' },
+    { id: 'golden-vintage', name: 'Golden Vintage' },
+    { id: 'greenish-film', name: 'Greenish Film' },
+    { id: 'pink-instant', name: 'Pink Instant' },
+    { id: 'muted-retro', name: 'Muted Retro' },
+    { id: 'red-film', name: 'Red Film' },
+    { id: 'dreamy-dust', name: 'Dreamy Dust' },
+  ])
+})
+
+test('B&W Instant removes chroma while preserving distinct tones', () => {
+  const source = pixels([[35, 80, 145], [210, 120, 50]], 2)
+  const result = applyColorLabPreset(source, 'bw-instant', 100, 67)
+  for (let pixel = 0; pixel < 2; pixel += 1) {
+    const red = result.data[pixel * 4]!
+    const green = result.data[pixel * 4 + 1]!
+    const blue = result.data[pixel * 4 + 2]!
+    assert.equal(red >= green && green >= blue, true)
+    assert.equal(red - blue <= 12, true)
+  }
+  assert.notEqual(luma(result.data, 0), luma(result.data, 1))
+})
+
+test('dust and long broken scratches use a deterministic normalized coordinate plan', () => {
+  const plan = createFilmDefectPlan('dreamy-dust', 173)
+  assert.deepEqual(plan, createFilmDefectPlan('dreamy-dust', 173))
+  assert.notDeepEqual(plan, createFilmDefectPlan('dreamy-dust', 174))
+  assert.equal(plan.dust.length, getColorLabPreset('dreamy-dust').dustCount)
+  assert.equal(plan.dust.every(({ x, y }) => x >= 0 && x <= 1 && y >= 0 && y <= 1), true)
+  assert.equal(plan.scratches.length >= 3 && plan.scratches.length <= 7, true)
+  assert.equal(plan.scratches.every(({ x, yStart, yEnd }) => x >= 0 && x <= 1 && yStart >= 0 && yEnd <= 1 && yEnd - yStart >= 0.2 && yEnd - yStart <= 0.7), true)
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {
