@@ -3,6 +3,7 @@ import test from 'node:test'
 import { fitWithinSource } from '../client/src/features/colorLab/export'
 import { applyColorLabPreset, type PixelBuffer } from '../client/src/features/colorLab/processor'
 import { fitColorLabDimensions, requireSafeDimensions } from '../client/src/features/colorLab/dimensions'
+import { getColorLabPreset } from '../client/src/features/colorLab/presets'
 
 function pixels(values: number[][], width = values.length): PixelBuffer {
   return { width, height: values.length / width, data: new Uint8ClampedArray(values.flatMap(([r, g, b, a = 255]) => [r, g, b, a])) }
@@ -88,6 +89,28 @@ test('bloom spreads from highlights without inventing glow in an all-dark source
   const lit = applyColorLabPreset(pixels(withHighlight, 5), 'dreamy-dust', 100, 41)
   assert.equal(luma(lit.data, 10) > luma(dark.data, 10), true)
   assert.equal(Math.abs(luma(lit.data, 0) - luma(dark.data, 0)) < 1, true)
+})
+
+test('Classic 600 grain remains fine stochastic texture without flat block patches', () => {
+  const source = pixels(Array.from({ length: 256 }, () => [180, 120, 145]), 16)
+  const result = applyColorLabPreset(source, 'classic-600', 100, 53)
+  const redValues = Array.from({ length: 256 }, (_, index) => result.data[index * 4]!)
+  assert.equal(new Set(redValues).size > 8, true)
+  for (let blockY = 0; blockY < 4; blockY += 1) {
+    for (let blockX = 0; blockX < 4; blockX += 1) {
+      const block = []
+      for (let y = 0; y < 4; y += 1) for (let x = 0; x < 4; x += 1) block.push(redValues[(blockY * 4 + y) * 16 + blockX * 4 + x])
+      assert.equal(new Set(block).size > 2, true)
+    }
+  }
+})
+
+test('dust remains sparse and separate from grain for normal presets', () => {
+  assert.equal(getColorLabPreset('classic-600').dustStrength <= 0.0002, true)
+  assert.equal(getColorLabPreset('cold-flash').dustStrength <= 0.0002, true)
+  assert.equal(getColorLabPreset('dreamy-dust').dustStrength > getColorLabPreset('classic-600').dustStrength, true)
+  assert.equal(getColorLabPreset('original').dustStrength, 0)
+  assert.equal(getColorLabPreset('original').grainStrength, 0)
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {

@@ -5,6 +5,10 @@ export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: n
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
 const luminanceOf = (r: number, g: number, b: number) => r * 0.2126 + g * 0.7152 + b * 0.0722
+const smoothstep = (edge0: number, edge1: number, value: number) => {
+  const t = clamp01((value - edge0) / Math.max(0.001, edge1 - edge0))
+  return t * t * (3 - 2 * t)
+}
 const hash = (value: number) => {
   let x = value | 0
   x = Math.imul(x ^ (x >>> 16), 0x45d9f3b)
@@ -32,18 +36,19 @@ function softChannel(source: Uint8ClampedArray, width: number, height: number, x
 
 function highlightNeighbour(source: Uint8ClampedArray, width: number, height: number, x: number, y: number, threshold: number): [number, number, number] {
   const total = [0, 0, 0]
-  let weight = 0
-  const offsets = [[0, 0], [-2, 0], [2, 0], [0, -2], [0, 2]] as const
-  for (const [offsetX, offsetY] of offsets) {
+  const kernel = [
+    [0, 0, 4], [-1, 0, 2], [1, 0, 2], [0, -1, 2], [0, 1, 2],
+    [-2, 0, 1], [2, 0, 1], [0, -2, 1], [0, 2, 1],
+  ] as const
+  const kernelWeight = 16
+  for (const [offsetX, offsetY, sampleWeight] of kernel) {
     const r = channelAt(source, width, height, x + offsetX, y + offsetY, 0)
     const g = channelAt(source, width, height, x + offsetX, y + offsetY, 1)
     const b = channelAt(source, width, height, x + offsetX, y + offsetY, 2)
-    const mask = clamp01((luminanceOf(r, g, b) - threshold) / Math.max(0.01, 1 - threshold))
-    const weightedMask = mask * mask
+    const weightedMask = smoothstep(threshold, Math.min(1, threshold + 0.22), luminanceOf(r, g, b)) * sampleWeight
     total[0] += r * weightedMask; total[1] += g * weightedMask; total[2] += b * weightedMask
-    weight += weightedMask
   }
-  return weight ? [total[0]! / weight, total[1]! / weight, total[2]! / weight] : [0, 0, 0]
+  return [total[0]! / kernelWeight, total[1]! / kernelWeight, total[2]! / kernelWeight]
 }
 
 function filmTone(value: number, contrast: number, blackLift: number, compression: number) {
@@ -109,11 +114,9 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
       b -= haloMask * preset.halationStrength * 0.12
     }
 
-    const grainCellX = Math.floor(x / preset.grainSize)
-    const grainCellY = Math.floor(y / preset.grainSize)
-    const fine = hash(textureSeed + pixel * 13) - 0.5
-    const clump = hash(textureSeed + grainCellX * 92821 + grainCellY * 68917) - 0.5
-    const grain = (fine * 0.62 + clump * 0.75) * preset.grainStrength * (0.35 + (1 - sourceLuminance) * 0.85)
+    const fine = ((hash(textureSeed + pixel * 13) + hash(textureSeed * 3 + pixel * 29) + hash(textureSeed * 7 + pixel * 47)) / 3) - 0.5
+    const microCluster = hash(textureSeed + Math.floor(x / 2) * 92821 + Math.floor(y / 2) * 68917) - 0.5
+    const grain = (fine * 1.65 + microCluster * Math.min(0.18, preset.grainSize * 0.07)) * preset.grainStrength * (0.32 + (1 - sourceLuminance) * 0.8)
     r += grain * 1.03; g += grain; b += grain * 0.94
 
     const dust = hash(textureSeed * 17 + pixel * 7)
