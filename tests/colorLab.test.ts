@@ -9,6 +9,7 @@ function pixels(values: number[][], width = values.length): PixelBuffer {
 }
 
 const sample = pixels([[12, 18, 25], [70, 85, 100], [145, 125, 110], [245, 235, 220]], 2)
+const luma = (data: Uint8ClampedArray, pixel: number) => data[pixel * 4]! * 0.2126 + data[pixel * 4 + 1]! * 0.7152 + data[pixel * 4 + 2]! * 0.0722
 
 test('Original produces an identical independent pixel buffer', () => {
   const result = applyColorLabPreset(sample, 'original', 100, 7)
@@ -54,6 +55,39 @@ test('Dreamy Dust bloom is highlight-derived and does not globally flatten dark 
   const result = applyColorLabPreset(source, 'dreamy-dust', 100, 19)
   assert.notEqual(result.data[0], result.data[4])
   assert.equal(result.data[8]! > result.data[0]!, true)
+})
+
+test('Milk Fade raises blacks and compresses tonal contrast', () => {
+  const source = pixels([[4, 4, 4], [128, 128, 128], [248, 248, 248]], 3)
+  const result = applyColorLabPreset(source, 'milk-fade', 100, 23)
+  assert.equal(luma(result.data, 0) > luma(source.data, 0), true)
+  assert.equal(luma(result.data, 2) - luma(result.data, 0) < luma(source.data, 2) - luma(source.data, 0), true)
+})
+
+test('Cold Flash and SX-70 have measurably different tonal responses', () => {
+  const cold = applyColorLabPreset(sample, 'cold-flash', 100, 29)
+  const warm = applyColorLabPreset(sample, 'sx70-warm', 100, 29)
+  assert.notDeepEqual([...cold.data], [...warm.data])
+  assert.equal(luma(cold.data, 3) - luma(cold.data, 0) > luma(warm.data, 3) - luma(warm.data, 0), true)
+})
+
+test('grain, dust, and scratches are deterministic per image and preset seed', () => {
+  const source = pixels(Array.from({ length: 1024 }, () => [96, 112, 128]), 32)
+  const first = applyColorLabPreset(source, 'dreamy-dust', 100, 101)
+  const repeated = applyColorLabPreset(source, 'dreamy-dust', 100, 101)
+  const otherPreset = applyColorLabPreset(source, 'red-film', 100, 101)
+  assert.deepEqual([...first.data], [...repeated.data])
+  assert.notDeepEqual([...first.data], [...otherPreset.data])
+})
+
+test('bloom spreads from highlights without inventing glow in an all-dark source', () => {
+  const darkValues = Array.from({ length: 25 }, () => [20, 20, 20])
+  const withHighlight = darkValues.map((value) => [...value])
+  withHighlight[12] = [255, 250, 235]
+  const dark = applyColorLabPreset(pixels(darkValues, 5), 'dreamy-dust', 100, 41)
+  const lit = applyColorLabPreset(pixels(withHighlight, 5), 'dreamy-dust', 100, 41)
+  assert.equal(luma(lit.data, 10) > luma(dark.data, 10), true)
+  assert.equal(Math.abs(luma(lit.data, 0) - luma(dark.data, 0)) < 1, true)
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {
