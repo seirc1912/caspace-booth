@@ -164,7 +164,7 @@ test('dust and long broken scratches use a deterministic normalized coordinate p
 })
 
 test('thumbnail, main, and export rasterize one area-scaled deterministic defect layout', () => {
-  assert.equal(COLOR_LAB_RENDER_VERSION, 6)
+  assert.equal(COLOR_LAB_RENDER_VERSION, 7)
   const thumbnail = createFilmDefectRaster(180, 135, 'golden-vintage', 307)
   const main = createFilmDefectRaster(1200, 900, 'golden-vintage', 307)
   const hd = createFilmDefectRaster(2400, 1800, 'golden-vintage', 307)
@@ -235,9 +235,9 @@ test('Burnt Film uses stable normalized edge-damage geometry for the same photo'
   const first = createBurnPlan(811)
   assert.deepEqual(createBurnPlan(811), first)
   assert.notDeepEqual(createBurnPlan(812), first)
-  assert.equal(first.length, 3)
-  assert.equal(first.every(({ x, y, radius, strength }) => Number.isFinite(x) && Number.isFinite(y) && radius > 0 && radius < 1 && strength > 0 && strength <= 1), true)
-  assert.equal(first.every(({ x, y }) => x < 0 || x > 1 || y < 0 || y > 1), true)
+  assert.equal(first.length >= 1 && first.length <= 4, true)
+  assert.equal(first.every(({ x, yStart, yEnd, width, tilt, wobble, strength }) => [x, yStart, yEnd, width, tilt, wobble, strength].every(Number.isFinite) && yEnd - yStart >= 0.5 && yEnd - yStart <= 1.01 && width >= 0.03 && width <= 0.3 && strength > 0 && strength <= 1), true)
+  assert.equal(first.some(({ x }) => x < 0 || x > 1), true)
 })
 
 test('Burnt Film edge damage is deterministic, spatially selective, and independent from optional effects', () => {

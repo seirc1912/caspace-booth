@@ -4,7 +4,7 @@ import { requireSafeDimensions } from './dimensions'
 export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: number }
 export interface FilmEffectState { grain: boolean; dust: boolean }
 
-export const COLOR_LAB_RENDER_VERSION = 6
+export const COLOR_LAB_RENDER_VERSION = 7
 const DEFECT_REFERENCE_WIDTH = 1000
 const DEFECT_REFERENCE_AREA = 1_000_000
 const FILM_EFFECT_PROFILE = {
@@ -40,8 +40,11 @@ const textureSeedFor = (seed: number, id: string) => {
 
 export interface FilmBurnLobe {
   x: number
-  y: number
-  radius: number
+  yStart: number
+  yEnd: number
+  width: number
+  tilt: number
+  wobble: number
   strength: number
   warmth: number
   phase: number
@@ -49,33 +52,53 @@ export interface FilmBurnLobe {
 
 export function createBurnPlan(seed = 1): readonly FilmBurnLobe[] {
   const burnSeed = textureSeedFor(seed, 'burnt-film-light-damage')
-  const edges = [
-    { x: -0.08, y: 0.12 + hash(burnSeed + 11) * 0.76 },
-    { x: 1.08, y: 0.08 + hash(burnSeed + 23) * 0.84 },
-    { x: 0.08 + hash(burnSeed + 37) * 0.84, y: hash(burnSeed + 41) < 0.5 ? -0.1 : 1.1 },
-  ]
-  return edges.map((edge, index) => ({
-    ...edge,
-    radius: 0.19 + hash(burnSeed + index * 71 + 53) * 0.18,
-    strength: 0.48 + hash(burnSeed + index * 79 + 59) * 0.34,
-    warmth: hash(burnSeed + index * 83 + 61),
-    phase: hash(burnSeed + index * 89 + 67) * Math.PI * 2,
-  }))
+  const count = 1 + Math.floor(hash(burnSeed + 5) * 4)
+  return Array.from({ length: count }, (_, index) => {
+    const length = 0.5 + hash(burnSeed + index * 71 + 11) * 0.5
+    const yStart = -0.08 + hash(burnSeed + index * 73 + 17) * Math.max(0.02, 1.08 - length)
+    const edgeOrigin = index === 0
+    const x = edgeOrigin
+      ? (hash(burnSeed + 19) < 0.5 ? -0.015 : 1.015)
+      : -0.04 + hash(burnSeed + index * 79 + 23) * 1.08
+    return {
+      x,
+      yStart,
+      yEnd: Math.min(1.08, yStart + length),
+      width: 0.03 + hash(burnSeed + index * 83 + 29) ** 0.72 * 0.27,
+      tilt: (hash(burnSeed + index * 89 + 31) - 0.5) * 0.16,
+      wobble: 0.006 + hash(burnSeed + index * 97 + 37) * 0.024,
+      strength: 0.58 + hash(burnSeed + index * 101 + 41) * 0.36,
+      warmth: hash(burnSeed + index * 103 + 43),
+      phase: hash(burnSeed + index * 107 + 47) * Math.PI * 2,
+    }
+  })
 }
 
 function burnAt(x: number, y: number, width: number, height: number, plan: readonly FilmBurnLobe[]) {
   const nx = (x + 0.5) / width
   const ny = (y + 0.5) / height
-  let amber = 0; let cream = 0
-  for (const lobe of plan) {
-    const angle = Math.atan2(ny - lobe.y, nx - lobe.x)
-    const irregularRadius = lobe.radius * (1 + Math.sin(angle * 3 + lobe.phase) * 0.12 + Math.sin(angle * 7 - lobe.phase * 0.7) * 0.055)
-    const distance = Math.hypot(nx - lobe.x, ny - lobe.y)
-    const mask = (1 - smoothstep(irregularRadius * 0.28, irregularRadius, distance)) * lobe.strength
-    amber += mask * (0.72 + lobe.warmth * 0.28)
-    cream += mask * mask * (0.5 + (1 - lobe.warmth) * 0.3)
+  let glow = 0; let body = 0; let core = 0; let cream = 0
+  for (const leak of plan) {
+    const length = Math.max(0.01, leak.yEnd - leak.yStart)
+    const progress = (ny - leak.yStart) / length
+    if (progress < -0.12 || progress > 1.12) continue
+    const verticalFade = smoothstep(0, 0.13, progress) * (1 - smoothstep(0.82, 1, progress))
+    const pulse = 0.57 + Math.sin(progress * Math.PI * 3.1 + leak.phase) * 0.19 + Math.sin(progress * Math.PI * 7.3 - leak.phase * 0.6) * 0.1
+    const breakFade = smoothstep(0.08, 0.3, Math.abs(Math.sin(progress * Math.PI * 4.7 + leak.phase * 1.3)))
+    const opacity = clamp01(verticalFade * (pulse + breakFade * 0.2)) * leak.strength
+    const center = leak.x + leak.tilt * (progress - 0.5) + Math.sin(progress * Math.PI * 4.2 + leak.phase) * leak.wobble
+    const widthVariation = 0.78 + Math.sin(progress * Math.PI * 2.7 - leak.phase) * 0.2 + Math.sin(progress * Math.PI * 8.1 + leak.phase * 0.5) * 0.08
+    const halfWidth = Math.max(0.008, leak.width * widthVariation * 0.5)
+    const distance = Math.abs(nx - center) / halfWidth
+    const outer = (1 - smoothstep(0.3, 1.85, distance)) * opacity
+    const inner = (1 - smoothstep(0.08, 1.02, distance)) * opacity
+    const hotspot = (1 - smoothstep(0.02, 0.38 + leak.warmth * 0.12, distance)) * opacity
+    glow += outer * (0.6 + leak.warmth * 0.18)
+    body += inner * (0.72 + (1 - leak.warmth) * 0.18)
+    core += hotspot * (0.52 + leak.warmth * 0.28)
+    cream += hotspot * hotspot * (0.3 + (1 - leak.warmth) * 0.42)
   }
-  return { amber: clamp01(amber), cream: clamp01(cream) }
+  return { glow: clamp01(glow), body: clamp01(body), core: clamp01(core), cream: clamp01(cream) }
 }
 const channelAt = (source: Uint8ClampedArray, width: number, height: number, x: number, y: number, channel: number) => {
   const safeX = Math.max(0, Math.min(width - 1, x))
@@ -438,12 +461,13 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
 
     if (burnPlan) {
       const burn = burnAt(x, y, dimensions.width, dimensions.height, burnPlan)
-      const amber = burn.amber * preset.burnStrength
+      const glow = burn.glow * preset.burnStrength
+      const body = burn.body * preset.burnStrength
+      const core = burn.core * preset.burnStrength
       const cream = burn.cream * preset.burnStrength
-      r += amber * 0.38 + cream * 0.28
-      g += amber * 0.13 + cream * 0.24
-      b -= amber * 0.09
-      b += cream * 0.11
+      r = 1 - (1 - r) * (1 - glow * 0.35 - body * 0.42 - core * 0.28 - cream * 0.46)
+      g = 1 - (1 - g) * (1 - glow * 0.1 - body * 0.13 - core * 0.06 - cream * 0.4)
+      b = 1 - (1 - b) * (1 - glow * 0.025 - cream * 0.22)
     }
 
     r = r0 + (clamp01(r) - r0) * intensity
