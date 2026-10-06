@@ -3,7 +3,7 @@ import { requireSafeDimensions } from './dimensions'
 
 export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: number }
 
-export const COLOR_LAB_RENDER_VERSION = 3
+export const COLOR_LAB_RENDER_VERSION = 4
 const DEFECT_REFERENCE_WIDTH = 1000
 const DEFECT_REFERENCE_AREA = 1_000_000
 
@@ -92,6 +92,18 @@ export interface FilmScratch {
   breakSeed: number
 }
 
+export interface FilmAbrasion {
+  x: number
+  y: number
+  length: number
+  angle: number
+  curve: number
+  width: number
+  opacity: number
+  light: boolean
+  breakSeed: number
+}
+
 function buildDustPlan(count: number, seed: number): FilmDust[] {
   return Array.from({ length: count }, (_, index) => {
     const light = hash(seed + index * 173 + 47) < 0.67
@@ -146,7 +158,7 @@ function materializeDust(width: number, height: number, plan: FilmDust[]) {
 function dustCountForArea(densityPerMegapixel: number, width: number, height: number) {
   if (densityPerMegapixel <= 0) return 0
   const areaCount = Math.round(densityPerMegapixel * width * height / DEFECT_REFERENCE_AREA)
-  const minimumVisibleCount = Math.ceil(densityPerMegapixel * 0.08)
+  const minimumVisibleCount = Math.min(width, height) >= 64 ? Math.ceil(densityPerMegapixel * 0.08) : 0
   return Math.max(minimumVisibleCount, areaCount)
 }
 
@@ -155,8 +167,48 @@ export function createFilmDefectPlan(presetId: ColorLabPresetId, seed = 1, width
   const textureSeed = textureSeedFor(seed, presetId)
   return {
     dust: buildDustPlan(dustCountForArea(preset.dustCount, width, height), textureSeed * 17),
+    abrasion: buildAbrasionPlan(dustCountForArea(preset.abrasionDensity, width, height), textureSeed * 23),
     scratches: buildScratches(preset.scratchMin, preset.scratchMax, preset.scratchOpacity, textureSeed * 31),
+    fibers: buildFibers(preset.fiberMin, preset.fiberMax, preset.scratchOpacity, textureSeed * 43),
   }
+}
+
+function buildAbrasionPlan(count: number, seed: number): FilmAbrasion[] {
+  return Array.from({ length: count }, (_, index) => ({
+    x: hash(seed + index * 173 + 17),
+    y: hash(seed + index * 181 + 29),
+    length: 0.003 + hash(seed + index * 191 + 37) * 0.045,
+    angle: hash(seed + index * 193 + 41) * Math.PI * 2,
+    curve: (hash(seed + index * 197 + 43) - 0.5) * 0.012,
+    width: 0.28 + hash(seed + index * 199 + 47) * 0.62,
+    opacity: 0.025 + hash(seed + index * 211 + 53) * 0.075,
+    light: hash(seed + index * 223 + 59) < 0.72,
+    breakSeed: seed + index * 227,
+  }))
+}
+
+function buildFibers(minimum: number, maximum: number, opacity: number, seed: number): FilmScratch[] {
+  if (maximum <= 0 || opacity <= 0) return []
+  const count = minimum + Math.floor(hash(seed + 613) * (maximum - minimum + 1))
+  return Array.from({ length: count }, (_, index) => {
+    const length = 0.12 + hash(seed + index * 229 + 19) * 0.34
+    const yStart = 0.03 + hash(seed + index * 233 + 23) * Math.max(0.01, 0.94 - length)
+    return {
+      x: 0.04 + hash(seed + index * 239 + 31) * 0.92,
+      yStart,
+      yEnd: yStart + length,
+      slope: (hash(seed + index * 241 + 37) - 0.5) * 0.48,
+      curve: (hash(seed + index * 251 + 41) - 0.5) * 0.24,
+      wobble: 0.003 + hash(seed + index * 257 + 43) * 0.009,
+      phase: hash(seed + index * 263 + 47) * Math.PI * 2,
+      width: 0.45 + hash(seed + index * 269 + 53) * 0.9,
+      softness: 0.35 + hash(seed + index * 271 + 59) * 0.6,
+      interruptions: 2 + Math.floor(hash(seed + index * 277 + 61) * 5),
+      opacity: opacity * (0.48 + hash(seed + index * 281 + 67) * 0.38),
+      light: hash(seed + index * 283 + 71) < 0.58,
+      breakSeed: seed + index * 293,
+    }
+  })
 }
 
 function buildScratches(minimum: number, maximum: number, opacity: number, seed: number): FilmScratch[] {
@@ -221,6 +273,36 @@ function materializeScratches(width: number, height: number, scratches: FilmScra
   return marks
 }
 
+function materializeAbrasion(width: number, height: number, abrasion: FilmAbrasion[]) {
+  const marks = new Map<number, number>()
+  for (const stroke of abrasion) {
+    const pixelLength = Math.max(1, stroke.length * Math.hypot(width, height))
+    const steps = Math.ceil(pixelLength * 1.25)
+    for (let step = 0; step <= steps; step += 1) {
+      const progress = step / steps
+      if (hash(stroke.breakSeed + Math.floor(progress * 17) * 307) < 0.08) continue
+      const fade = Math.min(1, progress * 8, (1 - progress) * 8)
+      const bend = Math.sin(progress * Math.PI) * stroke.curve
+      const nx = stroke.x + Math.cos(stroke.angle) * stroke.length * progress - Math.sin(stroke.angle) * bend
+      const ny = stroke.y + Math.sin(stroke.angle) * stroke.length * progress + Math.cos(stroke.angle) * bend
+      const centerX = Math.round(nx * width); const centerY = Math.round(ny * height)
+      if (centerX < 0 || centerX >= width || centerY < 0 || centerY >= height) continue
+      const radius = Math.max(0.22, stroke.width * width / DEFECT_REFERENCE_WIDTH)
+      const amount = (stroke.light ? 1 : -1) * stroke.opacity * fade * (0.72 + hash(stroke.breakSeed + step * 311) * 0.4)
+      const extent = Math.ceil(radius)
+      for (let offsetY = -extent; offsetY <= extent; offsetY += 1) for (let offsetX = -extent; offsetX <= extent; offsetX += 1) {
+        const distance = Math.hypot(offsetX, offsetY)
+        if (distance > radius) continue
+        const px = centerX + offsetX; const py = centerY + offsetY
+        if (px < 0 || px >= width || py < 0 || py >= height) continue
+        const key = py * width + px
+        marks.set(key, (marks.get(key) ?? 0) + amount * Math.max(0.15, 1 - distance / radius))
+      }
+    }
+  }
+  return marks
+}
+
 function compositeDefect(channel: number, amount: number) {
   return amount >= 0 ? channel + (1 - channel) * amount : channel + channel * amount
 }
@@ -231,7 +313,9 @@ export function createFilmDefectRaster(width: number, height: number, presetId: 
   return {
     plan,
     dust: materializeDust(dimensions.width, dimensions.height, plan.dust),
+    abrasion: materializeAbrasion(dimensions.width, dimensions.height, plan.abrasion),
     scratches: materializeScratches(dimensions.width, dimensions.height, plan.scratches),
+    fibers: materializeScratches(dimensions.width, dimensions.height, plan.fibers),
   }
 }
 
@@ -248,7 +332,9 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
   const softnessRadius = preset.softness >= 0.24 ? 2 : 1
   const defects = createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed)
   const dust = defects.dust
+  const abrasion = defects.abrasion
   const scratches = defects.scratches
+  const fibers = defects.fibers
 
   for (let pixel = 0; pixel < original.length; pixel += 4) {
     const x = (pixel / 4) % dimensions.width
@@ -308,9 +394,12 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
     const dustAmount = dust.get(pixel / 4) ?? [0, 0, 0]
     r = compositeDefect(r, dustAmount[0]); g = compositeDefect(g, dustAmount[1]); b = compositeDefect(b, dustAmount[2])
     const scratchAmount = scratches.get(pixel / 4) ?? 0
-    r = compositeDefect(r, scratchAmount)
-    g = compositeDefect(g, scratchAmount * 0.96)
-    b = compositeDefect(b, scratchAmount * 0.88)
+    const abrasionAmount = abrasion.get(pixel / 4) ?? 0
+    const fiberAmount = fibers.get(pixel / 4) ?? 0
+    const physicalMark = scratchAmount + abrasionAmount + fiberAmount
+    r = compositeDefect(r, physicalMark)
+    g = compositeDefect(g, physicalMark * 0.96)
+    b = compositeDefect(b, physicalMark * 0.88)
 
     if (preset.vignette > 0) {
       const nx = (x + 0.5) / dimensions.width - 0.5

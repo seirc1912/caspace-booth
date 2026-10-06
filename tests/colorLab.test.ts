@@ -154,7 +154,7 @@ test('dust and long broken scratches use a deterministic normalized coordinate p
   const plan = createFilmDefectPlan('dreamy-dust', 173, 1000, 1500)
   assert.deepEqual(plan, createFilmDefectPlan('dreamy-dust', 173, 1000, 1500))
   assert.notDeepEqual(plan, createFilmDefectPlan('dreamy-dust', 174, 1000, 1500))
-  assert.equal(plan.dust.length, 225)
+  assert.equal(plan.dust.length, 1275)
   assert.equal(plan.dust.every(({ x, y }) => x >= 0 && x <= 1 && y >= 0 && y <= 1), true)
   assert.equal(new Set(plan.dust.map(({ kind }) => kind)).size >= 3, true)
   assert.equal(plan.scratches.length >= 8 && plan.scratches.length <= 14, true)
@@ -164,7 +164,7 @@ test('dust and long broken scratches use a deterministic normalized coordinate p
 })
 
 test('thumbnail, main, and export rasterize one area-scaled deterministic defect layout', () => {
-  assert.equal(COLOR_LAB_RENDER_VERSION, 3)
+  assert.equal(COLOR_LAB_RENDER_VERSION, 4)
   const thumbnail = createFilmDefectRaster(180, 135, 'dreamy-dust', 307)
   const main = createFilmDefectRaster(1200, 900, 'dreamy-dust', 307)
   const hd = createFilmDefectRaster(2400, 1800, 'dreamy-dust', 307)
@@ -172,15 +172,23 @@ test('thumbnail, main, and export rasterize one area-scaled deterministic defect
   assert.equal(main.plan.dust.length < hd.plan.dust.length, true)
   assert.deepEqual(main.plan.dust.slice(0, thumbnail.plan.dust.length), thumbnail.plan.dust)
   assert.deepEqual(hd.plan.dust.slice(0, main.plan.dust.length), main.plan.dust)
+  assert.deepEqual(main.plan.abrasion.slice(0, thumbnail.plan.abrasion.length), thumbnail.plan.abrasion)
+  assert.deepEqual(hd.plan.abrasion.slice(0, main.plan.abrasion.length), main.plan.abrasion)
   assert.deepEqual(thumbnail.plan.scratches, main.plan.scratches)
   assert.deepEqual(main.plan.scratches, hd.plan.scratches)
+  assert.deepEqual(thumbnail.plan.fibers, main.plan.fibers)
+  assert.deepEqual(main.plan.fibers, hd.plan.fibers)
   for (const raster of [thumbnail, main, hd]) {
     assert.equal(raster.dust.size > 0, true)
+    assert.equal(raster.abrasion.size > 0, true)
     assert.equal(raster.scratches.size > 0, true)
+    assert.equal(raster.fibers.size > 0, true)
   }
   const original = createFilmDefectRaster(1200, 900, 'original', 307)
   assert.equal(original.dust.size, 0)
+  assert.equal(original.abrasion.size, 0)
   assert.equal(original.scratches.size, 0)
+  assert.equal(original.fibers.size, 0)
 })
 
 test('canonical film renderer bakes defects into thumbnail, main, and export pixels', () => {
@@ -198,7 +206,9 @@ test('canonical film renderer bakes defects into thumbnail, main, and export pix
     assert.notDeepEqual([...rendered.data], [...source.data])
     const raster = createFilmDefectRaster(width, height, 'dreamy-dust', 401)
     assert.equal(raster.dust.size > 0, true)
+    assert.equal(raster.abrasion.size > 0, true)
     assert.equal(raster.scratches.size > 0, true)
+    assert.equal(raster.fibers.size > 0, true)
   }
   assert.strictEqual(applyColorLabPreset, renderFilmImage)
 })
