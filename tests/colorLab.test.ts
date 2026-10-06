@@ -97,7 +97,7 @@ test('bloom spreads from highlights without inventing glow in an all-dark source
 
 test('Flash 90s grain remains fine stochastic texture without flat block patches', () => {
   const source = pixels(Array.from({ length: 256 }, () => [180, 120, 145]), 16)
-  const result = applyColorLabPreset(source, 'flash-90s', 100, 53)
+  const result = applyColorLabPreset(source, 'flash-90s', 100, 53, { grain: true, dust: false })
   const redValues = Array.from({ length: 256 }, (_, index) => result.data[index * 4]!)
   assert.equal(new Set(redValues).size > 8, true)
   for (let blockY = 0; blockY < 4; blockY += 1) {
@@ -154,17 +154,17 @@ test('dust and long broken scratches use a deterministic normalized coordinate p
   const plan = createFilmDefectPlan('dreamy-dust', 173, 1000, 1500)
   assert.deepEqual(plan, createFilmDefectPlan('dreamy-dust', 173, 1000, 1500))
   assert.notDeepEqual(plan, createFilmDefectPlan('dreamy-dust', 174, 1000, 1500))
-  assert.equal(plan.dust.length, 1275)
+  assert.equal(plan.dust.length, 975)
   assert.equal(plan.dust.every(({ x, y }) => x >= 0 && x <= 1 && y >= 0 && y <= 1), true)
   assert.equal(new Set(plan.dust.map(({ kind }) => kind)).size >= 3, true)
-  assert.equal(plan.scratches.length >= 8 && plan.scratches.length <= 14, true)
+  assert.equal(plan.scratches.length >= 6 && plan.scratches.length <= 10, true)
   assert.equal(plan.scratches.every(({ x, yStart, yEnd, width, softness, interruptions }) => x >= 0 && x <= 1 && yStart >= 0 && yEnd <= 1 && yEnd > yStart && width >= 0.7 && width <= 2.8 && softness >= 0 && softness <= 1 && interruptions >= 1), true)
   assert.equal(plan.scratches.filter(({ yStart, yEnd }) => yEnd - yStart >= 0.4 && yEnd - yStart <= 0.95).length >= Math.ceil(plan.scratches.length * 0.45), true)
   assert.equal(plan.scratches.some(({ slope, curve }) => Math.abs(slope) > 0.02 && Math.abs(curve) > 0.005), true)
 })
 
 test('thumbnail, main, and export rasterize one area-scaled deterministic defect layout', () => {
-  assert.equal(COLOR_LAB_RENDER_VERSION, 4)
+  assert.equal(COLOR_LAB_RENDER_VERSION, 5)
   const thumbnail = createFilmDefectRaster(180, 135, 'dreamy-dust', 307)
   const main = createFilmDefectRaster(1200, 900, 'dreamy-dust', 307)
   const hd = createFilmDefectRaster(2400, 1800, 'dreamy-dust', 307)
@@ -184,11 +184,8 @@ test('thumbnail, main, and export rasterize one area-scaled deterministic defect
     assert.equal(raster.scratches.size > 0, true)
     assert.equal(raster.fibers.size > 0, true)
   }
-  const original = createFilmDefectRaster(1200, 900, 'original', 307)
-  assert.equal(original.dust.size, 0)
-  assert.equal(original.abrasion.size, 0)
-  assert.equal(original.scratches.size, 0)
-  assert.equal(original.fibers.size, 0)
+  const originalSource = pixels(Array.from({ length: 100 }, () => [90, 110, 130]), 10)
+  assert.deepEqual([...renderFilmImage(originalSource, 'original', 100, 307, { grain: false, dust: false }).data], [...originalSource.data])
 })
 
 test('canonical film renderer bakes defects into thumbnail, main, and export pixels', () => {
@@ -202,7 +199,7 @@ test('canonical film renderer bakes defects into thumbnail, main, and export pix
   })
   for (const [width, height] of [[90, 60], [300, 200], [600, 400]]) {
     const source = fixture(width, height)
-    const rendered = renderFilmImage(source, 'dreamy-dust', 100, 401)
+    const rendered = renderFilmImage(source, 'dreamy-dust', 100, 401, { grain: true, dust: true })
     assert.notDeepEqual([...rendered.data], [...source.data])
     const raster = createFilmDefectRaster(width, height, 'dreamy-dust', 401)
     assert.equal(raster.dust.size > 0, true)
@@ -211,6 +208,39 @@ test('canonical film renderer bakes defects into thumbnail, main, and export pix
     assert.equal(raster.fibers.size > 0, true)
   }
   assert.strictEqual(applyColorLabPreset, renderFilmImage)
+})
+
+test('Grain and Dust are independent optional effects in every combination', () => {
+  const source = pixels(Array.from({ length: 4096 }, (_, index) => [70 + index % 90, 85 + index % 70, 100 + index % 50]), 64)
+  const clean = renderFilmImage(source, 'original', 100, 509, { grain: false, dust: false })
+  const grainOnly = renderFilmImage(source, 'original', 100, 509, { grain: true, dust: false })
+  const dustOnly = renderFilmImage(source, 'original', 100, 509, { grain: false, dust: true })
+  const both = renderFilmImage(source, 'original', 100, 509, { grain: true, dust: true })
+  assert.deepEqual([...clean.data], [...source.data])
+  assert.notDeepEqual([...grainOnly.data], [...clean.data])
+  assert.notDeepEqual([...dustOnly.data], [...clean.data])
+  assert.notDeepEqual([...both.data], [...grainOnly.data])
+  assert.notDeepEqual([...both.data], [...dustOnly.data])
+})
+
+test('Dust toggle restores identical geometry and is stable across color presets', () => {
+  const first = createFilmDefectPlan('golden-vintage', 601, 1200, 800)
+  const toggledBackOn = createFilmDefectPlan('golden-vintage', 601, 1200, 800)
+  const anotherColor = createFilmDefectPlan('pink-instant', 601, 1200, 800)
+  assert.deepEqual(toggledBackOn, first)
+  assert.deepEqual(anotherColor, first)
+})
+
+test('enabled Grain and Dust contribute to both main-preview and HD-sized pixels', () => {
+  const fixture = (width: number, height: number) => pixels(Array.from({ length: width * height }, (_, index) => [80 + index % 80, 95 + index % 60, 115 + index % 40]), width)
+  for (const [width, height] of [[240, 160], [720, 480]]) {
+    const source = fixture(width, height)
+    const clean = renderFilmImage(source, 'golden-vintage', 100, 701, { grain: false, dust: false })
+    const textured = renderFilmImage(source, 'golden-vintage', 100, 701, { grain: true, dust: true })
+    assert.notDeepEqual([...textured.data], [...clean.data])
+    const raster = createFilmDefectRaster(width, height, 'golden-vintage', 701)
+    assert.equal(raster.dust.size > 0 && raster.abrasion.size > 0 && raster.scratches.size > 0 && raster.fibers.size > 0, true)
+  }
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {

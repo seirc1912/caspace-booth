@@ -2,10 +2,22 @@ import { getColorLabPreset, type ColorLabPresetId } from './presets'
 import { requireSafeDimensions } from './dimensions'
 
 export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: number }
+export interface FilmEffectState { grain: boolean; dust: boolean }
 
-export const COLOR_LAB_RENDER_VERSION = 4
+export const COLOR_LAB_RENDER_VERSION = 5
 const DEFECT_REFERENCE_WIDTH = 1000
 const DEFECT_REFERENCE_AREA = 1_000_000
+const FILM_EFFECT_PROFILE = {
+  grainStrength: 0.075,
+  grainSize: 1.7,
+  dustDensity: 650,
+  abrasionDensity: 450,
+  scratchMin: 6,
+  scratchMax: 10,
+  scratchOpacity: 0.19,
+  fiberMin: 1,
+  fiberMax: 3,
+} as const
 
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
 const luminanceOf = (r: number, g: number, b: number) => r * 0.2126 + g * 0.7152 + b * 0.0722
@@ -163,13 +175,13 @@ function dustCountForArea(densityPerMegapixel: number, width: number, height: nu
 }
 
 export function createFilmDefectPlan(presetId: ColorLabPresetId, seed = 1, width = 1000, height = 1500) {
-  const preset = getColorLabPreset(presetId)
-  const textureSeed = textureSeedFor(seed, presetId)
+  void presetId
+  const textureSeed = textureSeedFor(seed, 'dust-effect')
   return {
-    dust: buildDustPlan(dustCountForArea(preset.dustCount, width, height), textureSeed * 17),
-    abrasion: buildAbrasionPlan(dustCountForArea(preset.abrasionDensity, width, height), textureSeed * 23),
-    scratches: buildScratches(preset.scratchMin, preset.scratchMax, preset.scratchOpacity, textureSeed * 31),
-    fibers: buildFibers(preset.fiberMin, preset.fiberMax, preset.scratchOpacity, textureSeed * 43),
+    dust: buildDustPlan(dustCountForArea(FILM_EFFECT_PROFILE.dustDensity, width, height), textureSeed * 17),
+    abrasion: buildAbrasionPlan(dustCountForArea(FILM_EFFECT_PROFILE.abrasionDensity, width, height), textureSeed * 23),
+    scratches: buildScratches(FILM_EFFECT_PROFILE.scratchMin, FILM_EFFECT_PROFILE.scratchMax, FILM_EFFECT_PROFILE.scratchOpacity, textureSeed * 31),
+    fibers: buildFibers(FILM_EFFECT_PROFILE.fiberMin, FILM_EFFECT_PROFILE.fiberMax, FILM_EFFECT_PROFILE.scratchOpacity, textureSeed * 43),
   }
 }
 
@@ -319,22 +331,18 @@ export function createFilmDefectRaster(width: number, height: number, presetId: 
   }
 }
 
-export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1): PixelBuffer {
+export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1, effects: FilmEffectState = { grain: false, dust: false }): PixelBuffer {
   const dimensions = requireSafeDimensions(source.width, source.height, 'processor')
   if (source.data.length !== dimensions.width * dimensions.height * 4) throw new Error('Color Lab image decode failed: invalid processor pixel buffer')
   const output = new Uint8ClampedArray(source.data)
   const intensity = clamp01(intensityPercent / 100)
-  if (presetId === 'original' || intensity === 0) return { ...dimensions, data: output }
+  if ((presetId === 'original' || intensity === 0) && !effects.grain && !effects.dust) return { ...dimensions, data: output }
 
   const preset = getColorLabPreset(presetId)
   const original = source.data
-  const textureSeed = textureSeedFor(seed, presetId)
+  const textureSeed = textureSeedFor(seed, 'grain-effect')
   const softnessRadius = preset.softness >= 0.24 ? 2 : 1
-  const defects = createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed)
-  const dust = defects.dust
-  const abrasion = defects.abrasion
-  const scratches = defects.scratches
-  const fibers = defects.fibers
+  const defects = effects.dust ? createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed) : null
 
   for (let pixel = 0; pixel < original.length; pixel += 4) {
     const x = (pixel / 4) % dimensions.width
@@ -386,21 +394,6 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
       b -= haloMask * preset.halationStrength * 0.12
     }
 
-    const fine = ((hash(textureSeed + pixel * 13) + hash(textureSeed * 3 + pixel * 29) + hash(textureSeed * 7 + pixel * 47)) / 3) - 0.5
-    const microCluster = hash(textureSeed + Math.floor(x / 2) * 92821 + Math.floor(y / 2) * 68917) - 0.5
-    const grain = (fine * 1.65 + microCluster * Math.min(0.18, preset.grainSize * 0.07)) * preset.grainStrength * (0.32 + (1 - sourceLuminance) * 0.8)
-    r += grain * 1.03; g += grain; b += grain * 0.94
-
-    const dustAmount = dust.get(pixel / 4) ?? [0, 0, 0]
-    r = compositeDefect(r, dustAmount[0]); g = compositeDefect(g, dustAmount[1]); b = compositeDefect(b, dustAmount[2])
-    const scratchAmount = scratches.get(pixel / 4) ?? 0
-    const abrasionAmount = abrasion.get(pixel / 4) ?? 0
-    const fiberAmount = fibers.get(pixel / 4) ?? 0
-    const physicalMark = scratchAmount + abrasionAmount + fiberAmount
-    r = compositeDefect(r, physicalMark)
-    g = compositeDefect(g, physicalMark * 0.96)
-    b = compositeDefect(b, physicalMark * 0.88)
-
     if (preset.vignette > 0) {
       const nx = (x + 0.5) / dimensions.width - 0.5
       const ny = (y + 0.5) / dimensions.height - 0.5
@@ -408,9 +401,27 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
       r -= edge; g -= edge; b -= edge
     }
 
-    output[pixel] = Math.round((r0 + (clamp01(r) - r0) * intensity) * 255)
-    output[pixel + 1] = Math.round((g0 + (clamp01(g) - g0) * intensity) * 255)
-    output[pixel + 2] = Math.round((b0 + (clamp01(b) - b0) * intensity) * 255)
+    r = r0 + (clamp01(r) - r0) * intensity
+    g = g0 + (clamp01(g) - g0) * intensity
+    b = b0 + (clamp01(b) - b0) * intensity
+
+    if (effects.grain) {
+      const fine = ((hash(textureSeed + pixel * 13) + hash(textureSeed * 3 + pixel * 29) + hash(textureSeed * 7 + pixel * 47)) / 3) - 0.5
+      const microCluster = hash(textureSeed + Math.floor(x / 2) * 92821 + Math.floor(y / 2) * 68917) - 0.5
+      const grain = (fine * 1.65 + microCluster * Math.min(0.18, FILM_EFFECT_PROFILE.grainSize * 0.07)) * FILM_EFFECT_PROFILE.grainStrength * (0.32 + (1 - sourceLuminance) * 0.8)
+      r += grain * 1.03; g += grain; b += grain * 0.94
+    }
+
+    if (defects) {
+      const dustAmount = defects.dust.get(pixel / 4) ?? [0, 0, 0]
+      r = compositeDefect(r, dustAmount[0]); g = compositeDefect(g, dustAmount[1]); b = compositeDefect(b, dustAmount[2])
+      const physicalMark = (defects.scratches.get(pixel / 4) ?? 0) + (defects.abrasion.get(pixel / 4) ?? 0) + (defects.fibers.get(pixel / 4) ?? 0)
+      r = compositeDefect(r, physicalMark); g = compositeDefect(g, physicalMark * 0.96); b = compositeDefect(b, physicalMark * 0.88)
+    }
+
+    output[pixel] = Math.round(clamp01(r) * 255)
+    output[pixel + 1] = Math.round(clamp01(g) * 255)
+    output[pixel + 2] = Math.round(clamp01(b) * 255)
     output[pixel + 3] = original[pixel + 3]!
   }
   return { ...dimensions, data: output }

@@ -43,6 +43,8 @@ export function ColorLabPage() {
   const [presetId, setPresetId] = useState<ColorLabPresetId>('original')
   const [intensity, setIntensity] = useState(100)
   const [showOriginal, setShowOriginal] = useState(false)
+  const [grainEnabled, setGrainEnabled] = useState(false)
+  const [dustEnabled, setDustEnabled] = useState(false)
   const [processing, setProcessing] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -77,7 +79,7 @@ export function ColorLabPage() {
     if (!photo || !previewRef.current) return
     const sequence = ++renderSequence.current
     const timer = window.setTimeout(() => {
-      void renderColorLabImage(photo.previewImage, photo.previewImage.naturalWidth, photo.previewImage.naturalHeight, showOriginal ? 'original' : presetId, showOriginal ? 0 : intensity, photo.seed, 1600).then((rendered) => {
+      void renderColorLabImage(photo.previewImage, photo.previewImage.naturalWidth, photo.previewImage.naturalHeight, showOriginal ? 'original' : presetId, showOriginal ? 0 : intensity, photo.seed, 1600, showOriginal ? { grain: false, dust: false } : { grain: grainEnabled, dust: dustEnabled }).then((rendered) => {
         if (sequence !== renderSequence.current || !previewRef.current) return
         const canvas = previewRef.current
         canvas.width = rendered.width; canvas.height = rendered.height
@@ -87,7 +89,7 @@ export function ColorLabPage() {
       }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Preview could not be rendered.'))
     }, 20)
     return () => window.clearTimeout(timer)
-  }, [photo, presetId, intensity, showOriginal])
+  }, [photo, presetId, intensity, showOriginal, grainEnabled, dustEnabled])
 
   useEffect(() => {
     if (!photo) return
@@ -110,7 +112,7 @@ export function ColorLabPage() {
     if (!photo || exporting) return
     setExporting(true); setError(null)
     try {
-      const canvas = await renderColorLabImage(photo.exportImage, photo.width, photo.height, presetId, intensity, photo.seed, 4096)
+      const canvas = await renderColorLabImage(photo.exportImage, photo.width, photo.height, presetId, intensity, photo.seed, 4096, { grain: grainEnabled, dust: dustEnabled })
       const blob = await canvasToBlob(canvas, photo.outputType, 0.96)
       canvas.width = 1; canvas.height = 1
       await deliverColorLabImage(blob, `ca-color-lab-${presetId}.${photo.outputType === 'image/png' ? 'png' : 'jpg'}`)
@@ -128,6 +130,13 @@ export function ColorLabPage() {
         <div aria-label="Film presets" className="mt-6 flex snap-x gap-3 overflow-x-auto pb-3">
           {colorLabPresets.map((preset) => <button aria-pressed={presetId === preset.id} className={`w-24 shrink-0 snap-start overflow-hidden rounded-2xl border-2 bg-white text-left transition ${presetId === preset.id ? 'border-stone-950 shadow-md' : 'border-transparent'}`} key={preset.id} onClick={() => setPresetId(preset.id)} type="button"><div className="aspect-square bg-stone-200">{thumbnails[preset.id] ? <img alt="" className="size-full object-cover" src={thumbnails[preset.id]} /> : null}</div><span className="block min-h-12 px-2 py-2 text-center text-[0.68rem] font-black leading-tight">{preset.name}</span></button>)}
         </div>
+        <section aria-label="Effects" className="mt-3 rounded-[1.5rem] bg-white p-4 shadow-sm">
+          <h2 className="text-xs font-black uppercase tracking-[0.2em] text-stone-500">Effects</h2>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <button aria-pressed={grainEnabled} className={`min-h-12 rounded-full border-2 px-4 text-sm font-black transition ${grainEnabled ? 'border-stone-950 bg-stone-950 text-white' : 'border-stone-300 bg-white text-stone-700'}`} onClick={() => setGrainEnabled((enabled) => !enabled)} type="button">Grain</button>
+            <button aria-pressed={dustEnabled} className={`min-h-12 rounded-full border-2 px-4 text-sm font-black transition ${dustEnabled ? 'border-stone-950 bg-stone-950 text-white' : 'border-stone-300 bg-white text-stone-700'}`} onClick={() => setDustEnabled((enabled) => !enabled)} type="button">Dust</button>
+          </div>
+        </section>
         <div className="mt-4 rounded-[1.75rem] bg-white p-5 shadow-sm"><div className="flex items-center justify-between"><label className="font-black" htmlFor="color-lab-intensity">Intensity</label><output className="font-black tabular-nums">{presetId === 'original' ? 0 : intensity}%</output></div><input className="mt-4 h-10 w-full accent-stone-950" disabled={presetId === 'original'} id="color-lab-intensity" max="100" min="0" onChange={(event) => setIntensity(Number(event.target.value))} type="range" value={presetId === 'original' ? 0 : intensity} /><p className="mt-2 text-center text-xs font-semibold text-stone-400">Press and hold the photo to see Before</p></div>
         <button className="mt-4 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:opacity-50" disabled={exporting} onClick={downloadHd} type="button">{exporting ? 'Processing HD…' : 'Download HD'}</button>
       </>}
