@@ -4,7 +4,7 @@ import { requireSafeDimensions } from './dimensions'
 export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: number }
 export interface FilmEffectState { grain: boolean; dust: boolean }
 
-export const COLOR_LAB_RENDER_VERSION = 5
+export const COLOR_LAB_RENDER_VERSION = 6
 const DEFECT_REFERENCE_WIDTH = 1000
 const DEFECT_REFERENCE_AREA = 1_000_000
 const FILM_EFFECT_PROFILE = {
@@ -36,6 +36,46 @@ const textureSeedFor = (seed: number, id: string) => {
   const versionedId = `${id}:film-engine-${COLOR_LAB_RENDER_VERSION}`
   for (let index = 0; index < versionedId.length; index += 1) result = Math.imul(result ^ versionedId.charCodeAt(index), 16777619)
   return result | 0
+}
+
+export interface FilmBurnLobe {
+  x: number
+  y: number
+  radius: number
+  strength: number
+  warmth: number
+  phase: number
+}
+
+export function createBurnPlan(seed = 1): readonly FilmBurnLobe[] {
+  const burnSeed = textureSeedFor(seed, 'burnt-film-light-damage')
+  const edges = [
+    { x: -0.08, y: 0.12 + hash(burnSeed + 11) * 0.76 },
+    { x: 1.08, y: 0.08 + hash(burnSeed + 23) * 0.84 },
+    { x: 0.08 + hash(burnSeed + 37) * 0.84, y: hash(burnSeed + 41) < 0.5 ? -0.1 : 1.1 },
+  ]
+  return edges.map((edge, index) => ({
+    ...edge,
+    radius: 0.19 + hash(burnSeed + index * 71 + 53) * 0.18,
+    strength: 0.48 + hash(burnSeed + index * 79 + 59) * 0.34,
+    warmth: hash(burnSeed + index * 83 + 61),
+    phase: hash(burnSeed + index * 89 + 67) * Math.PI * 2,
+  }))
+}
+
+function burnAt(x: number, y: number, width: number, height: number, plan: readonly FilmBurnLobe[]) {
+  const nx = (x + 0.5) / width
+  const ny = (y + 0.5) / height
+  let amber = 0; let cream = 0
+  for (const lobe of plan) {
+    const angle = Math.atan2(ny - lobe.y, nx - lobe.x)
+    const irregularRadius = lobe.radius * (1 + Math.sin(angle * 3 + lobe.phase) * 0.12 + Math.sin(angle * 7 - lobe.phase * 0.7) * 0.055)
+    const distance = Math.hypot(nx - lobe.x, ny - lobe.y)
+    const mask = (1 - smoothstep(irregularRadius * 0.28, irregularRadius, distance)) * lobe.strength
+    amber += mask * (0.72 + lobe.warmth * 0.28)
+    cream += mask * mask * (0.5 + (1 - lobe.warmth) * 0.3)
+  }
+  return { amber: clamp01(amber), cream: clamp01(cream) }
 }
 const channelAt = (source: Uint8ClampedArray, width: number, height: number, x: number, y: number, channel: number) => {
   const safeX = Math.max(0, Math.min(width - 1, x))
@@ -341,6 +381,7 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
   const preset = getColorLabPreset(presetId)
   const original = source.data
   const textureSeed = textureSeedFor(seed, 'grain-effect')
+  const burnPlan = preset.burnStrength > 0 ? createBurnPlan(seed) : null
   const softnessRadius = preset.softness >= 0.24 ? 2 : 1
   const defects = effects.dust ? createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed) : null
 
@@ -377,12 +418,6 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
     g += preset.shadowBias[1] * shadow + preset.midtoneBias[1] * midtone + preset.highlightBias[1] * highlight
     b += preset.shadowBias[2] * shadow + preset.midtoneBias[2] * midtone + preset.highlightBias[2] * highlight
 
-    if (presetId === 'red-film') {
-      r += 0.12 * midtone + 0.1 * highlight
-      g *= 0.7 - highlight * 0.08
-      b *= 0.58 - highlight * 0.06
-    }
-
     if (preset.bloomStrength > 0) {
       const [bloomR, bloomG, bloomB] = highlightNeighbour(original, dimensions.width, dimensions.height, x, y, preset.bloomThreshold)
       r += bloomR * (preset.bloomStrength + preset.bloomTint[0])
@@ -399,6 +434,16 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
       const ny = (y + 0.5) / dimensions.height - 0.5
       const edge = smoothstep(0.26, 0.7, Math.hypot(nx, ny)) * preset.vignette
       r -= edge; g -= edge; b -= edge
+    }
+
+    if (burnPlan) {
+      const burn = burnAt(x, y, dimensions.width, dimensions.height, burnPlan)
+      const amber = burn.amber * preset.burnStrength
+      const cream = burn.cream * preset.burnStrength
+      r += amber * 0.38 + cream * 0.28
+      g += amber * 0.13 + cream * 0.24
+      b -= amber * 0.09
+      b += cream * 0.11
     }
 
     r = r0 + (clamp01(r) - r0) * intensity
