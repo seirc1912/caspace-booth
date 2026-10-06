@@ -3,6 +3,10 @@ import { requireSafeDimensions } from './dimensions'
 
 export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: number }
 
+export const COLOR_LAB_RENDER_VERSION = 3
+const DEFECT_REFERENCE_WIDTH = 1000
+const DEFECT_REFERENCE_AREA = 1_000_000
+
 const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
 const luminanceOf = (r: number, g: number, b: number) => r * 0.2126 + g * 0.7152 + b * 0.0722
 const smoothstep = (edge0: number, edge1: number, value: number) => {
@@ -17,7 +21,8 @@ const hash = (value: number) => {
 }
 const textureSeedFor = (seed: number, id: string) => {
   let result = seed | 0
-  for (let index = 0; index < id.length; index += 1) result = Math.imul(result ^ id.charCodeAt(index), 16777619)
+  const versionedId = `${id}:film-engine-${COLOR_LAB_RENDER_VERSION}`
+  for (let index = 0; index < versionedId.length; index += 1) result = Math.imul(result ^ versionedId.charCodeAt(index), 16777619)
   return result | 0
 }
 const channelAt = (source: Uint8ClampedArray, width: number, height: number, x: number, y: number, channel: number) => {
@@ -110,7 +115,7 @@ function buildDustPlan(count: number, seed: number): FilmDust[] {
 
 function materializeDust(width: number, height: number, plan: FilmDust[]) {
   const dust = new Map<number, readonly [number, number, number]>()
-  const resolutionScale = Math.max(0.6, Math.max(width, height) / 1600)
+  const resolutionScale = Math.max(0.35, width / DEFECT_REFERENCE_WIDTH)
   for (const point of plan) {
     const x = Math.min(width - 1, Math.floor(point.x * width))
     const y = Math.min(height - 1, Math.floor(point.y * height))
@@ -138,11 +143,18 @@ function materializeDust(width: number, height: number, plan: FilmDust[]) {
   return dust
 }
 
-export function createFilmDefectPlan(presetId: ColorLabPresetId, seed = 1) {
+function dustCountForArea(densityPerMegapixel: number, width: number, height: number) {
+  if (densityPerMegapixel <= 0) return 0
+  const areaCount = Math.round(densityPerMegapixel * width * height / DEFECT_REFERENCE_AREA)
+  const minimumVisibleCount = Math.ceil(densityPerMegapixel * 0.08)
+  return Math.max(minimumVisibleCount, areaCount)
+}
+
+export function createFilmDefectPlan(presetId: ColorLabPresetId, seed = 1, width = 1000, height = 1500) {
   const preset = getColorLabPreset(presetId)
   const textureSeed = textureSeedFor(seed, presetId)
   return {
-    dust: buildDustPlan(preset.dustCount, textureSeed * 17),
+    dust: buildDustPlan(dustCountForArea(preset.dustCount, width, height), textureSeed * 17),
     scratches: buildScratches(preset.scratchMin, preset.scratchMax, preset.scratchOpacity, textureSeed * 31),
   }
 }
@@ -151,8 +163,12 @@ function buildScratches(minimum: number, maximum: number, opacity: number, seed:
   if (maximum <= 0 || opacity <= 0) return []
   const count = minimum + Math.floor(hash(seed + 809) * (maximum - minimum + 1))
   return Array.from({ length: count }, (_, index) => {
-    const isLong = index < Math.ceil(count * 0.72)
-    const length = isLong ? 0.2 + hash(seed + index * 293 + 41) * 0.7 : 0.08 + hash(seed + index * 293 + 41) * 0.16
+    const longCount = Math.ceil(count * 0.45)
+    const mediumCount = Math.ceil(count * 0.3)
+    const lengthRoll = hash(seed + index * 293 + 41)
+    const length = index < longCount
+      ? 0.4 + lengthRoll * 0.55
+      : index < longCount + mediumCount ? 0.15 + lengthRoll * 0.25 : 0.03 + lengthRoll * 0.12
     const yStart = 0.02 + hash(seed + index * 251 + 17) * Math.max(0.01, 0.96 - length)
     return {
       x: 0.04 + hash(seed + index * 271 + 29) * 0.92,
@@ -162,7 +178,7 @@ function buildScratches(minimum: number, maximum: number, opacity: number, seed:
       curve: (hash(seed + index * 317 + 59) - 0.5) * 0.055,
       wobble: 0.0007 + hash(seed + index * 331 + 67) * 0.003,
       phase: hash(seed + index * 347 + 79) * Math.PI * 2,
-      width: 0.3 + hash(seed + index * 349 + 89) * 1.2,
+      width: 0.7 + hash(seed + index * 349 + 89) * 2.1,
       softness: hash(seed + index * 353 + 91),
       interruptions: 1 + Math.floor(hash(seed + index * 357 + 93) * 4),
       opacity: opacity * (0.62 + hash(seed + index * 359 + 97) * 0.58),
@@ -187,7 +203,7 @@ function materializeScratches(width: number, height: number, scratches: FilmScra
       const normalizedX = scratch.x + scratch.slope * progress + curvature + Math.sin(progress * Math.PI * 5 + scratch.phase) * scratch.wobble
       const centerX = normalizedX * width - 0.5
       const widthVariation = 0.76 + Math.sin(progress * Math.PI * 13 + scratch.phase) * 0.18 + hash(scratch.breakSeed + Math.floor(progress * 67)) * 0.12
-      const radius = Math.max(0.3, scratch.width * widthVariation * width / 1600)
+      const radius = Math.max(0.3, scratch.width * widthVariation * width / DEFECT_REFERENCE_WIDTH)
       const firstX = Math.max(0, Math.floor(centerX - radius))
       const lastX = Math.min(width - 1, Math.ceil(centerX + radius))
       const taper = Math.min(1, progress * 16, (1 - progress) * 16)
@@ -209,7 +225,17 @@ function compositeDefect(channel: number, amount: number) {
   return amount >= 0 ? channel + (1 - channel) * amount : channel + channel * amount
 }
 
-export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1): PixelBuffer {
+export function createFilmDefectRaster(width: number, height: number, presetId: ColorLabPresetId, seed = 1) {
+  const dimensions = requireSafeDimensions(width, height, 'defect raster')
+  const plan = createFilmDefectPlan(presetId, seed, dimensions.width, dimensions.height)
+  return {
+    plan,
+    dust: materializeDust(dimensions.width, dimensions.height, plan.dust),
+    scratches: materializeScratches(dimensions.width, dimensions.height, plan.scratches),
+  }
+}
+
+export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1): PixelBuffer {
   const dimensions = requireSafeDimensions(source.width, source.height, 'processor')
   if (source.data.length !== dimensions.width * dimensions.height * 4) throw new Error('Color Lab image decode failed: invalid processor pixel buffer')
   const output = new Uint8ClampedArray(source.data)
@@ -220,9 +246,9 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
   const original = source.data
   const textureSeed = textureSeedFor(seed, presetId)
   const softnessRadius = preset.softness >= 0.24 ? 2 : 1
-  const defects = createFilmDefectPlan(presetId, seed)
-  const dust = materializeDust(dimensions.width, dimensions.height, defects.dust)
-  const scratches = materializeScratches(dimensions.width, dimensions.height, defects.scratches)
+  const defects = createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed)
+  const dust = defects.dust
+  const scratches = defects.scratches
 
   for (let pixel = 0; pixel < original.length; pixel += 4) {
     const x = (pixel / 4) % dimensions.width
@@ -300,3 +326,5 @@ export function applyColorLabPreset(source: PixelBuffer, presetId: ColorLabPrese
   }
   return { ...dimensions, data: output }
 }
+
+export const applyColorLabPreset = renderFilmImage

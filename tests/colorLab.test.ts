@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { fitWithinSource } from '../client/src/features/colorLab/export'
-import { applyColorLabPreset, createFilmDefectPlan, type PixelBuffer } from '../client/src/features/colorLab/processor'
+import { applyColorLabPreset, COLOR_LAB_RENDER_VERSION, createFilmDefectPlan, createFilmDefectRaster, renderFilmImage, type PixelBuffer } from '../client/src/features/colorLab/processor'
 import { fitColorLabDimensions, requireSafeDimensions } from '../client/src/features/colorLab/dimensions'
 import { colorLabPresets, getColorLabPreset } from '../client/src/features/colorLab/presets'
 
@@ -151,16 +151,56 @@ test('B&W Instant removes chroma while preserving distinct tones', () => {
 })
 
 test('dust and long broken scratches use a deterministic normalized coordinate plan', () => {
-  const plan = createFilmDefectPlan('dreamy-dust', 173)
-  assert.deepEqual(plan, createFilmDefectPlan('dreamy-dust', 173))
-  assert.notDeepEqual(plan, createFilmDefectPlan('dreamy-dust', 174))
-  assert.equal(plan.dust.length, getColorLabPreset('dreamy-dust').dustCount)
+  const plan = createFilmDefectPlan('dreamy-dust', 173, 1000, 1500)
+  assert.deepEqual(plan, createFilmDefectPlan('dreamy-dust', 173, 1000, 1500))
+  assert.notDeepEqual(plan, createFilmDefectPlan('dreamy-dust', 174, 1000, 1500))
+  assert.equal(plan.dust.length, 225)
   assert.equal(plan.dust.every(({ x, y }) => x >= 0 && x <= 1 && y >= 0 && y <= 1), true)
   assert.equal(new Set(plan.dust.map(({ kind }) => kind)).size >= 3, true)
   assert.equal(plan.scratches.length >= 8 && plan.scratches.length <= 14, true)
-  assert.equal(plan.scratches.every(({ x, yStart, yEnd, width, softness, interruptions }) => x >= 0 && x <= 1 && yStart >= 0 && yEnd <= 1 && yEnd > yStart && width >= 0.3 && width <= 1.5 && softness >= 0 && softness <= 1 && interruptions >= 1), true)
-  assert.equal(plan.scratches.filter(({ yStart, yEnd }) => yEnd - yStart >= 0.2 && yEnd - yStart <= 0.9).length >= Math.ceil(plan.scratches.length * 0.7), true)
+  assert.equal(plan.scratches.every(({ x, yStart, yEnd, width, softness, interruptions }) => x >= 0 && x <= 1 && yStart >= 0 && yEnd <= 1 && yEnd > yStart && width >= 0.7 && width <= 2.8 && softness >= 0 && softness <= 1 && interruptions >= 1), true)
+  assert.equal(plan.scratches.filter(({ yStart, yEnd }) => yEnd - yStart >= 0.4 && yEnd - yStart <= 0.95).length >= Math.ceil(plan.scratches.length * 0.45), true)
   assert.equal(plan.scratches.some(({ slope, curve }) => Math.abs(slope) > 0.02 && Math.abs(curve) > 0.005), true)
+})
+
+test('thumbnail, main, and export rasterize one area-scaled deterministic defect layout', () => {
+  assert.equal(COLOR_LAB_RENDER_VERSION, 3)
+  const thumbnail = createFilmDefectRaster(180, 135, 'dreamy-dust', 307)
+  const main = createFilmDefectRaster(1200, 900, 'dreamy-dust', 307)
+  const hd = createFilmDefectRaster(2400, 1800, 'dreamy-dust', 307)
+  assert.equal(thumbnail.plan.dust.length < main.plan.dust.length, true)
+  assert.equal(main.plan.dust.length < hd.plan.dust.length, true)
+  assert.deepEqual(main.plan.dust.slice(0, thumbnail.plan.dust.length), thumbnail.plan.dust)
+  assert.deepEqual(hd.plan.dust.slice(0, main.plan.dust.length), main.plan.dust)
+  assert.deepEqual(thumbnail.plan.scratches, main.plan.scratches)
+  assert.deepEqual(main.plan.scratches, hd.plan.scratches)
+  for (const raster of [thumbnail, main, hd]) {
+    assert.equal(raster.dust.size > 0, true)
+    assert.equal(raster.scratches.size > 0, true)
+  }
+  const original = createFilmDefectRaster(1200, 900, 'original', 307)
+  assert.equal(original.dust.size, 0)
+  assert.equal(original.scratches.size, 0)
+})
+
+test('canonical film renderer bakes defects into thumbnail, main, and export pixels', () => {
+  const fixture = (width: number, height: number): PixelBuffer => ({
+    width,
+    height,
+    data: new Uint8ClampedArray(Array.from({ length: width * height }, (_, index) => {
+      const x = index % width; const y = Math.floor(index / width)
+      return [70 + x / width * 120, 55 + y / height * 140, 90 + (x + y) / (width + height) * 100, 255]
+    }).flat()),
+  })
+  for (const [width, height] of [[90, 60], [300, 200], [600, 400]]) {
+    const source = fixture(width, height)
+    const rendered = renderFilmImage(source, 'dreamy-dust', 100, 401)
+    assert.notDeepEqual([...rendered.data], [...source.data])
+    const raster = createFilmDefectRaster(width, height, 'dreamy-dust', 401)
+    assert.equal(raster.dust.size > 0, true)
+    assert.equal(raster.scratches.size > 0, true)
+  }
+  assert.strictEqual(applyColorLabPreset, renderFilmImage)
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {
