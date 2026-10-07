@@ -4,12 +4,16 @@ import { PageShell } from '../components/layout/PageShell'
 import { canvasToBlob, deliverColorLabImage, renderColorLabImage } from '../features/colorLab/export'
 import { colorLabPresets, type ColorLabPresetId } from '../features/colorLab/presets'
 import { requireSafeDimensions } from '../features/colorLab/dimensions'
+import { ColorLabPreviewClient, preparePreviewPixels } from '../features/colorLab/previewClient'
 import { loadPhotoFile } from '../features/photos/imageLoader'
 import type { PhotoAsset } from '../types/selfBooth'
 
 interface LoadedColorLabPhoto {
   asset: PhotoAsset
   previewImage: HTMLImageElement
+  previewPixels: Uint8ClampedArray
+  previewWidth: number
+  previewHeight: number
   exportImage: HTMLImageElement
   width: number
   height: number
@@ -38,6 +42,7 @@ function seedForAsset(asset: PhotoAsset) {
 export function ColorLabPage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const previewRef = useRef<HTMLCanvasElement>(null)
+  const previewClientRef = useRef<ColorLabPreviewClient | null>(null)
   const renderSequence = useRef(0)
   const [photo, setPhoto] = useState<LoadedColorLabPhoto | null>(null)
   const [presetId, setPresetId] = useState<ColorLabPresetId>('original')
@@ -58,7 +63,8 @@ export function ColorLabPage() {
       const [previewImage, exportImage] = await Promise.all([decodeImage(asset.previewSrc ?? asset.src, 'preview source'), decodeImage(asset.src, 'HD source')])
       const exportDimensions = requireSafeDimensions(exportImage.naturalWidth, exportImage.naturalHeight, 'HD source')
       requireSafeDimensions(previewImage.naturalWidth, previewImage.naturalHeight, 'preview source')
-      const next: LoadedColorLabPhoto = { asset, previewImage, exportImage, width: exportDimensions.width, height: exportDimensions.height, seed: seedForAsset(asset), outputType: file.type === 'image/png' || /\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg' }
+      const preview = preparePreviewPixels(previewImage, previewImage.naturalWidth, previewImage.naturalHeight)
+      const next: LoadedColorLabPhoto = { asset, previewImage, previewPixels: preview.data, previewWidth: preview.width, previewHeight: preview.height, exportImage, width: exportDimensions.width, height: exportDimensions.height, seed: seedForAsset(asset), outputType: file.type === 'image/png' || /\.png$/i.test(file.name) ? 'image/png' : 'image/jpeg' }
       setPhoto((current) => {
         if (current) { URL.revokeObjectURL(current.asset.src); if (current.asset.previewSrc) URL.revokeObjectURL(current.asset.previewSrc) }
         return next
@@ -76,19 +82,30 @@ export function ColorLabPage() {
   }, [photo])
 
   useEffect(() => {
+    if (!photo) return
+    const client = new ColorLabPreviewClient(photo.asset.id, photo.previewWidth, photo.previewHeight, photo.seed, photo.previewPixels)
+    previewClientRef.current = client
+    return () => { if (previewClientRef.current === client) previewClientRef.current = null; client.dispose() }
+  }, [photo])
+
+  useEffect(() => {
     if (!photo || !previewRef.current) return
     const sequence = ++renderSequence.current
-    const timer = window.setTimeout(() => {
-      void renderColorLabImage(photo.previewImage, photo.previewImage.naturalWidth, photo.previewImage.naturalHeight, showOriginal ? 'original' : presetId, showOriginal ? 0 : intensity, photo.seed, 1600, showOriginal ? { grain: false, dust: false } : { grain: grainEnabled, dust: dustEnabled }).then((rendered) => {
-        if (sequence !== renderSequence.current || !previewRef.current) return
+    const frame = window.requestAnimationFrame(() => {
+      const client = previewClientRef.current
+      if (!client) return
+      void client.render({ presetId: showOriginal ? 'original' : presetId, intensity: showOriginal ? 0 : intensity, effects: showOriginal ? { grain: false, dust: false } : { grain: grainEnabled, dust: dustEnabled } }).then((rendered) => {
+        if (!rendered || sequence !== renderSequence.current || !previewRef.current) return
         const canvas = previewRef.current
         canvas.width = rendered.width; canvas.height = rendered.height
         const context = canvas.getContext('2d')
-        context?.drawImage(rendered, 0, 0)
-        rendered.width = 1; rendered.height = 1
+        if (!context) return
+        const imageData = context.createImageData(rendered.width, rendered.height)
+        imageData.data.set(rendered.data)
+        context.putImageData(imageData, 0, 0)
       }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Preview could not be rendered.'))
-    }, 20)
-    return () => window.clearTimeout(timer)
+    })
+    return () => window.cancelAnimationFrame(frame)
   }, [photo, presetId, intensity, showOriginal, grainEnabled, dustEnabled])
 
   useEffect(() => {

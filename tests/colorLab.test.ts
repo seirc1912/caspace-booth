@@ -4,6 +4,8 @@ import { fitWithinSource } from '../client/src/features/colorLab/export'
 import { applyColorLabPreset, COLOR_LAB_RENDER_VERSION, createBurnPlan, createFilmDefectPlan, createFilmDefectRaster, renderFilmImage, type PixelBuffer } from '../client/src/features/colorLab/processor'
 import { fitColorLabDimensions, requireSafeDimensions } from '../client/src/features/colorLab/dimensions'
 import { colorLabPresets } from '../client/src/features/colorLab/presets'
+import { ColorLabPreviewRuntime } from '../client/src/features/colorLab/previewRuntime'
+import { isLatestPreviewRequest } from '../client/src/features/colorLab/previewClient'
 
 function pixels(values: number[][], width = values.length): PixelBuffer {
   return { width, height: values.length / width, data: new Uint8ClampedArray(values.flatMap(([r, g, b, a = 255]) => [r, g, b, a])) }
@@ -266,6 +268,43 @@ test('enabled Grain and Dust contribute to both main-preview and HD-sized pixels
     const raster = createFilmDefectRaster(width, height, 'golden-vintage', 701)
     assert.equal(raster.dust.size > 0 && raster.abrasion.size > 0 && raster.scratches.size > 0 && raster.fibers.size > 0, true)
   }
+})
+
+test('preview runtime reuses one source and cached base color across effect toggles', () => {
+  const source = pixels(Array.from({ length: 4096 }, (_, index) => [70 + index % 90, 85 + index % 70, 100 + index % 50]), 64)
+  const before = [...source.data]
+  const runtime = new ColorLabPreviewRuntime('source-a', source, 907)
+  const clean = runtime.render('golden-vintage', 100, { grain: false, dust: false })
+  const grain = runtime.render('golden-vintage', 100, { grain: true, dust: false })
+  const dust = runtime.render('golden-vintage', 100, { grain: false, dust: true })
+  const both = runtime.render('golden-vintage', 100, { grain: true, dust: true })
+  assert.equal(runtime.metrics.baseRenders, 1)
+  assert.equal(runtime.metrics.baseCacheHits, 3)
+  assert.equal(runtime.metrics.grainGenerations, 1)
+  assert.equal(runtime.metrics.dustGenerations, 1)
+  assert.deepEqual([...source.data], before)
+  assert.notDeepEqual([...clean.data], [...grain.data])
+  assert.notDeepEqual([...clean.data], [...dust.data])
+  assert.notDeepEqual([...both.data], [...grain.data])
+})
+
+test('preview base cache key separates preset and intensity while revisits hit cache', () => {
+  const source = pixels(Array.from({ length: 1024 }, (_, index) => [80 + index % 70, 90 + index % 60, 110 + index % 40]), 32)
+  const runtime = new ColorLabPreviewRuntime('source-b', source, 919)
+  runtime.render('golden-vintage', 100, { grain: false, dust: false })
+  runtime.render('expired-film', 100, { grain: false, dust: false })
+  runtime.render('expired-film', 75, { grain: false, dust: false })
+  runtime.render('expired-film', 100, { grain: false, dust: false })
+  assert.equal(runtime.metrics.baseRenders, 3)
+  assert.equal(runtime.metrics.baseCacheHits, 1)
+})
+
+test('latest preview request token rejects stale rapid preset results', () => {
+  const requests = ['original', 'golden-vintage', 'burnt-film', 'expired-film', 'dark-instant', 'bw-instant'].map((presetId, index) => ({ presetId, requestId: index + 1 }))
+  const latestRequestId = requests.at(-1)!.requestId
+  assert.deepEqual(requests.filter(({ requestId }) => isLatestPreviewRequest(requestId, latestRequestId)).map(({ presetId }) => presetId), ['bw-instant'])
+  assert.equal(isLatestPreviewRequest(2, 6), false)
+  assert.equal(isLatestPreviewRequest(6, 6), true)
 })
 
 test('HD dimensions preserve aspect ratio and never upscale', () => {

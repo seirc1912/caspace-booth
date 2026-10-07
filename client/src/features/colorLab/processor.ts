@@ -2,7 +2,14 @@ import { getColorLabPreset, type ColorLabPresetId } from './presets'
 import { requireSafeDimensions } from './dimensions'
 
 export interface PixelBuffer { data: Uint8ClampedArray; width: number; height: number }
+export interface BaseColorBuffer { data: Float64Array; width: number; height: number }
 export interface FilmEffectState { grain: boolean; dust: boolean }
+export interface FilmEffectCache {
+  grain?: Float32Array
+  defects?: ReturnType<typeof createFilmDefectRaster>
+  grainGenerations: number
+  dustGenerations: number
+}
 
 export const COLOR_LAB_RENDER_VERSION = 7
 const DEFECT_REFERENCE_WIDTH = 1000
@@ -394,19 +401,23 @@ export function createFilmDefectRaster(width: number, height: number, presetId: 
   }
 }
 
-export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1, effects: FilmEffectState = { grain: false, dust: false }): PixelBuffer {
+function validateSource(source: PixelBuffer) {
   const dimensions = requireSafeDimensions(source.width, source.height, 'processor')
   if (source.data.length !== dimensions.width * dimensions.height * 4) throw new Error('Color Lab image decode failed: invalid processor pixel buffer')
-  const output = new Uint8ClampedArray(source.data)
-  const intensity = clamp01(intensityPercent / 100)
-  if ((presetId === 'original' || intensity === 0) && !effects.grain && !effects.dust) return { ...dimensions, data: output }
+  return dimensions
+}
 
+export function createFilmEffectCache(): FilmEffectCache {
+  return { grainGenerations: 0, dustGenerations: 0 }
+}
+
+function visitBaseColors(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed: number, visit: (index: number, r: number, g: number, b: number) => void) {
+  const dimensions = validateSource(source)
+  const intensity = clamp01(intensityPercent / 100)
   const preset = getColorLabPreset(presetId)
   const original = source.data
-  const textureSeed = textureSeedFor(seed, 'grain-effect')
   const burnPlan = preset.burnStrength > 0 ? createBurnPlan(seed) : null
   const softnessRadius = preset.softness >= 0.24 ? 2 : 1
-  const defects = effects.dust ? createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed) : null
 
   for (let pixel = 0; pixel < original.length; pixel += 4) {
     const x = (pixel / 4) % dimensions.width
@@ -474,25 +485,96 @@ export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId,
     g = g0 + (clamp01(g) - g0) * intensity
     b = b0 + (clamp01(b) - b0) * intensity
 
+    visit(pixel / 4, r, g, b)
+  }
+  return dimensions
+}
+
+export function renderBaseColorImage(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1): BaseColorBuffer {
+  const output = new Float64Array(source.width * source.height * 3)
+  const dimensions = visitBaseColors(source, presetId, intensityPercent, seed, (index, r, g, b) => {
+    const outputPixel = index * 3
+    output[outputPixel] = r
+    output[outputPixel + 1] = g
+    output[outputPixel + 2] = b
+  })
+  return { ...dimensions, data: output }
+}
+
+function grainFieldFor(source: PixelBuffer, seed: number) {
+  const dimensions = validateSource(source)
+  const field = new Float32Array(dimensions.width * dimensions.height)
+  const textureSeed = textureSeedFor(seed, 'grain-effect')
+  for (let index = 0; index < field.length; index += 1) {
+    const pixel = index * 4
+    const x = index % dimensions.width
+    const y = Math.floor(index / dimensions.width)
+    const sourceLuminance = luminanceOf(source.data[pixel]! / 255, source.data[pixel + 1]! / 255, source.data[pixel + 2]! / 255)
+    const fine = ((hash(textureSeed + pixel * 13) + hash(textureSeed * 3 + pixel * 29) + hash(textureSeed * 7 + pixel * 47)) / 3) - 0.5
+    const microCluster = hash(textureSeed + Math.floor(x / 2) * 92821 + Math.floor(y / 2) * 68917) - 0.5
+    field[index] = (fine * 1.65 + microCluster * Math.min(0.18, FILM_EFFECT_PROFILE.grainSize * 0.07)) * FILM_EFFECT_PROFILE.grainStrength * (0.32 + (1 - sourceLuminance) * 0.8)
+  }
+  return field
+}
+
+export function applyFilmEffects(source: PixelBuffer, base: BaseColorBuffer, effects: FilmEffectState, seed = 1, cache = createFilmEffectCache()): PixelBuffer {
+  const dimensions = validateSource(source)
+  if (base.width !== dimensions.width || base.height !== dimensions.height || base.data.length !== dimensions.width * dimensions.height * 3) throw new Error('Color Lab image decode failed: invalid base color buffer')
+  if (effects.grain && !cache.grain) { cache.grain = grainFieldFor(source, seed); cache.grainGenerations += 1 }
+  if (effects.dust && !cache.defects) { cache.defects = createFilmDefectRaster(dimensions.width, dimensions.height, 'original', seed); cache.dustGenerations += 1 }
+  const output = new Uint8ClampedArray(source.data.length)
+  for (let index = 0; index < dimensions.width * dimensions.height; index += 1) {
+    const pixel = index * 4
+    const basePixel = index * 3
+    let r = base.data[basePixel]!
+    let g = base.data[basePixel + 1]!
+    let b = base.data[basePixel + 2]!
+    if (effects.grain && cache.grain) {
+      const grain = cache.grain[index]!
+      r += grain * 1.03; g += grain; b += grain * 0.94
+    }
+    if (effects.dust && cache.defects) {
+      const dustAmount = cache.defects.dust.get(index) ?? [0, 0, 0]
+      r = compositeDefect(r, dustAmount[0]); g = compositeDefect(g, dustAmount[1]); b = compositeDefect(b, dustAmount[2])
+      const physicalMark = (cache.defects.scratches.get(index) ?? 0) + (cache.defects.abrasion.get(index) ?? 0) + (cache.defects.fibers.get(index) ?? 0)
+      r = compositeDefect(r, physicalMark); g = compositeDefect(g, physicalMark * 0.96); b = compositeDefect(b, physicalMark * 0.88)
+    }
+    output[pixel] = Math.round(clamp01(r) * 255)
+    output[pixel + 1] = Math.round(clamp01(g) * 255)
+    output[pixel + 2] = Math.round(clamp01(b) * 255)
+    output[pixel + 3] = source.data[pixel + 3]!
+  }
+  return { ...dimensions, data: output }
+}
+
+export function renderFilmImage(source: PixelBuffer, presetId: ColorLabPresetId, intensityPercent: number, seed = 1, effects: FilmEffectState = { grain: false, dust: false }): PixelBuffer {
+  const dimensions = validateSource(source)
+  const output = new Uint8ClampedArray(source.data.length)
+  const textureSeed = textureSeedFor(seed, 'grain-effect')
+  const defects = effects.dust ? createFilmDefectRaster(dimensions.width, dimensions.height, presetId, seed) : null
+  visitBaseColors(source, presetId, intensityPercent, seed, (index, baseR, baseG, baseB) => {
+    const pixel = index * 4
+    const x = index % dimensions.width
+    const y = Math.floor(index / dimensions.width)
+    let r = baseR; let g = baseG; let b = baseB
     if (effects.grain) {
+      const sourceLuminance = luminanceOf(source.data[pixel]! / 255, source.data[pixel + 1]! / 255, source.data[pixel + 2]! / 255)
       const fine = ((hash(textureSeed + pixel * 13) + hash(textureSeed * 3 + pixel * 29) + hash(textureSeed * 7 + pixel * 47)) / 3) - 0.5
       const microCluster = hash(textureSeed + Math.floor(x / 2) * 92821 + Math.floor(y / 2) * 68917) - 0.5
       const grain = (fine * 1.65 + microCluster * Math.min(0.18, FILM_EFFECT_PROFILE.grainSize * 0.07)) * FILM_EFFECT_PROFILE.grainStrength * (0.32 + (1 - sourceLuminance) * 0.8)
       r += grain * 1.03; g += grain; b += grain * 0.94
     }
-
     if (defects) {
-      const dustAmount = defects.dust.get(pixel / 4) ?? [0, 0, 0]
+      const dustAmount = defects.dust.get(index) ?? [0, 0, 0]
       r = compositeDefect(r, dustAmount[0]); g = compositeDefect(g, dustAmount[1]); b = compositeDefect(b, dustAmount[2])
-      const physicalMark = (defects.scratches.get(pixel / 4) ?? 0) + (defects.abrasion.get(pixel / 4) ?? 0) + (defects.fibers.get(pixel / 4) ?? 0)
+      const physicalMark = (defects.scratches.get(index) ?? 0) + (defects.abrasion.get(index) ?? 0) + (defects.fibers.get(index) ?? 0)
       r = compositeDefect(r, physicalMark); g = compositeDefect(g, physicalMark * 0.96); b = compositeDefect(b, physicalMark * 0.88)
     }
-
     output[pixel] = Math.round(clamp01(r) * 255)
     output[pixel + 1] = Math.round(clamp01(g) * 255)
     output[pixel + 2] = Math.round(clamp01(b) * 255)
-    output[pixel + 3] = original[pixel + 3]!
-  }
+    output[pixel + 3] = source.data[pixel + 3]!
+  })
   return { ...dimensions, data: output }
 }
 
