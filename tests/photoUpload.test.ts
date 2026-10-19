@@ -7,6 +7,9 @@ import { enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
 import { sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
+import { parseStaffAllowlist } from '../client/api/_lib/staffAuth.ts'
+import { originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
+import { updateCrc32 } from '../client/api/staff/photos/zip.ts'
 
 const originalPng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...Array.from({ length: 4096 }, (_, index) => index % 251)])
 const pngPrefix = originalPng.subarray(0, 16).toString('base64')
@@ -169,4 +172,28 @@ test('per-IP byte quota rejects repeated large initialization attempts', () => {
   enforceUploadByteQuota(request, 125 * 1024 * 1024)
   assert.throws(() => enforceUploadByteQuota(request, 1), UploadApiError)
   resetRateLimitsForTests()
+})
+
+test('staff allowlist is normalized and never grants access when empty', () => {
+  assert.deepEqual([...parseStaffAllowlist(' Staff@CaSpace.vn,owner@example.com ')], ['staff@caspace.vn', 'owner@example.com'])
+  assert.equal(parseStaffAllowlist('').size, 0)
+})
+
+test('staff phone and object paths reject traversal and cross-customer access', () => {
+  const phone = requireCustomerPhone('+84 901 234 567')
+  assert.equal(phone, '0901234567')
+  assert.equal(requireCustomerObjectPath(phone, '0901234567/photo--request_123.png'), '0901234567/photo--request_123.png')
+  assert.throws(() => requireCustomerObjectPath(phone, '0999999999/photo.png'), UploadApiError)
+  assert.throws(() => requireCustomerObjectPath(phone, '0901234567/../secret.png'), UploadApiError)
+  assert.throws(() => requireCustomerPhone('not-a-phone'), UploadApiError)
+})
+
+test('staff display names remove only the collision-safe request suffix', () => {
+  assert.equal(originalFilename('portrait--request_12345678.jpg'), 'portrait.jpg')
+  assert.equal(originalFilename('family-photo.jpg'), 'family-photo.jpg')
+})
+
+test('streaming ZIP CRC32 matches the standard reference vector', () => {
+  const crc = (updateCrc32(0xffffffff, Buffer.from('123456789')) ^ 0xffffffff) >>> 0
+  assert.equal(crc, 0xcbf43926)
 })

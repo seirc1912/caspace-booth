@@ -15,6 +15,8 @@ export const adminRoutes = Object.freeze({
   templateEditPattern: '/admin/templates/:id/edit',
 })
 
+export const staffRoutes = Object.freeze({ photos: '/staff/photos' })
+
 export interface DeploymentOrigins {
   customer: string
   admin: string
