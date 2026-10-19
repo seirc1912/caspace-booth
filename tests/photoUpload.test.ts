@@ -6,7 +6,7 @@ import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
 import { enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
 import { sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
-import { isValidVietnamesePhone, normalizeVietnamesePhone, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
+import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 
 const originalPng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...Array.from({ length: 4096 }, (_, index) => index % 251)])
 const pngPrefix = originalPng.subarray(0, 16).toString('base64')
@@ -67,6 +67,19 @@ test('selection and API limits enforce type, size, count, and total bytes', () =
   assert.match(validateSelectedFiles(Array.from({ length: 21 }, (_, index) => ({ name: `${index}.png`, type: 'image/png', size: 1 }))) ?? '', /20 ảnh/)
   assert.match(validateSelectedFiles(Array.from({ length: 20 }, (_, index) => ({ name: `${index}.png`, type: 'image/png', size: 13 * 1024 * 1024 }))) ?? '', /250 MB/)
   assert.throws(() => metadata({ size: 26 * 1024 * 1024 }), UploadApiError)
+})
+
+test('first-load iOS selection snapshots the live FileList before the input is cleared', () => {
+  const first = { name: 'first.png' }
+  const second = { name: 'second.png' }
+  const liveFileList: { 0?: typeof first; 1?: typeof second; length: number } = { 0: first, 1: second, length: 2 }
+  const snapshot = snapshotSelectedFiles(liveFileList)
+
+  liveFileList.length = 0
+  delete liveFileList[0]
+  delete liveFileList[1]
+
+  assert.deepEqual(snapshot, [first, second])
 })
 
 test('filename sanitization removes path traversal and control characters', () => {

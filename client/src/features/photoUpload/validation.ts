@@ -4,6 +4,13 @@ export const PHOTO_UPLOAD_MAX_TOTAL_BYTES = 250 * 1024 * 1024
 
 const vietnameseMobilePattern = /^0(?:3|5|7|8|9)\d{8}$/
 
+// Safari exposes a live FileList whose contents can disappear as soon as the
+// input value is cleared. Always detach the selected File objects in the same
+// synchronous change event before scheduling any React state update.
+export function snapshotSelectedFiles<T>(files: ArrayLike<T>) {
+  return Array.from(files)
+}
+
 export function normalizeVietnamesePhone(value: string) {
   const compact = value.trim().replace(/[\s().-]/g, '')
   if (compact.startsWith('+84')) return `0${compact.slice(3)}`

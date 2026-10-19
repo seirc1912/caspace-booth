@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
 import { uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
-import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, validateSelectedFiles } from '../features/photoUpload/validation'
+import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
   file: File
@@ -34,11 +34,12 @@ export function PhotoUploadPage() {
 
   const addFiles = (incoming: FileList | null) => {
     if (!incoming) return
+    const selectedFiles = snapshotSelectedFiles(incoming)
     setMessage(null)
-    const nextFiles = [...photos.map(({ file }) => file), ...Array.from(incoming)]
+    const nextFiles = [...photos.map(({ file }) => file), ...selectedFiles]
     const error = validateSelectedFiles(nextFiles)
     if (error) { setMessage({ kind: 'error', text: error }); return }
-    setPhotos((current) => [...current, ...Array.from(incoming, makePhoto)])
+    setPhotos((current) => [...current, ...selectedFiles.map(makePhoto)])
     submissionIdRef.current = crypto.randomUUID()
   }
 
