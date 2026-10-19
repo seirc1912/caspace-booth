@@ -1,6 +1,7 @@
 export const customerRoutes = Object.freeze({
   home: '/',
   colorLab: '/color-lab',
+  photoUpload: '/upload-anh',
   templates: '/templates',
   editor: '/editor',
   preview: '/preview',
@@ -13,6 +14,8 @@ export const adminRoutes = Object.freeze({
   newTemplate: '/admin/templates/new',
   templateEditPattern: '/admin/templates/:id/edit',
 })
+
+export const staffRoutes = Object.freeze({ photos: '/staff/photos' })
 
 export interface DeploymentOrigins {
   customer: string
