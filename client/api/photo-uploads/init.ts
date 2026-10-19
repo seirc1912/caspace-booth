@@ -1,6 +1,6 @@
-import { getGoogleAccessToken, GoogleDriveUploadService, loadGoogleDriveEnvironment } from '../_lib/googleDrive.js'
+import { loadSupabaseStorageEnvironment, SupabasePhotoUploadService } from '../_lib/supabaseStorage.js'
 import { enforceSameOrigin, readJsonBody, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse } from '../_lib/http.js'
-import { enforceRateLimit } from '../_lib/rateLimit.js'
+import { enforceRateLimit, enforceUploadByteQuota } from '../_lib/rateLimit.js'
 import { parseUploadMetadata } from '../_lib/uploadValidation.js'
 
 export const config = { maxDuration: 30 }
@@ -12,11 +12,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     enforceSameOrigin(request)
     enforceRateLimit(request)
     const metadata = parseUploadMetadata(readJsonBody(request))
-    const environment = loadGoogleDriveEnvironment()
-    const accessToken = await getGoogleAccessToken(environment)
-    const drive = new GoogleDriveUploadService(accessToken, environment.parentFolderId)
-    const folderId = await drive.findOrCreateCustomerFolder(metadata.phone)
-    response.status(200).json(await drive.createResumableUpload(folderId, metadata))
+    enforceUploadByteQuota(request, metadata.size)
+    const storage = new SupabasePhotoUploadService(loadSupabaseStorageEnvironment())
+    response.status(200).json(await storage.createSignedUpload(metadata))
   } catch (reason) {
     console.error('[photo-upload] init failed', { kind: reason instanceof Error ? reason.constructor.name : 'unknown' })
     sendApiError(response, reason)

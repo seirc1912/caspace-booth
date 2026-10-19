@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
-import { uploadPhotoToDrive } from '../features/photoUpload/uploadClient'
+import { uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
@@ -68,7 +68,7 @@ export function PhotoUploadPage() {
         const photo = photos[index]!
         if (photo.state === 'uploaded') continue
         setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploading', progress: 0 } : item))
-        await uploadPhotoToDrive({
+        await uploadPhotoToStorage({
           file: photo.file,
           phone: normalizedPhone,
           requestId: `${submissionIdRef.current}-${index}`,

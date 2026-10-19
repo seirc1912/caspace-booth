@@ -63,27 +63,11 @@ export function parseUploadMetadata(value: unknown): UploadMetadata {
   return metadata
 }
 
-export interface CompletionMetadata {
-  fileId: string
-  folderId: string
-  mimeType: 'image/png' | 'image/jpeg'
-  requestId: string
-  sha256: string
-  size: number
-}
+export interface CompletionMetadata extends UploadMetadata { objectPath: string }
 
 export function parseCompletionMetadata(value: unknown): CompletionMetadata {
-  if (!value || typeof value !== 'object') throw new UploadApiError(400, 'Thông tin xác nhận không hợp lệ.')
-  const record = value as Record<string, unknown>
-  const mimeType = String(record.mimeType ?? '')
-  const result: CompletionMetadata = {
-    fileId: String(record.fileId ?? ''),
-    folderId: String(record.folderId ?? ''),
-    mimeType: mimeType === 'image/png' ? 'image/png' : mimeType === 'image/jpeg' ? 'image/jpeg' : (() => { throw new UploadApiError(400, 'Định dạng xác nhận không hợp lệ.') })(),
-    requestId: String(record.requestId ?? ''),
-    sha256: String(record.sha256 ?? '').toLowerCase(),
-    size: Number(record.size),
-  }
-  if (!/^[a-zA-Z0-9_-]{8,200}$/.test(result.fileId) || !/^[a-zA-Z0-9_-]{8,200}$/.test(result.folderId) || !requestIdPattern.test(result.requestId) || !sha256Pattern.test(result.sha256) || !Number.isSafeInteger(result.size) || result.size <= 0 || result.size > MAX_UPLOAD_FILE_BYTES) throw new UploadApiError(400, 'Thông tin xác nhận không hợp lệ.')
-  return result
+  const metadata = parseUploadMetadata(value)
+  const objectPath = String((value as Record<string, unknown>).objectPath ?? '')
+  if (!/^[^/]+\/[\p{L}\p{N} _.,()-]+$/u.test(objectPath) || objectPath.length > 240) throw new UploadApiError(400, 'Thông tin xác nhận không hợp lệ.')
+  return { ...metadata, objectPath }
 }

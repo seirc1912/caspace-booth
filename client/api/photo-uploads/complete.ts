@@ -1,4 +1,4 @@
-import { getGoogleAccessToken, GoogleDriveUploadService, loadGoogleDriveEnvironment } from '../_lib/googleDrive.js'
+import { loadSupabaseStorageEnvironment, SupabasePhotoUploadService } from '../_lib/supabaseStorage.js'
 import { enforceSameOrigin, readJsonBody, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse } from '../_lib/http.js'
 import { enforceRateLimit } from '../_lib/rateLimit.js'
 import { parseCompletionMetadata } from '../_lib/uploadValidation.js'
@@ -12,10 +12,8 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     enforceSameOrigin(request)
     enforceRateLimit(request, { limit: 60, windowMs: 10 * 60_000 })
     const metadata = parseCompletionMetadata(readJsonBody(request))
-    const environment = loadGoogleDriveEnvironment()
-    const accessToken = await getGoogleAccessToken(environment)
-    const drive = new GoogleDriveUploadService(accessToken, environment.parentFolderId)
-    await drive.verifyCompletedUpload(metadata)
+    const storage = new SupabasePhotoUploadService(loadSupabaseStorageEnvironment())
+    await storage.verifyUploadedObject(metadata, metadata.objectPath)
     response.status(200).json({ ok: true })
   } catch (reason) {
     console.error('[photo-upload] completion failed', { kind: reason instanceof Error ? reason.constructor.name : 'unknown' })

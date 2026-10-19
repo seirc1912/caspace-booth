@@ -1,21 +1,45 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { GoogleDriveUploadService } from '../client/api/_lib/googleDrive.ts'
-import { UploadApiError } from '../client/api/_lib/http.ts'
-import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
+import { customerPhotoBucket, objectPathForUpload, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
+import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
+import { enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
+import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
 import { sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 
-const pngPrefix = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 0]).toString('base64')
+const originalPng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...Array.from({ length: 4096 }, (_, index) => index % 251)])
+const pngPrefix = originalPng.subarray(0, 16).toString('base64')
 const jpegPrefix = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46]).toString('base64')
-
-function jsonResponse(value: unknown, init: ResponseInit = {}) {
-  return new Response(JSON.stringify(value), { status: 200, headers: { 'Content-Type': 'application/json', ...init.headers }, ...init })
-}
+const checksum = createHash('sha256').update(originalPng).digest('hex')
+const environment = { url: 'https://project.supabase.co', serviceRoleKey: 'server-secret' }
 
 function metadata(overrides: Record<string, unknown> = {}) {
-  return parseUploadMetadata({ phone: '0901234567', filename: 'frame.png', mimeType: 'image/png', size: 12, prefix: pngPrefix, sha256: 'a'.repeat(64), requestId: 'request_12345678', ...overrides })
+  return parseUploadMetadata({ phone: '0901234567', filename: 'frame.png', mimeType: 'image/png', size: originalPng.length, prefix: pngPrefix, sha256: checksum, requestId: 'request_12345678', ...overrides })
+}
+
+function storageClient(options: { exists?: boolean; signedUrl?: string; error?: string } = {}) {
+  const calls: Array<{ bucket: string; path: string; upsert?: boolean }> = []
+  return {
+    calls,
+    client: {
+      storage: {
+        from(bucket: string) {
+          return {
+            async exists(path: string) { calls.push({ bucket, path }); return options.error ? { data: false, error: { message: options.error } } : { data: options.exists ?? false, error: null } },
+            async createSignedUploadUrl(path: string, value: { upsert: boolean }) {
+              calls.push({ bucket, path, upsert: value.upsert })
+              return { data: { signedUrl: options.signedUrl ?? `https://project.supabase.co/storage/v1/object/upload/sign/${bucket}/${path}?token=signed` }, error: null }
+            },
+          }
+        },
+      },
+    },
+  }
+}
+
+function storedObject(body = originalPng, type = 'image/png') {
+  return new Response(body, { status: 200, headers: { 'Content-Type': type, 'Content-Length': String(body.length) } })
 }
 
 test('Vietnamese phone numbers normalize consistently and reject invalid prefixes', () => {
@@ -36,12 +60,13 @@ test('PNG and JPEG magic bytes must agree with MIME type and extension', () => {
   assert.throws(() => metadata({ prefix: Buffer.from('not an image').toString('base64') }), UploadApiError)
 })
 
-test('selection limits enforce type, per-file size, count, and total size', () => {
+test('selection and API limits enforce type, size, count, and total bytes', () => {
   assert.equal(validateSelectedFiles([{ name: 'one.png', type: 'image/png', size: 100 }, { name: 'two.jpg', type: 'image/jpeg', size: 200 }]), null)
   assert.match(validateSelectedFiles([{ name: 'bad.gif', type: 'image/gif', size: 100 }]) ?? '', /không phải ảnh/)
   assert.match(validateSelectedFiles([{ name: 'huge.png', type: 'image/png', size: 26 * 1024 * 1024 }]) ?? '', /25 MB/)
   assert.match(validateSelectedFiles(Array.from({ length: 21 }, (_, index) => ({ name: `${index}.png`, type: 'image/png', size: 1 }))) ?? '', /20 ảnh/)
   assert.match(validateSelectedFiles(Array.from({ length: 20 }, (_, index) => ({ name: `${index}.png`, type: 'image/png', size: 13 * 1024 * 1024 }))) ?? '', /250 MB/)
+  assert.throws(() => metadata({ size: 26 * 1024 * 1024 }), UploadApiError)
 })
 
 test('filename sanitization removes path traversal and control characters', () => {
@@ -49,72 +74,78 @@ test('filename sanitization removes path traversal and control characters', () =
   assert.throws(() => sanitizeFilename('../..'), UploadApiError)
 })
 
-test('SHA-256 of the browser upload Blob matches the untouched original bytes', async () => {
-  const original = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...Array.from({ length: 4096 }, (_, index) => index % 251)])
-  const expected = createHash('sha256').update(original).digest('hex')
-  assert.equal(await sha256Blob(new Blob([original])), expected)
+test('SHA-256 of the browser upload Blob matches untouched original bytes', async () => {
+  assert.equal(await sha256Blob(new Blob([originalPng])), checksum)
 })
 
-test('Drive folder lookup reuses an existing normalized-phone folder', async () => {
-  let calls = 0
-  const fetchMock: typeof fetch = async (_input, init) => {
-    calls += 1
-    assert.equal(init?.method, undefined)
-    return jsonResponse({ files: [{ id: 'folder_existing_123', name: '0901234567' }] })
-  }
-  const service = new GoogleDriveUploadService('token', 'parent_folder_123', fetchMock)
-  assert.equal(await service.findOrCreateCustomerFolder('0901234567'), 'folder_existing_123')
-  assert.equal(calls, 1)
+test('same phone groups files under one private prefix and distinct requests never collide', () => {
+  const first = objectPathForUpload(metadata())
+  const retry = objectPathForUpload(metadata())
+  const second = objectPathForUpload(metadata({ requestId: 'request_87654321' }))
+  assert.equal(first, retry)
+  assert.match(first, /^0901234567\//)
+  assert.notEqual(first, second)
+  assert.equal(first.endsWith('.png'), true)
 })
 
-test('Drive folder creation is shared by concurrent requests in one serverless instance', async () => {
-  let listCalls = 0
-  let createCalls = 0
-  const fetchMock: typeof fetch = async (_input, init) => {
-    if (init?.method === 'POST') { createCalls += 1; return jsonResponse({ id: 'folder_new_123' }) }
-    listCalls += 1
-    await new Promise((resolve) => setTimeout(resolve, 5))
-    return jsonResponse({ files: listCalls === 1 ? [] : [{ id: 'folder_new_123', name: '0901234567' }] })
-  }
-  const first = new GoogleDriveUploadService('token', 'parent_folder_123', fetchMock)
-  const second = new GoogleDriveUploadService('token', 'parent_folder_123', fetchMock)
-  assert.deepEqual(await Promise.all([first.findOrCreateCustomerFolder('0901234567'), second.findOrCreateCustomerFolder('0901234567')]), ['folder_new_123', 'folder_new_123'])
-  assert.equal(createCalls, 1)
-  assert.equal(listCalls, 2)
+test('signed permission targets one exact object, disables overwrite, and exposes no read URL', async () => {
+  const mock = storageClient()
+  const service = new SupabasePhotoUploadService(environment, mock.client)
+  const result = await service.createSignedUpload(metadata())
+  assert.equal(result.alreadyUploaded, false)
+  assert.equal(mock.calls.every((call) => call.bucket === customerPhotoBucket), true)
+  assert.equal(mock.calls.at(-1)?.upsert, false)
+  assert.match(result.uploadUrl ?? '', /\/object\/upload\/sign\/customer-photo-uploads\//)
+  assert.equal('downloadUrl' in result, false)
+  assert.equal('serviceRoleKey' in result, false)
 })
 
-test('resumable upload reuses completed requests and never overwrites duplicate filenames', async () => {
-  const responses = [
-    jsonResponse({ files: [] }),
-    jsonResponse({ files: [{ id: 'old_file_123', name: 'frame.png' }, { id: 'old_file_456', name: 'frame (2).png' }] }),
-    jsonResponse({}, { headers: { Location: 'https://www.googleapis.com/upload/drive/v3/files?upload_id=safe' } }),
-  ]
-  let body = ''
-  const fetchMock: typeof fetch = async (_input, init) => {
-    if (init?.method === 'POST' && typeof init.body === 'string') body = init.body
-    return responses.shift()!
-  }
-  const service = new GoogleDriveUploadService('token', 'parent_folder_123', fetchMock)
-  const prepared = await service.createResumableUpload('folder_existing_123', metadata())
-  assert.equal(prepared.alreadyUploaded, false)
-  assert.equal(JSON.parse(body).name, 'frame (3).png')
-
-  const idempotentFetch: typeof fetch = async () => jsonResponse({ files: [{ id: 'file_done_123', parents: ['folder_existing_123'], size: '12', appProperties: { sha256: 'a'.repeat(64), uploadRequestId: 'request_12345678' } }] })
-  const idempotentService = new GoogleDriveUploadService('token', 'parent_folder_123', idempotentFetch)
-  assert.deepEqual(await idempotentService.createResumableUpload('folder_existing_123', metadata()), { alreadyUploaded: true, fileId: 'file_done_123', folderId: 'folder_existing_123' })
+test('invalid signed-upload hosts are rejected', async () => {
+  const mock = storageClient({ signedUrl: 'https://attacker.example/upload?token=bad' })
+  const service = new SupabasePhotoUploadService(environment, mock.client)
+  await assert.rejects(() => service.createSignedUpload(metadata()), UploadApiError)
 })
 
-test('completion verifies Drive file integrity metadata and parent hierarchy', async () => {
-  const responses = [
-    jsonResponse({ id: 'file_done_123', size: '12', sha256Checksum: 'a'.repeat(64), mimeType: 'image/png', parents: ['folder_existing_123'], appProperties: { sha256: 'a'.repeat(64), uploadRequestId: 'request_12345678' } }),
-    jsonResponse({ id: 'folder_existing_123', mimeType: 'application/vnd.google-apps.folder', parents: ['parent_folder_123'], trashed: false }),
-  ]
-  const service = new GoogleDriveUploadService('token', 'parent_folder_123', async () => responses.shift()!)
-  const verified = await service.verifyCompletedUpload({ fileId: 'file_done_123', folderId: 'folder_existing_123', mimeType: 'image/png', size: 12, sha256: 'a'.repeat(64), requestId: 'request_12345678' })
-  assert.equal(verified.id, 'file_done_123')
+test('completion streams and verifies stored size, MIME signature, and SHA-256', async () => {
+  let requestHeaders: Headers | undefined
+  const service = new SupabasePhotoUploadService(environment, storageClient().client, async (_url, init) => {
+    requestHeaders = new Headers(init?.headers)
+    return storedObject()
+  })
+  const result = await service.verifyUploadedObject(metadata(), objectPathForUpload(metadata()))
+  assert.equal(result.sha256, checksum)
+  assert.equal(result.size, originalPng.length)
+  assert.equal(requestHeaders?.get('Authorization'), 'Bearer server-secret')
 })
 
-test('a partial Google Drive failure remains an error and never becomes success', async () => {
-  const service = new GoogleDriveUploadService('token', 'parent_folder_123', async () => jsonResponse({ error: 'unavailable' }, { status: 503 }))
-  await assert.rejects(() => service.findOrCreateCustomerFolder('0901234567'), UploadApiError)
+test('tampered bytes, wrong paths, and partial upload failures remain errors', async () => {
+  const tampered = Buffer.from(originalPng)
+  tampered[tampered.length - 1] ^= 1
+  const service = new SupabasePhotoUploadService(environment, storageClient().client, async () => storedObject(tampered))
+  await assert.rejects(() => service.verifyUploadedObject(metadata(), objectPathForUpload(metadata())), UploadApiError)
+  await assert.rejects(() => service.verifyUploadedObject(metadata(), '0999999999/other.png'), UploadApiError)
+  const unavailable = new SupabasePhotoUploadService(environment, storageClient().client, async () => new Response('unavailable', { status: 503 }))
+  await assert.rejects(() => unavailable.verifyUploadedObject(metadata(), objectPathForUpload(metadata())), UploadApiError)
+})
+
+test('completed retry verifies and reuses its deterministic object without issuing a new upload URL', async () => {
+  const mock = storageClient({ exists: true })
+  const service = new SupabasePhotoUploadService(environment, mock.client, async () => storedObject())
+  assert.deepEqual(await service.createSignedUpload(metadata()), { alreadyUploaded: true, objectPath: objectPathForUpload(metadata()) })
+  assert.equal(mock.calls.length, 1)
+})
+
+test('completion metadata cannot redirect verification to an arbitrary object', () => {
+  const value = { ...metadata(), objectPath: objectPathForUpload(metadata()) }
+  assert.equal(parseCompletionMetadata(value).objectPath, objectPathForUpload(metadata()))
+  assert.throws(() => parseCompletionMetadata({ ...value, objectPath: '../private/secret.png' }), UploadApiError)
+})
+
+test('per-IP byte quota rejects repeated large initialization attempts', () => {
+  resetRateLimitsForTests()
+  const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.8' } }
+  enforceUploadByteQuota(request, 125 * 1024 * 1024)
+  enforceUploadByteQuota(request, 125 * 1024 * 1024)
+  assert.throws(() => enforceUploadByteQuota(request, 1), UploadApiError)
+  resetRateLimitsForTests()
 })
