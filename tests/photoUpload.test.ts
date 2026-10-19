@@ -109,6 +109,13 @@ test('ready customer photos show no percentage or progress bar before submission
   assert.match(page, /\{uploading \? <div className="mt-5" aria-live="polite">/)
 })
 
+test('staff photo detail provides folder-list and homepage navigation', () => {
+  const page = readFileSync(new URL('../client/src/pages/StaffPhotosPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /← Quay lại danh sách/)
+  assert.match(page, /href="\/"[^>]*>Trang chủ<\/a>/)
+  assert.match(page, /Trang chủ<\/a><button[^>]+onClick=\{logout\}/)
+})
+
 test('same phone groups files under one private prefix and distinct requests never collide', () => {
   const first = objectPathForUpload(metadata())
   const retry = objectPathForUpload(metadata())
@@ -253,7 +260,7 @@ test('staff dashboard automatically loads folders and keeps folder navigation co
   const page = readFileSync(new URL('../client/src/pages/StaffPhotosPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /listStaffPhotoFolders\(search\)/)
   assert.match(page, /Tải thêm thư mục/)
-  assert.match(page, /← Thư mục khách/)
+  assert.match(page, /← Quay lại danh sách/)
 })
 
 test('streaming ZIP CRC32 matches the standard reference vector', () => {
