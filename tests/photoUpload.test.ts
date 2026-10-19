@@ -26,7 +26,7 @@ function storageClient(options: { exists?: boolean; signedUrl?: string; error?: 
       storage: {
         from(bucket: string) {
           return {
-            async exists(path: string) { calls.push({ bucket, path }); return options.error ? { data: false, error: { message: options.error } } : { data: options.exists ?? false, error: null } },
+            async exists(path: string) { calls.push({ bucket, path }); return options.error ? { data: false, error: { message: options.error, status: 404 } } : { data: options.exists ?? false, error: null } },
             async createSignedUploadUrl(path: string, value: { upsert: boolean }) {
               calls.push({ bucket, path, upsert: value.upsert })
               return { data: { signedUrl: options.signedUrl ?? `https://project.supabase.co/storage/v1/object/upload/sign/${bucket}/${path}?token=signed` }, error: null }
@@ -89,7 +89,7 @@ test('same phone groups files under one private prefix and distinct requests nev
 })
 
 test('signed permission targets one exact object, disables overwrite, and exposes no read URL', async () => {
-  const mock = storageClient()
+  const mock = storageClient({ error: 'Object not found' })
   const service = new SupabasePhotoUploadService(environment, mock.client)
   const result = await service.createSignedUpload(metadata())
   assert.equal(result.alreadyUploaded, false)
@@ -98,6 +98,14 @@ test('signed permission targets one exact object, disables overwrite, and expose
   assert.match(result.uploadUrl ?? '', /\/object\/upload\/sign\/customer-photo-uploads\//)
   assert.equal('downloadUrl' in result, false)
   assert.equal('serviceRoleKey' in result, false)
+})
+
+test('a missing object response from storage-js is the expected first-upload state', async () => {
+  const mock = storageClient({ error: 'Object not found' })
+  const service = new SupabasePhotoUploadService(environment, mock.client)
+  const result = await service.createSignedUpload(metadata())
+  assert.equal(result.alreadyUploaded, false)
+  assert.equal(mock.calls.length, 2)
 })
 
 test('invalid signed-upload hosts are rejected', async () => {

@@ -14,7 +14,7 @@ interface StorageClient {
   storage: {
     from(bucket: string): {
       createSignedUploadUrl(path: string, options: { upsert: boolean }): Promise<{ data: null | { signedUrl: string }; error: null | { message: string } }>
-      exists(path: string): Promise<{ data: boolean; error: null | { message: string } }>
+      exists(path: string): Promise<{ data: boolean; error: null | { message: string; status?: number } }>
     }
   }
 }
@@ -58,10 +58,15 @@ export class SupabasePhotoUploadService {
   async createSignedUpload(metadata: UploadMetadata) {
     const objectPath = objectPathForUpload(metadata)
     const existing = await this.client.storage.from(customerPhotoBucket).exists(objectPath)
-    if (existing.error) throw new UploadApiError(502, 'Supabase Storage chưa thể kiểm tra ảnh. Vui lòng thử lại.')
     if (existing.data) {
       await this.verifyUploadedObject(metadata, objectPath)
       return { alreadyUploaded: true as const, objectPath }
+    }
+
+    // storage-js deliberately returns data:false plus a 400/404 error when HEAD
+    // confirms that an object is absent. That is the expected first-upload state.
+    if (existing.error && (existing.error.status === undefined || ![400, 404].includes(existing.error.status))) {
+      throw new UploadApiError(502, 'Supabase Storage chưa thể kiểm tra ảnh. Vui lòng thử lại.')
     }
 
     const signed = await this.client.storage.from(customerPhotoBucket).createSignedUploadUrl(objectPath, { upsert: false })
