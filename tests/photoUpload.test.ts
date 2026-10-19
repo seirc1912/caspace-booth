@@ -6,7 +6,7 @@ import { customerPhotoBucket, objectPathForUpload, SupabasePhotoUploadService } 
 import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
 import { enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
-import { sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
+import { calculateOverallUploadProgress, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
@@ -94,6 +94,19 @@ test('filename sanitization removes path traversal and control characters', () =
 
 test('SHA-256 of the browser upload Blob matches untouched original bytes', async () => {
   assert.equal(await sha256Blob(new Blob([originalPng])), checksum)
+})
+
+test('customer upload progress is weighted by real file bytes and safely clamped', () => {
+  assert.equal(calculateOverallUploadProgress([{ size: 1_000, uploadedBytes: 1_000 }, { size: 9_000, uploadedBytes: 0 }]), 10)
+  assert.equal(calculateOverallUploadProgress([{ size: 1_000, uploadedBytes: 2_000 }, { size: 1_000, uploadedBytes: -5 }]), 50)
+  assert.equal(calculateOverallUploadProgress([]), 0)
+})
+
+test('ready customer photos show no percentage or progress bar before submission', () => {
+  const page = readFileSync(new URL('../client/src/pages/PhotoUploadPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /photo\.state === 'uploading' \? `\$\{photo\.progress\}%` : 'Sẵn sàng'/)
+  assert.match(page, /photo\.state === 'uploading' \? <div className="mt-2 h-1\.5/)
+  assert.match(page, /\{uploading \? <div className="mt-5" aria-live="polite">/)
 })
 
 test('same phone groups files under one private prefix and distinct requests never collide', () => {

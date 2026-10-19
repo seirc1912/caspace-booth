@@ -2,6 +2,13 @@ import { normalizeVietnamesePhone, supportedImageMime } from './validation'
 
 export interface UploadProgress { loaded: number; total: number }
 
+export function calculateOverallUploadProgress(files: Array<{ size: number; uploadedBytes: number }>) {
+  const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
+  if (!totalBytes) return 0
+  const uploadedBytes = files.reduce((sum, file) => sum + Math.max(0, Math.min(file.size, file.uploadedBytes)), 0)
+  return Math.min(100, Math.round((uploadedBytes / totalBytes) * 100))
+}
+
 interface InitResponse {
   alreadyUploaded?: boolean
   objectPath: string
