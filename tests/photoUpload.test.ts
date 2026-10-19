@@ -3,13 +3,14 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { customerPhotoBucket, objectPathForUpload, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
 import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
-import { enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
+import { enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
 import { sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
-import { parseStaffAllowlist } from '../client/api/_lib/staffAuth.ts'
+import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
 import { updateCrc32 } from '../client/api/staff/photos/zip.ts'
+import { parseStaffLoginCredentials } from '../client/api/staff/login.ts'
 
 const originalPng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...Array.from({ length: 4096 }, (_, index) => index % 251)])
 const pngPrefix = originalPng.subarray(0, 16).toString('base64')
@@ -174,9 +175,29 @@ test('per-IP byte quota rejects repeated large initialization attempts', () => {
   resetRateLimitsForTests()
 })
 
-test('staff allowlist is normalized and never grants access when empty', () => {
-  assert.deepEqual([...parseStaffAllowlist(' Staff@CaSpace.vn,owner@example.com ')], ['staff@caspace.vn', 'owner@example.com'])
-  assert.equal(parseStaffAllowlist('').size, 0)
+test('shared staff username is fixed and the session token is only accepted from its HttpOnly cookie', () => {
+  assert.equal(STAFF_PUBLIC_USERNAME, 'caspace_staff')
+  const cookie = staffSessionCookie('real-token', 3600)
+  assert.match(cookie, /HttpOnly/)
+  assert.match(cookie, /Secure/)
+  assert.match(cookie, /SameSite=Strict/)
+  assert.equal(staffSessionToken({ headers: { cookie: `other=value; ${cookie.split(';')[0]}` } }), 'real-token')
+  assert.equal(staffSessionToken({ headers: { authorization: 'Bearer client-controlled' } }), undefined)
+  assert.match(clearStaffSessionCookie(), /Max-Age=0/)
+})
+
+test('staff login attempts are rate limited independently of photo size quotas', () => {
+  resetRateLimitsForTests()
+  const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.12' } }
+  for (let attempt = 0; attempt < 5; attempt += 1) enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000 })
+  assert.throws(() => enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000 }), UploadApiError)
+  resetRateLimitsForTests()
+})
+
+test('staff login accepts only the fixed username and forwards no client identity', () => {
+  assert.deepEqual(parseStaffLoginCredentials({ username: 'caspace_staff', password: 'strong-private-value' }), { password: 'strong-private-value' })
+  assert.throws(() => parseStaffLoginCredentials({ username: 'other_staff', password: 'strong-private-value' }), UploadApiError)
+  assert.throws(() => parseStaffLoginCredentials({ username: 'caspace_staff', password: '' }), UploadApiError)
 })
 
 test('staff phone and object paths reject traversal and cross-customer access', () => {

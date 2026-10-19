@@ -1,21 +1,30 @@
 # Kho ảnh khách dành cho nhân viên
 
-Trang `/staff/photos` dùng Supabase Auth để đăng nhập và API phía máy chủ để đọc bucket riêng tư `customer-photo-uploads`. Trình duyệt không bao giờ nhận service-role key và không có API đăng ký tài khoản công khai.
+Trang `/staff/photos` dùng Supabase Auth để đăng nhập một tài khoản staff dùng chung và API phía máy chủ để đọc bucket riêng tư `customer-photo-uploads`. Trình duyệt không nhận email nội bộ, service-role key hoặc access token; phiên Supabase được giữ trong cookie `HttpOnly`, `Secure`, `SameSite=Strict`. Không có API đăng ký tài khoản công khai.
 
 ## Cấu hình bắt buộc
 
 Giữ nguyên các biến Supabase hiện có và thêm biến chỉ dùng phía máy chủ:
 
 ```text
-STAFF_PHOTO_EMAIL_ALLOWLIST=staff1@example.com,staff2@example.com
+STAFF_PHOTO_AUTH_EMAIL=internal-staff-identity@example.com
+STAFF_PHOTO_AUTH_USER_ID=uuid-cua-supabase-auth-user
 ```
 
-- Khai báo biến này riêng cho môi trường Vercel Preview trước khi kiểm thử.
-- Không đặt tiền tố `VITE_`; biến không được đưa vào bundle trình duyệt.
-- Email được chuẩn hóa chữ thường và phải khớp chính xác.
-- Danh sách trống sẽ từ chối toàn bộ yêu cầu staff.
+- Khai báo hai biến này riêng cho môi trường Vercel Preview trước khi kiểm thử.
+- Không đặt tiền tố `VITE_`; các biến không được đưa vào bundle trình duyệt.
+- Username công khai duy nhất là `caspace_staff`; server ánh xạ username này sang email nội bộ.
+- Thiếu email hoặc user ID sẽ từ chối toàn bộ đăng nhập/quyền staff.
 
-Chủ dự án tự tạo tài khoản đã duyệt trong Supabase Dashboard → Authentication → Users. Không bật public signup chỉ để phục vụ trang này. Mỗi request danh sách, xem trước, tải file hoặc ZIP đều xác minh access token với Supabase rồi kiểm tra email trong allowlist phía máy chủ.
+Chủ dự án tự tạo đúng một tài khoản nội bộ trong Supabase Dashboard → Authentication → Users, đặt mật khẩu mạnh và lấy UUID của user. Không bật public signup. Mỗi request danh sách, xem trước, tải file hoặc ZIP đều xác minh access token HttpOnly với Supabase rồi so sánh UUID ở phía máy chủ; username do trình duyệt gửi không bao giờ cấp quyền trực tiếp.
+
+### Đổi mật khẩu hoặc thu hồi phiên
+
+1. Chủ dự án đổi mật khẩu của identity nội bộ trong Supabase Dashboard → Authentication → Users.
+2. Dùng hành động **Sign out user / Sign out all sessions** trong Dashboard để thu hồi các phiên đang hoạt động.
+3. Staff đăng nhập lại bằng username `caspace_staff` và mật khẩu mới.
+
+Không gửi email nội bộ hoặc mật khẩu qua chat, source code hay biến `VITE_*`.
 
 ## Mô hình truy cập
 
@@ -33,13 +42,13 @@ Danh sách tải 40 ảnh mỗi trang; ảnh xem trước dùng transform nhỏ 
 
 ## Kiểm thử Preview
 
-1. Xác nhận `STAFF_PHOTO_EMAIL_ALLOWLIST` chỉ tồn tại trong Preview.
+1. Xác nhận `STAFF_PHOTO_AUTH_EMAIL` và `STAFF_PHOTO_AUTH_USER_ID` chỉ tồn tại trong Preview.
 2. Đăng nhập bằng tài khoản được duyệt và tìm một số điện thoại có dữ liệu thử.
 3. Kiểm tra thumbnail, tên file, dung lượng và thời gian tải lên.
 4. Tải một file gốc và so sánh SHA-256 với object trong Storage.
 5. Tải ZIP và xác nhận byte của từng file không đổi.
-6. Dùng tài khoản Supabase không có trong allowlist: API phải trả `403`.
+6. Dùng token/cookie của Supabase user khác: API phải trả `403`.
 7. Gọi API không có token hoặc token hết hạn: API phải trả `401`.
 8. Thử đường dẫn của prefix khác hoặc `../`: API phải từ chối.
 
-Việc tạo tài khoản staff và thêm allowlist là thao tác thủ công của chủ dự án. Không triển khai Production cho đến khi Preview được duyệt.
+Việc tạo identity nội bộ và thêm hai biến Preview là thao tác thủ công của chủ dự án. Không triển khai Production cho đến khi Preview được duyệt.
