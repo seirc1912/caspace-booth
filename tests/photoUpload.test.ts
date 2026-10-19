@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { customerPhotoBucket, objectPathForUpload, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
 import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
@@ -8,7 +9,7 @@ import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhon
 import { sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
-import { originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
+import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
 import { updateCrc32 } from '../client/api/staff/photos/zip.ts'
 import { parseStaffLoginCredentials } from '../client/api/staff/login.ts'
 
@@ -212,6 +213,34 @@ test('staff phone and object paths reject traversal and cross-customer access', 
 test('staff display names remove only the collision-safe request suffix', () => {
   assert.equal(originalFilename('portrait--request_12345678.jpg'), 'portrait.jpg')
   assert.equal(originalFilename('family-photo.jpg'), 'family-photo.jpg')
+})
+
+test('staff folder search accepts empty and partial Vietnamese phone numbers', () => {
+  assert.equal(normalizeFolderSearch(''), '')
+  assert.equal(normalizeFolderSearch('090 12'), '09012')
+  assert.equal(normalizeFolderSearch('+84 90'), '090')
+  assert.throws(() => normalizeFolderSearch('090<script>'), UploadApiError)
+})
+
+test('staff folder listing reads metadata only and sorts loaded folders by latest upload', async () => {
+  const calls: Array<{ path: string; offset: number; search?: string }> = []
+  const client = { storage: { from() { return { async list(path: string, options: { offset: number; search?: string }) {
+    calls.push({ path, offset: options.offset, search: options.search })
+    if (!path) return { data: [{ name: '0901234567' }, { name: '0912345678' }], error: null }
+    if (path === '0901234567') return { data: [{ id: 'a', name: 'a.png', created_at: '2026-01-01T00:00:00Z' }], error: null }
+    return { data: [{ id: 'b', name: 'b.jpg', created_at: '2026-02-01T00:00:00Z' }, { id: 'c', name: 'c.png', created_at: '2026-01-10T00:00:00Z' }], error: null }
+  } } } } }
+  const result = await listCustomerFolders(client as never, '09')
+  assert.deepEqual(result.items.map((folder) => [folder.phone, folder.photoCount]), [['0912345678', 2], ['0901234567', 1]])
+  assert.equal(calls[0]?.path, '')
+  assert.equal(calls[0]?.search, '09')
+})
+
+test('staff dashboard automatically loads folders and keeps folder navigation controls', () => {
+  const page = readFileSync(new URL('../client/src/pages/StaffPhotosPage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /listStaffPhotoFolders\(search\)/)
+  assert.match(page, /Tải thêm thư mục/)
+  assert.match(page, /← Thư mục khách/)
 })
 
 test('streaming ZIP CRC32 matches the standard reference vector', () => {

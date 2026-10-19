@@ -38,7 +38,9 @@ Không cần thay đổi bảng dữ liệu, migration, RLS hoặc policy của 
 
 ## Hiệu năng và ZIP
 
-Danh sách tải 40 ảnh mỗi trang; ảnh xem trước dùng transform nhỏ và lazy loading. ZIP được tạo theo kiểu streaming trên server, đọc từng object riêng tư và lưu nguyên byte, không resize hoặc recompress ảnh. Trình duyệt vẫn cần nhận file ZIP hoàn chỉnh để bắt đầu tải xuống; với thư mục cực lớn, nên tải từng file hoặc chia theo đợt để tránh giới hạn bộ nhớ thiết bị và thời gian chạy của Vercel Function.
+Sau đăng nhập, trang tự liệt kê các prefix số điện thoại thành lưới thư mục. Danh sách thư mục tải 24 mục mỗi trang và tìm kiếm một phần được thực hiện phía server; mỗi thư mục chỉ đọc metadata để tính số ảnh và lần tải gần nhất, không tải byte ảnh. Các request metadata được giới hạn theo nhóm để tránh dồn tải lên Storage.
+
+Danh sách trong một thư mục tải 40 ảnh mỗi trang; ảnh xem trước dùng transform nhỏ và lazy loading. ZIP được tạo theo kiểu streaming trên server, đọc từng object riêng tư và lưu nguyên byte, không resize hoặc recompress ảnh. Trình duyệt vẫn cần nhận file ZIP hoàn chỉnh để bắt đầu tải xuống; với thư mục cực lớn, nên tải từng file hoặc chia theo đợt để tránh giới hạn bộ nhớ thiết bị và thời gian chạy của Vercel Function.
 
 ## Kiểm thử Preview
 
