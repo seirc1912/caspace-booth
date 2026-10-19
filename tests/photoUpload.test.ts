@@ -112,8 +112,10 @@ test('ready customer photos show no percentage or progress bar before submission
 test('staff photo detail provides folder-list and homepage navigation', () => {
   const page = readFileSync(new URL('../client/src/pages/StaffPhotosPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /← Quay lại danh sách/)
-  assert.match(page, /href="\/"[^>]*>Trang chủ<\/a>/)
-  assert.match(page, /Trang chủ<\/a><button[^>]+onClick=\{logout\}/)
+  assert.match(page, /<nav aria-label="Điều hướng nhân viên"[^>]*>/)
+  assert.match(page, /<a[^>]+href="\/">Trang chủ<\/a>/)
+  assert.match(page, /Trang chủ<\/a><button[^>]+onClick=\{logout\}[^>]*>Đăng xuất<\/button>/)
+  assert.doesNotMatch(page, /<a[^>]+href="\/"[^>]+onClick=\{logout\}/)
 })
 
 test('same phone groups files under one private prefix and distinct requests never collide', () => {
