@@ -13,7 +13,7 @@ export interface SupabaseStorageEnvironment {
 interface StorageClient {
   storage: {
     from(bucket: string): {
-      createSignedUploadUrl(path: string, options: { upsert: boolean }): Promise<{ data: null | { signedUrl: string }; error: null | { message: string } }>
+      createSignedUploadUrl(path: string, options: { upsert: boolean }): Promise<{ data: null | { signedUrl: string; token?: string }; error: null | { message: string } }>
       exists(path: string): Promise<{ data: boolean; error: null | { message: string; status?: number } }>
     }
   }
@@ -46,6 +46,12 @@ function encodedObjectPath(path: string) {
   return path.split('/').map(encodeURIComponent).join('/')
 }
 
+function resumableEndpoint(projectUrl: string) {
+  const url = new URL(projectUrl)
+  const projectId = url.hostname.split('.')[0]
+  return `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`
+}
+
 export class SupabasePhotoUploadService {
   private readonly client: StorageClient
 
@@ -72,19 +78,23 @@ export class SupabasePhotoUploadService {
     const signed = await this.client.storage.from(customerPhotoBucket).createSignedUploadUrl(objectPath, { upsert: false })
     if (signed.error || !signed.data?.signedUrl) throw new UploadApiError(502, 'Không thể chuẩn bị phiên gửi ảnh an toàn. Vui lòng thử lại.')
     const signedUrl = new URL(signed.data.signedUrl)
+    const uploadToken = signed.data.token ?? signedUrl.searchParams.get('token')
     const expectedHost = new URL(this.environment.url).host
     if (signedUrl.protocol !== 'https:' || signedUrl.host !== expectedHost || !signedUrl.pathname.includes(`/storage/v1/object/upload/sign/${customerPhotoBucket}/`)) {
       throw new UploadApiError(502, 'Supabase Storage không trả về phiên gửi ảnh an toàn.')
     }
-    return { alreadyUploaded: false as const, objectPath, uploadUrl: signedUrl.toString() }
+    if (!uploadToken) throw new UploadApiError(502, 'Supabase Storage không trả về token gửi ảnh an toàn.')
+    return { alreadyUploaded: false as const, objectPath, uploadUrl: signedUrl.toString(), uploadToken, resumableEndpoint: resumableEndpoint(this.environment.url) }
   }
 
   async verifyUploadedObject(metadata: UploadMetadata, objectPath: string) {
     if (objectPath !== objectPathForUpload(metadata)) throw new UploadApiError(403, 'Đường dẫn ảnh không hợp lệ.')
     const objectUrl = `${this.environment.url}/storage/v1/object/authenticated/${customerPhotoBucket}/${encodedObjectPath(objectPath)}`
+    const startedAt = performance.now()
     const response = await this.fetchImpl(objectUrl, {
       headers: { apikey: this.environment.serviceRoleKey, Authorization: `Bearer ${this.environment.serviceRoleKey}` },
     })
+    const responseAt = performance.now()
     if (!response.ok || !response.body) throw new UploadApiError(409, 'Supabase Storage chưa xác nhận đầy đủ ảnh. Vui lòng thử lại.')
 
     const hash = createHash('sha256')
@@ -107,6 +117,6 @@ export class SupabasePhotoUploadService {
     if (received !== metadata.size || hash.digest('hex') !== metadata.sha256 || contentType !== metadata.mimeType || !signatureMatches) {
       throw new UploadApiError(409, 'Nội dung ảnh đã nhận không khớp bản gốc.')
     }
-    return { objectPath, size: received, sha256: metadata.sha256 }
+    return { objectPath, size: received, sha256: metadata.sha256, timing: { storageResponseMs: Math.round(responseAt - startedAt), streamVerificationMs: Math.round(performance.now() - responseAt) } }
   }
 }

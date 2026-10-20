@@ -37,11 +37,12 @@ export function header(request: ApiRequest, name: string) {
 }
 
 export class UploadApiError extends Error {
-  constructor(readonly status: number, message: string) { super(message) }
+  constructor(readonly status: number, message: string, readonly retryAfterSeconds?: number) { super(message) }
 }
 
 export function sendApiError(response: ApiResponse, reason: unknown) {
   const status = reason instanceof UploadApiError ? reason.status : 500
   const message = reason instanceof UploadApiError ? reason.message : 'Không thể xử lý ảnh lúc này. Vui lòng thử lại.'
+  if (reason instanceof UploadApiError && reason.retryAfterSeconds) response.setHeader('Retry-After', String(reason.retryAfterSeconds))
   response.status(status).json({ error: message })
 }

@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { customerPhotoBucket, objectPathForUpload, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
 import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
-import { enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
+import { enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
-import { calculateOverallUploadProgress, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
+import { calculateOverallUploadProgress, recommendedUploadConcurrency, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
@@ -136,6 +136,8 @@ test('signed permission targets one exact object, disables overwrite, and expose
   assert.equal(mock.calls.every((call) => call.bucket === customerPhotoBucket), true)
   assert.equal(mock.calls.at(-1)?.upsert, false)
   assert.match(result.uploadUrl ?? '', /\/object\/upload\/sign\/customer-photo-uploads\//)
+  assert.equal(result.uploadToken, 'signed')
+  assert.equal(result.resumableEndpoint, 'https://project.storage.supabase.co/storage/v1/upload/resumable')
   assert.equal('downloadUrl' in result, false)
   assert.equal('serviceRoleKey' in result, false)
 })
@@ -196,6 +198,59 @@ test('per-IP byte quota rejects repeated large initialization attempts', () => {
   enforceUploadByteQuota(request, 125 * 1024 * 1024)
   assert.throws(() => enforceUploadByteQuota(request, 1), UploadApiError)
   resetRateLimitsForTests()
+})
+
+test('shared-IP upload limits allow 30 legitimate 45 MB customers while retaining an IP abuse ceiling', () => {
+  resetRateLimitsForTests()
+  const ip = '203.0.113.25'
+  for (let customer = 0; customer < 30; customer += 1) {
+    const clientId = `00000000-0000-4000-8000-${String(customer).padStart(12, '0')}`
+    const request: ApiRequest = { headers: { 'x-forwarded-for': ip, 'x-upload-client-id': clientId } }
+    for (let file = 0; file < 5; file += 1) enforceCustomerUploadLimits(request, 9 * 1024 * 1024)
+    for (let file = 0; file < 5; file += 1) enforceCustomerUploadLimits(request, 0)
+  }
+  const rotatingClient: ApiRequest = { headers: { 'x-forwarded-for': ip, 'x-upload-client-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff' } }
+  assert.throws(() => enforceCustomerUploadLimits(rotatingClient, 700 * 1024 * 1024, { clientBytes: 1024 * 1024 * 1024, clientRequests: 80, ipBytes: 2 * 1024 * 1024 * 1024, ipRequests: 600, windowMs: 10 * 60_000 }), UploadApiError)
+  resetRateLimitsForTests()
+})
+
+test('clients without a valid browser id keep the conservative legacy shared-IP quota', () => {
+  resetRateLimitsForTests()
+  const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.26' } }
+  enforceCustomerUploadLimits(request, 250 * 1024 * 1024)
+  assert.throws(() => enforceCustomerUploadLimits(request, 1), UploadApiError)
+  resetRateLimitsForTests()
+})
+
+test('upload queue caps concurrency and keeps processing after one file fails', async () => {
+  let active = 0
+  let peak = 0
+  const completed: number[] = []
+  const failures = await runUploadQueue([0, 1, 2, 3, 4], async (value) => {
+    active += 1
+    peak = Math.max(peak, active)
+    await new Promise((resolve) => setTimeout(resolve, 2))
+    active -= 1
+    if (value === 2) throw new Error('expected failure')
+    completed.push(value)
+  }, 2)
+  assert.equal(peak, 2)
+  assert.deepEqual(failures.map(({ index }) => index), [2])
+  assert.deepEqual(completed.sort(), [0, 1, 3, 4])
+})
+
+test('upload transport keeps slow networks sequential and uses Supabase-required TUS sizing', () => {
+  assert.equal(recommendedUploadConcurrency({ saveData: true }), 1)
+  assert.equal(recommendedUploadConcurrency({ effectiveType: '2g' }), 1)
+  assert.equal(recommendedUploadConcurrency({ effectiveType: '4g' }), 2)
+  assert.equal(recommendedUploadConcurrency(), 2)
+  assert.equal(RESUMABLE_UPLOAD_THRESHOLD_BYTES, 6 * 1024 * 1024)
+  assert.equal(RESUMABLE_CHUNK_BYTES, 6 * 1024 * 1024)
+})
+
+test('Vercel functions run near the Seoul Supabase project for verification', () => {
+  const config = JSON.parse(readFileSync(new URL('../client/vercel.json', import.meta.url), 'utf8')) as { regions?: string[] }
+  assert.deepEqual(config.regions, ['icn1'])
 })
 
 test('shared staff username is fixed and the session token is only accepted from its HttpOnly cookie', () => {
