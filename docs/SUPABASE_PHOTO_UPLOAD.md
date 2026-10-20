@@ -9,7 +9,10 @@ The existing customer page remains `/upload-anh`. Vercel creates a signed upload
 - A customer receives only a short-lived Supabase signed-upload permission for one server-generated object path. It grants no list/read/download permission and has `upsert: false`.
 - Phone numbers group files for staff; they are not treated as authentication. Customers cannot use a phone number to read any object.
 - The server validates Vietnamese phone format, filename, extension, MIME type, PNG/JPEG magic bytes, per-file size, request ID, and SHA-256. Completion streams the stored bytes through SHA-256 without modifying them.
-- Limits are 20 files per selection, 25 MB per file, and 250 MB per selection. The API uses a 10-minute 300 MB budget per browser plus a 2 GB shared-IP safety ceiling, so customers behind one cafe/mobile-carrier NAT are not all treated as one person. Requests without a valid browser session identifier retain the conservative legacy 250 MB/IP limit. The application limiter is still best-effort per serverless instance; configure a distributed rate-limit store or Vercel Firewall rules for `/api/photo-uploads/*` before relying on it as the sole abuse control.
+- Limits are 20 files per selection, 25 MB per file, and 250 MB per selection. Across selections, the API uses a rolling 10-minute 1,000 MB budget per signed browser session plus a 5,000 MB shared-IP safety ceiling, so 10–30 customers behind one cafe/mobile-carrier NAT are not all treated as one person. Requests without a valid server-signed session retain the conservative legacy 250 MB/IP accounting and are rejected so the browser can establish a fresh session.
+- The upload session is generated server-side, signed with a server-only secret, bound to the browser user agent, and valid for 24 hours. A separate signed completion receipt binds the session to the exact object path, SHA-256, and byte count. Client-created or rotated identifiers therefore cannot bypass the per-session budget; rotating valid sessions remains bounded by the shared-IP ceiling and session-issuance limit.
+- Byte allowance is reserved once per stable upload request ID. Init retries and TUS resume requests do not double-count the same file, while a changed size for the same reservation is rejected.
+- Enforcement is a rolling window, but the maps live inside each Vercel function instance and are therefore **not globally authoritative**. The safest global design is a small atomic distributed counter store (for example Vercel KV/Upstash Redis) keyed by HMAC-hashed session/IP and reservation ID with 10-minute TTLs. This is intentionally not enabled because it introduces paid infrastructure and requires owner approval.
 
 ## Phase 2 upload performance
 
@@ -26,7 +29,7 @@ Use a separate non-production Supabase project or isolated staging bucket with i
 
 1. Prepare deterministic 5 MB JPEG and 12 MB PNG fixtures and record their SHA-256 hashes.
 2. Run cohorts of 1, 5, 10, 20, then 30 simulated customers. Each customer should submit a representative 45 MB batch from a distinct browser session; run a second scenario where all sessions share one public IP.
-3. For each cohort, capture success rate and p50/p95 for hash, init, transfer, verification, and total time. Confirm no 429 response for the legitimate shared-IP scenario and confirm the IP ceiling rejects traffic above 2 GB/10 minutes.
+3. For each cohort, capture success rate and p50/p95 for hash, init, transfer, verification, and total time. Confirm no 429 response for the legitimate shared-IP scenario and confirm the session and shared-IP ceilings reject traffic above 1,000 MB and 5,000 MB per rolling 10 minutes respectively.
 4. Interrupt a TUS transfer after at least one chunk, retry, and verify only the remaining bytes are sent. Compare the downloaded original with the fixture SHA-256.
 5. Confirm anonymous list/read requests return 401/403, overwrite attempts fail, bad signatures fail, and failed files remain retryable.
 6. Watch Vercel function duration/error rate and Supabase Storage/egress usage. Stop before advancing a cohort if errors rise or mobile memory/network behavior degrades.

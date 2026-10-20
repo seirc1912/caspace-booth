@@ -12,6 +12,7 @@ export function calculateOverallUploadProgress(files: Array<{ size: number; uplo
 
 interface InitResponse {
   alreadyUploaded?: boolean
+  completionToken: string
   objectPath: string
   resumableEndpoint?: string
   uploadToken?: string
@@ -20,6 +21,9 @@ interface InitResponse {
 
 const API_TIMEOUT_MS = 30_000
 const UPLOAD_TIMEOUT_MS = 5 * 60_000
+const uploadSessionStorageKey = 'caspace.photo-upload-session.v1'
+let uploadSessionRequest: Promise<string> | null = null
+let uploadSessionValue: string | null = null
 export const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024
 export const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024
 
@@ -33,15 +37,34 @@ export interface UploadTiming {
   verificationMs: number
 }
 
-function uploadClientId() {
-  const key = 'caspace.photo-upload-client.v1'
+function storedUploadSession() {
+  if (uploadSessionValue) return uploadSessionValue
   try {
-    const existing = sessionStorage.getItem(key)
-    if (existing) return existing
-    const created = crypto.randomUUID()
-    sessionStorage.setItem(key, created)
-    return created
-  } catch { return crypto.randomUUID() }
+    const existing = sessionStorage.getItem(uploadSessionStorageKey)
+    return existing?.startsWith('v1.') ? existing : null
+  } catch { return null }
+}
+
+function clearUploadSession() {
+  uploadSessionValue = null
+  try { sessionStorage.removeItem(uploadSessionStorageKey) } catch { /* private-mode storage may be unavailable */ }
+}
+
+async function uploadSession(forceRefresh = false) {
+  if (forceRefresh) clearUploadSession()
+  const existing = storedUploadSession()
+  if (existing) return existing
+  if (!uploadSessionRequest) uploadSessionRequest = fetchWithTimeout('/api/photo-uploads/session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+  }, 'Khởi tạo phiên gửi ảnh quá thời gian chờ. Vui lòng thử lại.').then(async (response) => {
+    const body = await jsonOrError(response) as { token?: string }
+    if (!body.token?.startsWith('v1.')) throw new Error('Không nhận được phiên gửi ảnh an toàn. Vui lòng thử lại.')
+    uploadSessionValue = body.token
+    try { sessionStorage.setItem(uploadSessionStorageKey, body.token) } catch { /* keep the in-memory result */ }
+    return body.token
+  }).finally(() => { uploadSessionRequest = null })
+  return uploadSessionRequest
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -67,6 +90,19 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, mes
   } finally {
     window.clearTimeout(timeout)
   }
+}
+
+async function uploadApi(path: string, body: string, timeoutMessage: string) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const token = await uploadSession(attempt > 0)
+    const response = await fetchWithTimeout(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Upload-Session': token },
+      body,
+    }, timeoutMessage)
+    if (response.status !== 401 || attempt > 0) return response
+  }
+  throw new Error('Không thể khởi tạo lại phiên gửi ảnh.')
 }
 
 export async function sha256Blob(blob: Blob) {
@@ -162,14 +198,11 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
     sha256Blob(input.file),
   ])
   const hashMs = performance.now() - hashStartedAt
-  const clientId = uploadClientId()
   const initializationStartedAt = performance.now()
-  const init = await fetchWithTimeout('/api/photo-uploads/init', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Upload-Client-Id': clientId },
-    body: JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId }),
-  }, 'Chuẩn bị gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
+  const metadata = JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId })
+  const init = await uploadApi('/api/photo-uploads/init', metadata, 'Chuẩn bị gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
   const prepared = await jsonOrError(init) as InitResponse
+  if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
   const initializationMs = performance.now() - initializationStartedAt
   let transport: UploadTiming['transport'] = 'existing'
   const transferStartedAt = performance.now()
@@ -186,11 +219,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   }
   const transferMs = performance.now() - transferStartedAt
   const verificationStartedAt = performance.now()
-  const completion = await fetchWithTimeout('/api/photo-uploads/complete', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Upload-Client-Id': clientId },
-    body: JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId }),
-  }, 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.')
+  const completion = await uploadApi('/api/photo-uploads/complete', JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, completionToken: prepared.completionToken }), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.')
   await jsonOrError(completion)
   const verificationMs = performance.now() - verificationStartedAt
   input.onProgress({ loaded: input.file.size, total: input.file.size })

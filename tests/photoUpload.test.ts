@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { customerPhotoBucket, objectPathForUpload, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
 import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
-import { enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
+import { CUSTOMER_UPLOAD_SESSION_BYTES, CUSTOMER_UPLOAD_SHARED_IP_BYTES, CUSTOMER_UPLOAD_WINDOW_MS, enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
+import { createUploadCompletionToken, createUploadSessionToken, verifyUploadCompletionToken, verifyUploadSessionToken } from '../client/api/_lib/uploadSession.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
 import { calculateOverallUploadProgress, recommendedUploadConcurrency, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
@@ -200,25 +201,71 @@ test('per-IP byte quota rejects repeated large initialization attempts', () => {
   resetRateLimitsForTests()
 })
 
-test('shared-IP upload limits allow 30 legitimate 45 MB customers while retaining an IP abuse ceiling', () => {
+test('signed upload sessions reject forgery, expiry, user-agent theft, and cross-session completion', () => {
+  const secret = 'test-only-high-entropy-secret'
+  const request: ApiRequest = { headers: { 'user-agent': 'Mobile Safari' } }
+  const issuedAt = 1_800_000_000_000
+  const token = createUploadSessionToken(request, secret, issuedAt)
+  const signedRequest: ApiRequest = { headers: { ...request.headers, 'x-upload-session': token } }
+  const sessionId = verifyUploadSessionToken(signedRequest, secret, issuedAt + 1_000)
+  assert.ok(sessionId)
+  assert.equal(verifyUploadSessionToken({ headers: { 'user-agent': 'Other', 'x-upload-session': token } }, secret, issuedAt + 1_000), null)
+  assert.equal(verifyUploadSessionToken({ headers: { ...signedRequest.headers, 'x-upload-session': `${token.slice(0, -1)}x` } }, secret, issuedAt + 1_000), null)
+  assert.equal(verifyUploadSessionToken(signedRequest, secret, issuedAt + 24 * 60 * 60_000 + 1), null)
+  const completion = createUploadCompletionToken(secret, sessionId!, '0901234567/photo.png', checksum, originalPng.length)
+  assert.equal(verifyUploadCompletionToken(secret, sessionId!, '0901234567/photo.png', checksum, originalPng.length, completion), true)
+  assert.equal(verifyUploadCompletionToken(secret, 'other-session', '0901234567/photo.png', checksum, originalPng.length, completion), false)
+  assert.equal(verifyUploadCompletionToken(secret, sessionId!, '0901234567/other.png', checksum, originalPng.length, completion), false)
+})
+
+test('shared-IP limits allow 1, 10, 20, and 30 legitimate customers without cross-blocking', () => {
   resetRateLimitsForTests()
-  const ip = '203.0.113.25'
-  for (let customer = 0; customer < 30; customer += 1) {
-    const clientId = `00000000-0000-4000-8000-${String(customer).padStart(12, '0')}`
-    const request: ApiRequest = { headers: { 'x-forwarded-for': ip, 'x-upload-client-id': clientId } }
-    for (let file = 0; file < 5; file += 1) enforceCustomerUploadLimits(request, 9 * 1024 * 1024)
-    for (let file = 0; file < 5; file += 1) enforceCustomerUploadLimits(request, 0)
+  for (const customerCount of [1, 10, 20, 30]) {
+    resetRateLimitsForTests()
+    const ip = `203.0.113.${customerCount}`
+    for (let customer = 0; customer < customerCount; customer += 1) {
+      const sessionId = `session-${customer}`
+      const request: ApiRequest = { headers: { 'x-forwarded-for': ip } }
+      for (let file = 0; file < 6; file += 1) {
+        const requestId = `customer-${customer}-file-${file}`
+        enforceCustomerUploadLimits(request, 25 * 1024 * 1024, sessionId, requestId)
+        enforceCustomerUploadLimits(request, 0, sessionId)
+      }
+    }
   }
-  const rotatingClient: ApiRequest = { headers: { 'x-forwarded-for': ip, 'x-upload-client-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff' } }
-  assert.throws(() => enforceCustomerUploadLimits(rotatingClient, 700 * 1024 * 1024, { clientBytes: 1024 * 1024 * 1024, clientRequests: 80, ipBytes: 2 * 1024 * 1024 * 1024, ipRequests: 600, windowMs: 10 * 60_000 }), UploadApiError)
   resetRateLimitsForTests()
 })
 
-test('clients without a valid browser id keep the conservative legacy shared-IP quota', () => {
+test('1 GB session and 5 GB shared-IP ceilings are enforced across rotated signed sessions', () => {
+  resetRateLimitsForTests()
+  const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.90' } }
+  enforceCustomerUploadLimits(request, CUSTOMER_UPLOAD_SESSION_BYTES, 'session-a', 'full-session')
+  assert.throws(() => enforceCustomerUploadLimits(request, 1, 'session-a', 'over-session'), UploadApiError)
+  resetRateLimitsForTests()
+  for (let session = 0; session < 5; session += 1) {
+    enforceCustomerUploadLimits(request, 1_000 * 1024 * 1024, `rotated-${session}`, `batch-${session}`)
+  }
+  assert.throws(() => enforceCustomerUploadLimits(request, 1, 'rotated-5', 'over-ip'), UploadApiError)
+  assert.equal(CUSTOMER_UPLOAD_SHARED_IP_BYTES, 5_000 * 1024 * 1024)
+  assert.equal(CUSTOMER_UPLOAD_WINDOW_MS, 10 * 60_000)
+  resetRateLimitsForTests()
+})
+
+test('retries and resumable restarts reserve bytes once per session request', () => {
+  resetRateLimitsForTests()
+  const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.91' } }
+  enforceCustomerUploadLimits(request, 600 * 1024 * 1024, 'session-retry', 'stable-request')
+  enforceCustomerUploadLimits(request, 600 * 1024 * 1024, 'session-retry', 'stable-request')
+  assert.throws(() => enforceCustomerUploadLimits(request, 500 * 1024 * 1024, 'session-retry', 'new-request'), UploadApiError)
+  assert.throws(() => enforceCustomerUploadLimits(request, 601 * 1024 * 1024, 'session-retry', 'stable-request'), UploadApiError)
+  resetRateLimitsForTests()
+})
+
+test('clients without a valid signed session keep the conservative fallback quota', () => {
   resetRateLimitsForTests()
   const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.26' } }
-  enforceCustomerUploadLimits(request, 250 * 1024 * 1024)
-  assert.throws(() => enforceCustomerUploadLimits(request, 1), UploadApiError)
+  enforceCustomerUploadLimits(request, 250 * 1024 * 1024, null)
+  assert.throws(() => enforceCustomerUploadLimits(request, 1, null), UploadApiError)
   resetRateLimitsForTests()
 })
 
@@ -246,6 +293,14 @@ test('upload transport keeps slow networks sequential and uses Supabase-required
   assert.equal(recommendedUploadConcurrency(), 2)
   assert.equal(RESUMABLE_UPLOAD_THRESHOLD_BYTES, 6 * 1024 * 1024)
   assert.equal(RESUMABLE_CHUNK_BYTES, 6 * 1024 * 1024)
+})
+
+test('TUS uploads retain bounded retries and resume the previous upload fingerprint', () => {
+  const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
+  assert.match(source, /retryDelays:\s*\[0, 1_000, 3_000, 5_000, 10_000\]/)
+  assert.match(source, /findPreviousUploads\(\)/)
+  assert.match(source, /resumeFromPreviousUpload\(previous\[0\]\)/)
+  assert.match(source, /removeFingerprintOnSuccess:\s*true/)
 })
 
 test('Vercel functions run near the Seoul Supabase project for verification', () => {
