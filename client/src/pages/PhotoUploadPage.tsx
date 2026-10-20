@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
-import { calculateOverallUploadProgress, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
+import { calculateOverallUploadProgress, recommendedUploadConcurrency, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
@@ -66,18 +66,24 @@ export function PhotoUploadPage() {
     setMessage(null)
     const normalizedPhone = normalizeVietnamesePhone(phone)
     try {
-      for (let index = 0; index < photos.length; index += 1) {
-        const photo = photos[index]!
-        if (photo.state === 'uploaded') continue
+      const pending = photos.map((photo, index) => ({ index, photo })).filter(({ photo }) => photo.state !== 'uploaded')
+      const connection = (navigator as Navigator & { connection?: { effectiveType?: string; saveData?: boolean } }).connection
+      const failures = await runUploadQueue(pending, async ({ index, photo }) => {
         setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploading', progress: 0, uploadedBytes: 0 } : item))
-        await uploadPhotoToStorage({
-          file: photo.file,
-          phone: normalizedPhone,
-          requestId: `${submissionIdRef.current}-${index}`,
-          onProgress: ({ loaded, total }) => setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0, uploadedBytes: total > 0 ? Math.min(item.file.size, Math.round((loaded / total) * item.file.size)) : 0 } : item)),
-        })
-        setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
-      }
+        try {
+          await uploadPhotoToStorage({
+            file: photo.file,
+            phone: normalizedPhone,
+            requestId: `${submissionIdRef.current}-${index}`,
+            onProgress: ({ loaded, total }) => setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0, uploadedBytes: total > 0 ? Math.min(item.file.size, Math.round((loaded / total) * item.file.size)) : 0 } : item)),
+          })
+          setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
+        } catch (reason) {
+          setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'failed' } : item))
+          throw reason
+        }
+      }, recommendedUploadConcurrency(connection))
+      if (failures.length) throw failures[0]!.reason
       setMessage({ kind: 'success', text: successMessage })
       submissionIdRef.current = crypto.randomUUID()
     } catch (reason) {
