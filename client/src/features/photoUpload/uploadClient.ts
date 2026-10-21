@@ -1,5 +1,5 @@
 import { normalizeVietnamesePhone, supportedImageMime } from './validation'
-import type { Upload as TusUpload } from 'tus-js-client'
+import type { DetailedError, Upload as TusUpload } from 'tus-js-client'
 
 export interface UploadProgress { loaded: number; total: number }
 
@@ -26,6 +26,7 @@ let uploadSessionRequest: Promise<string> | null = null
 let uploadSessionValue: string | null = null
 export const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024
 export const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024
+export const MAX_UPLOAD_CONCURRENCY = 1
 
 export interface UploadTiming {
   finalizationMs: number
@@ -35,6 +36,64 @@ export interface UploadTiming {
   transferMs: number
   transport: 'existing' | 'standard' | 'tus'
   verificationMs: number
+}
+
+export type UploadFailureStage = 'hash' | 'init' | 'standard-transfer' | 'tus-create' | 'tus-resume' | 'tus-transfer' | 'verification'
+
+interface UploadFailureDiagnostic {
+  code: string
+  correlationId: string
+  durationMs: number
+  retryCount: number
+  stage: UploadFailureStage
+  status: number
+  transport: 'api' | 'standard' | 'tus'
+}
+
+class UploadStageError extends Error {
+  readonly diagnostic: UploadFailureDiagnostic
+  constructor(message: string, diagnostic: UploadFailureDiagnostic, options?: ErrorOptions) {
+    super(message, options)
+    this.diagnostic = diagnostic
+  }
+}
+
+function uploadErrorMessage(status: number) {
+  if (status === 401 || status === 403) return 'Phiên gửi ảnh đã hết hạn hoặc không còn hợp lệ. Vui lòng thử lại ảnh này.'
+  if (status === 404) return 'Phiên gửi ảnh cũ không còn tồn tại. Vui lòng thử lại ảnh này.'
+  if (status === 409) return 'Ảnh đang có một phiên gửi khác. Vui lòng thử lại ảnh này.'
+  if (status === 413) return 'Ảnh vượt quá giới hạn dung lượng cho phép.'
+  if (status === 429) return 'Hệ thống đang nhận quá nhiều ảnh. Vui lòng chờ một lát rồi thử lại ảnh này.'
+  if (status >= 500) return 'Kho ảnh đang tạm thời gián đoạn. Vui lòng thử lại ảnh này.'
+  return 'Không thể gửi ảnh này đến kho lưu trữ. Vui lòng thử lại.'
+}
+
+export function classifyTusFailure(reason: unknown, input: Omit<UploadFailureDiagnostic, 'code' | 'stage' | 'status'>) {
+  const detailed = reason as Partial<DetailedError> | undefined
+  const status = detailed?.originalResponse?.getStatus?.() ?? 0
+  const method = detailed?.originalRequest?.getMethod?.()
+  const stage: UploadFailureStage = method === 'POST' ? 'tus-create' : method === 'HEAD' ? 'tus-resume' : 'tus-transfer'
+  const code = status ? `STORAGE_TUS_${stage.replace('tus-', '').toUpperCase()}_${status}` : 'STORAGE_TUS_NETWORK'
+  return new UploadStageError(uploadErrorMessage(status), { ...input, code, stage, status }, { cause: reason })
+}
+
+export function isFreshTusUpload(candidate: { creationTime: string; uploadUrl: string | null }, endpoint: string, now = Date.now()) {
+  if (!candidate.uploadUrl) return false
+  try {
+    const createdAt = Date.parse(candidate.creationTime)
+    return Number.isFinite(createdAt) && now - createdAt >= 0 && now - createdAt < 23 * 60 * 60_000 && new URL(candidate.uploadUrl).origin === new URL(endpoint).origin
+  } catch { return false }
+}
+
+async function reportUploadFailure(diagnostic: UploadFailureDiagnostic) {
+  try {
+    const token = await uploadSession()
+    await fetchWithTimeout('/api/photo-uploads/diagnostics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Upload-Session': token },
+      body: JSON.stringify(diagnostic),
+    }, 'diagnostic timeout')
+  } catch { /* diagnostics must never block a customer upload or retry */ }
 }
 
 function storedUploadSession() {
@@ -73,6 +132,12 @@ function bytesToBase64(bytes: Uint8Array) {
   return btoa(binary)
 }
 
+function uploadCorrelationId() {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = crypto.getRandomValues(new Uint8Array(16))
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
 async function jsonOrError(response: Response) {
   const body = await response.json().catch(() => ({})) as { error?: string }
   if (!response.ok) throw new Error(body.error ?? 'Không thể chuẩn bị tải ảnh lên.')
@@ -92,7 +157,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, mes
   }
 }
 
-async function uploadApi(path: string, body: string, timeoutMessage: string) {
+async function uploadApi(path: string, body: string, timeoutMessage: string, refreshOnUnauthorized = true) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await uploadSession(attempt > 0)
     const response = await fetchWithTimeout(path, {
@@ -100,9 +165,25 @@ async function uploadApi(path: string, body: string, timeoutMessage: string) {
       headers: { 'Content-Type': 'application/json', 'X-Upload-Session': token },
       body,
     }, timeoutMessage)
-    if (response.status !== 401 || attempt > 0) return response
+    if (response.status !== 401 || attempt > 0 || !refreshOnUnauthorized) return response
   }
   throw new Error('Không thể khởi tạo lại phiên gửi ảnh.')
+}
+
+async function uploadApiResult(response: Response, stage: 'init' | 'verification', correlationId: string, startedAt: number) {
+  if (response.ok) return jsonOrError(response)
+  const body = await response.json().catch(() => ({})) as { error?: string }
+  const diagnostic: UploadFailureDiagnostic = {
+    code: `UPLOAD_${stage.toUpperCase()}_${response.status || 'NETWORK'}`,
+    correlationId,
+    durationMs: Math.round(performance.now() - startedAt),
+    retryCount: 0,
+    stage,
+    status: response.status,
+    transport: 'api',
+  }
+  await reportUploadFailure(diagnostic)
+  throw new UploadStageError(body.error ?? (stage === 'init' ? 'Không thể chuẩn bị tải ảnh lên.' : 'Không thể xác minh ảnh đã gửi.'), diagnostic)
 }
 
 export async function sha256Blob(blob: Blob) {
@@ -110,19 +191,21 @@ export async function sha256Blob(blob: Blob) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void) {
+function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string) {
   return new Promise<string>((resolve, reject) => {
+    const startedAt = performance.now()
     const request = new XMLHttpRequest()
     request.open('PUT', uploadUrl)
     request.timeout = UPLOAD_TIMEOUT_MS
     request.setRequestHeader('x-upsert', 'false')
     request.upload.onprogress = (event) => onProgress({ loaded: event.loaded, total: event.lengthComputable ? event.total : file.size })
-    request.onerror = () => reject(new Error('Kết nối tải ảnh bị gián đoạn. Vui lòng thử lại.'))
+    const fail = (status: number, code: string, message = uploadErrorMessage(status)) => reject(new UploadStageError(message, { code, correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: 0, stage: 'standard-transfer', status, transport: 'standard' }))
+    request.onerror = () => fail(0, 'STORAGE_STANDARD_NETWORK')
     request.onabort = () => reject(new Error('Đã hủy gửi ảnh.'))
-    request.ontimeout = () => reject(new Error('Gửi ảnh quá thời gian chờ. Vui lòng kiểm tra mạng và thử lại.'))
+    request.ontimeout = () => fail(0, 'STORAGE_STANDARD_TIMEOUT', 'Gửi ảnh quá thời gian chờ. Vui lòng thử lại ảnh này.')
     request.onload = () => {
       if (request.status >= 200 && request.status < 300) resolve('ok')
-      else reject(new Error('Supabase Storage chưa nhận được ảnh. Vui lòng thử lại.'))
+      else fail(request.status, `STORAGE_STANDARD_HTTP_${request.status}`)
     }
     const body = new FormData()
     body.append('cacheControl', '3600')
@@ -131,12 +214,14 @@ function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress
   })
 }
 
-async function uploadResumableFile(input: { contentType: string; endpoint: string; file: File; objectPath: string; onProgress: (progress: UploadProgress) => void; token: string }) {
+async function uploadResumableFile(input: { contentType: string; correlationId: string; endpoint: string; file: File; objectPath: string; onProgress: (progress: UploadProgress) => void; token: string }) {
   const { Upload, isSupported } = await import('tus-js-client')
   if (!isSupported) throw new Error('Trình duyệt này chưa hỗ trợ gửi ảnh có thể tiếp tục. Vui lòng dùng Safari hoặc Chrome mới nhất.')
   await new Promise<void>((resolve, reject) => {
     let settled = false
     let inactivityTimer = 0
+    let requestCount = 0
+    const startedAt = performance.now()
     const finish = (callback: () => void) => {
       if (settled) return
       settled = true
@@ -157,38 +242,30 @@ async function uploadResumableFile(input: { contentType: string; endpoint: strin
       metadata: { bucketName: 'customer-photo-uploads', objectName: input.objectPath, contentType: input.contentType, cacheControl: '3600' },
       uploadDataDuringCreation: true,
       removeFingerprintOnSuccess: true,
-      onError: (reason) => finish(() => reject(new Error('Không thể tiếp tục gửi ảnh. Vui lòng thử lại trên kết nối ổn định.', { cause: reason }))),
+      onError: (reason) => finish(() => reject(classifyTusFailure(reason, { correlationId: input.correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: Math.max(0, requestCount - 1), transport: 'tus' }))),
+      onBeforeRequest: () => { requestCount += 1 },
       onProgress: (loaded, total) => { refreshInactivityTimer(upload); input.onProgress({ loaded, total }) },
       onSuccess: () => finish(resolve),
     })
     refreshInactivityTimer(upload)
     void upload.findPreviousUploads().then((previous) => {
-      if (previous[0]) upload.resumeFromPreviousUpload(previous[0])
+      const resumable = previous.find((candidate) => isFreshTusUpload(candidate, input.endpoint))
+      if (resumable) upload.resumeFromPreviousUpload(resumable)
       upload.start()
-    }).catch((reason) => finish(() => reject(reason)))
+    }).catch((reason) => finish(() => reject(classifyTusFailure(reason, { correlationId: input.correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: Math.max(0, requestCount - 1), transport: 'tus' }))))
   })
 }
 
-export function recommendedUploadConcurrency(connection?: { effectiveType?: string; saveData?: boolean }) {
-  return connection?.saveData || connection?.effectiveType === 'slow-2g' || connection?.effectiveType === '2g' ? 1 : 2
-}
-
-export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, index: number) => Promise<void>, concurrency: number) {
-  let nextIndex = 0
-  const failures: Array<{ index: number; reason: unknown }> = []
-  const run = async () => {
-    while (true) {
-      const index = nextIndex++
-      if (index >= items.length) return
-      try { await worker(items[index]!, index) }
-      catch (reason) { failures.push({ index, reason }) }
-    }
+export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, index: number) => Promise<void>) {
+  for (let index = 0; index < items.length; index += 1) {
+    try { await worker(items[index]!, index) }
+    catch (reason) { return [{ index, reason }] }
   }
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, run))
-  return failures.sort((left, right) => left.index - right.index)
+  return []
 }
 
 export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
+  const correlationId = uploadCorrelationId()
   const totalStartedAt = performance.now()
   const mimeType = supportedImageMime(input.file)
   if (!mimeType) throw new Error('Chỉ hỗ trợ ảnh PNG, JPG và JPEG.')
@@ -201,7 +278,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   const initializationStartedAt = performance.now()
   const metadata = JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId })
   const init = await uploadApi('/api/photo-uploads/init', metadata, 'Chuẩn bị gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
-  const prepared = await jsonOrError(init) as InitResponse
+  let prepared = await uploadApiResult(init, 'init', correlationId, initializationStartedAt) as InitResponse
   if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
   const initializationMs = performance.now() - initializationStartedAt
   let transport: UploadTiming['transport'] = 'existing'
@@ -211,16 +288,41 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
     if (input.file.size > RESUMABLE_UPLOAD_THRESHOLD_BYTES) {
       if (!prepared.uploadToken || !prepared.resumableEndpoint) throw new Error('Không nhận được phiên gửi ảnh có thể tiếp tục. Vui lòng thử lại.')
       transport = 'tus'
-      await uploadResumableFile({ contentType: mimeType, endpoint: prepared.resumableEndpoint, file: input.file, objectPath: prepared.objectPath, onProgress: input.onProgress, token: prepared.uploadToken })
+      try {
+        await uploadResumableFile({ contentType: mimeType, correlationId, endpoint: prepared.resumableEndpoint, file: input.file, objectPath: prepared.objectPath, onProgress: input.onProgress, token: prepared.uploadToken })
+      } catch (reason) {
+        if (reason instanceof UploadStageError) await reportUploadFailure(reason.diagnostic)
+        // Files are capped at 25 MB. The signed standard upload is the proven
+        // pre-TUS path and remains scoped to this exact, non-overwritable object.
+        transport = 'standard'
+        input.onProgress({ loaded: 0, total: input.file.size })
+        try { await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
+        catch (fallbackReason) {
+          if (fallbackReason instanceof UploadStageError) await reportUploadFailure(fallbackReason.diagnostic)
+          throw fallbackReason
+        }
+      }
     } else {
       transport = 'standard'
-      await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress)
+      try { await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
+      catch (reason) {
+        if (reason instanceof UploadStageError) await reportUploadFailure(reason.diagnostic)
+        throw reason
+      }
     }
   }
   const transferMs = performance.now() - transferStartedAt
   const verificationStartedAt = performance.now()
-  const completion = await uploadApi('/api/photo-uploads/complete', JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, completionToken: prepared.completionToken }), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.')
-  await jsonOrError(completion)
+  const completionBody = () => JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, completionToken: prepared.completionToken })
+  let completion = await uploadApi('/api/photo-uploads/complete', completionBody(), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.', false)
+  if (completion.status === 401) {
+    clearUploadSession()
+    const refreshedInit = await uploadApi('/api/photo-uploads/init', metadata, 'Khởi tạo lại phiên gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
+    prepared = await uploadApiResult(refreshedInit, 'init', correlationId, verificationStartedAt) as InitResponse
+    if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
+    completion = await uploadApi('/api/photo-uploads/complete', completionBody(), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.', false)
+  }
+  await uploadApiResult(completion, 'verification', correlationId, verificationStartedAt)
   const verificationMs = performance.now() - verificationStartedAt
   input.onProgress({ loaded: input.file.size, total: input.file.size })
   const timing: UploadTiming = { finalizationMs: 0, hashMs: Math.round(hashMs), initializationMs: Math.round(initializationMs), totalMs: Math.round(performance.now() - totalStartedAt), transferMs: Math.round(transferMs), transport, verificationMs: Math.round(verificationMs) }
