@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PrintOrderItem, PrintOrderStatus, PrintQueueOrder } from '../../orders/repositories/PrintOrderRepository'
 import { createZip } from '../../orders/services/createZip'
 import { downloadBlob, downloadUrl } from '../../orders/services/downloadBlob'
@@ -10,7 +10,16 @@ const dateTime = (value: string) => new Intl.DateTimeFormat(undefined, { dateSty
 export function AdminPrintQueuePage() {
   const [orders, setOrders] = useState<PrintQueueOrder[]>([]); const [selected, setSelected] = useState<PrintQueueOrder | null>(null)
   const [items, setItems] = useState<PrintOrderItem[]>([]); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null)
-  const load = useCallback(async () => { try { setOrders(await printOrderRepository.listQueue()) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to load the Print Queue.') } }, [])
+  const loadSequence = useRef(0)
+  const load = useCallback(async () => {
+    const sequence = ++loadSequence.current
+    try {
+      const next = await printOrderRepository.listQueue()
+      if (sequence === loadSequence.current) { setOrders(next); setError(null) }
+    } catch (reason) {
+      if (sequence === loadSequence.current) setError(reason instanceof Error ? reason.message : 'Unable to load the Print Queue.')
+    }
+  }, [])
   useEffect(() => { const initial = window.setTimeout(() => void load(), 0); const timer = window.setInterval(() => void load(), 5_000); return () => { window.clearTimeout(initial); window.clearInterval(timer) } }, [load])
   const open = async (order: PrintQueueOrder) => { setSelected(order); setBusy(true); setError(null); try { setItems(await printOrderRepository.listItems(order.id)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to open this order.') } finally { setBusy(false) } }
   const updateStatus = async (status: PrintOrderStatus) => { if (!selected) return; setBusy(true); try { await printOrderRepository.updateStatus(selected.id, status); const next = { ...selected, status }; setSelected(next); setOrders((current) => current.map((order) => order.id === next.id ? next : order)) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to update status.') } finally { setBusy(false) } }

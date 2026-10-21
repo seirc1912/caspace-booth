@@ -11,6 +11,7 @@ import { calculateOverallUploadProgress, MAX_UPLOAD_CONCURRENCY, RESUMABLE_CHUNK
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
+import { newestPrintOrdersFirst } from '../client/src/features/orders/repositories/PrintOrderRepository.ts'
 import { updateCrc32 } from '../client/api/staff/photos/zip.ts'
 import { parseStaffLoginCredentials } from '../client/api/staff/login.ts'
 
@@ -393,6 +394,22 @@ test('staff dashboard automatically loads folders and keeps folder navigation co
   assert.match(page, /listStaffPhotoFolders\(search\)/)
   assert.match(page, /Tải thêm thư mục/)
   assert.match(page, /← Quay lại danh sách/)
+})
+
+test('print queue sorts newest submitted orders first regardless of RPC response order', () => {
+  const order = (id: string, submittedAt: string, createdAt = submittedAt) => ({ id, phoneNumber: '0901234567', roomId: 'room', roomName: 'Room', totalImages: 1, status: 'Pending' as const, submittedAt, createdAt, updatedAt: submittedAt })
+  const sorted = newestPrintOrdersFirst([
+    order('older', '2026-10-21T08:00:00Z'),
+    order('newest', '2026-10-21T10:00:00Z'),
+    order('middle', '2026-10-21T09:00:00Z'),
+  ])
+  assert.deepEqual(sorted.map(({ id }) => id), ['newest', 'middle', 'older'])
+})
+
+test('print queue ignores stale overlapping refresh responses', () => {
+  const page = readFileSync(new URL('../client/src/features/admin/pages/AdminPrintQueuePage.tsx', import.meta.url), 'utf8')
+  assert.match(page, /const sequence = \+\+loadSequence\.current/)
+  assert.match(page, /sequence === loadSequence\.current/)
 })
 
 test('streaming ZIP CRC32 matches the standard reference vector', () => {

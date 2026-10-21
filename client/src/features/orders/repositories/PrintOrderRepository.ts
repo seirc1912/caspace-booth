@@ -23,6 +23,11 @@ export interface PrintQueueOrder {
   updatedAt: string
 }
 
+export const newestPrintOrdersFirst = (orders: PrintQueueOrder[]) => [...orders].sort((left, right) => {
+  const submitted = Date.parse(right.submittedAt) - Date.parse(left.submittedAt)
+  return submitted || Date.parse(right.createdAt) - Date.parse(left.createdAt) || right.id.localeCompare(left.id)
+})
+
 export interface PrintOrderRepository {
   createDraft(phoneNumber: string, roomId: string): Promise<PrintOrderDraft>
   addItem(draft: PrintOrderDraft, phoneNumber: string, templateId: string, image: Blob, displayOrder: number, onTiming?: (timing: { uploadMs: number; itemRpcMs: number }) => void): Promise<PrintOrderItem>

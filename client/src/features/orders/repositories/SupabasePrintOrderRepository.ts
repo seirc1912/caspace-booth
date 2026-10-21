@@ -1,5 +1,5 @@
 import { getAdminToken, supabase } from '../../../services/catalog/SupabaseCatalogService'
-import type { PrintOrderDraft, PrintOrderItem, PrintOrderRepository, PrintOrderStatus, PrintQueueOrder } from './PrintOrderRepository'
+import { newestPrintOrdersFirst, type PrintOrderDraft, type PrintOrderItem, type PrintOrderRepository, type PrintOrderStatus, type PrintQueueOrder } from './PrintOrderRepository'
 
 const bucket = 'print-orders'
 const unwrap = <T>(data: T | null, error: { message: string } | null): T => {
@@ -108,7 +108,7 @@ export class SupabasePrintOrderRepository implements PrintOrderRepository {
 
   async listQueue() {
     const { data, error } = await supabase.rpc('admin_print_orders', { p_token: adminToken() })
-    return unwrap(data as OrderRow[] | null, error).map(toOrder)
+    return newestPrintOrdersFirst(unwrap(data as OrderRow[] | null, error).map(toOrder))
   }
 
   async listItems(orderId: string) {
