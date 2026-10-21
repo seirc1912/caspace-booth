@@ -7,7 +7,7 @@ import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
 import { CUSTOMER_UPLOAD_SESSION_BYTES, CUSTOMER_UPLOAD_SHARED_IP_BYTES, CUSTOMER_UPLOAD_WINDOW_MS, enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { createUploadCompletionToken, createUploadSessionToken, verifyUploadCompletionToken, verifyUploadSessionToken } from '../client/api/_lib/uploadSession.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
-import { calculateOverallUploadProgress, MAX_UPLOAD_CONCURRENCY, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
+import { calculateOverallUploadProgress, classifyTusFailure, isFreshTusUpload, MAX_UPLOAD_CONCURRENCY, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
@@ -307,12 +307,49 @@ test('upload transport is always single-file and uses Supabase-required TUS sizi
   assert.equal(RESUMABLE_CHUNK_BYTES, 6 * 1024 * 1024)
 })
 
-test('TUS uploads retain bounded retries and resume the previous upload fingerprint', () => {
+test('TUS uploads retain bounded retries and only resume a fresh same-origin upload', () => {
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
   assert.match(source, /retryDelays:\s*\[0, 1_000, 3_000, 5_000, 10_000\]/)
   assert.match(source, /findPreviousUploads\(\)/)
-  assert.match(source, /resumeFromPreviousUpload\(previous\[0\]\)/)
+  assert.match(source, /resumeFromPreviousUpload\(resumable\)/)
   assert.match(source, /removeFingerprintOnSuccess:\s*true/)
+  const now = Date.parse('2026-10-21T10:00:00Z')
+  const endpoint = 'https://project.storage.supabase.co/storage/v1/upload/resumable'
+  assert.equal(isFreshTusUpload({ creationTime: '2026-10-21T09:00:00Z', uploadUrl: `${endpoint}/fresh` }, endpoint, now), true)
+  assert.equal(isFreshTusUpload({ creationTime: '2026-10-20T09:00:00Z', uploadUrl: `${endpoint}/expired` }, endpoint, now), false)
+  assert.equal(isFreshTusUpload({ creationTime: '2026-10-21T09:00:00Z', uploadUrl: 'https://attacker.example/resume' }, endpoint, now), false)
+})
+
+test('TUS HTTP failures preserve safe stage, status, code, correlation, retry, and duration', () => {
+  const error = classifyTusFailure({
+    originalRequest: { getMethod: () => 'PATCH' },
+    originalResponse: { getStatus: () => 409 },
+  }, { correlationId: '12345678-1234-1234-1234-123456789abc', durationMs: 4321, retryCount: 3, transport: 'tus' })
+  assert.match(error.message, /phiên gửi khác/)
+  assert.deepEqual(error.diagnostic, {
+    code: 'STORAGE_TUS_TRANSFER_409',
+    correlationId: '12345678-1234-1234-1234-123456789abc',
+    durationMs: 4321,
+    retryCount: 3,
+    stage: 'tus-transfer',
+    status: 409,
+    transport: 'tus',
+  })
+})
+
+test('TUS failure falls back to the exact-object standard signed upload without weakening validation', () => {
+  const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
+  assert.match(source, /await uploadResumableFile/)
+  assert.match(source, /await uploadOriginalFile\(prepared\.uploadUrl, input\.file/)
+  assert.match(source, /request\.setRequestHeader\('x-upsert', 'false'\)/)
+  assert.match(source, /await reportUploadFailure\(reason\.diagnostic\)/)
+})
+
+test('failure telemetry is session-authenticated and logs only allow-listed privacy-safe fields', () => {
+  const endpoint = readFileSync(new URL('../client/api/photo-uploads/diagnostics.ts', import.meta.url), 'utf8')
+  assert.match(endpoint, /verifyUploadSessionToken/)
+  assert.match(endpoint, /console\.warn\('\[photo-upload:failure\]', diagnostic\)/)
+  assert.doesNotMatch(endpoint, /body\.(phone|filename|objectPath|token)/)
 })
 
 test('an expired upload session is refreshed before completion without re-uploading file bytes', () => {
