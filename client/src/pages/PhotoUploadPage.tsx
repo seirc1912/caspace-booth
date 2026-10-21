@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
-import { calculateOverallUploadProgress, recommendedUploadConcurrency, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
+import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
@@ -67,7 +67,6 @@ export function PhotoUploadPage() {
     const normalizedPhone = normalizeVietnamesePhone(phone)
     try {
       const pending = photos.map((photo, index) => ({ index, photo })).filter(({ photo }) => photo.state !== 'uploaded')
-      const connection = (navigator as Navigator & { connection?: { effectiveType?: string; saveData?: boolean } }).connection
       const failures = await runUploadQueue(pending, async ({ index, photo }) => {
         setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploading', progress: 0, uploadedBytes: 0 } : item))
         try {
@@ -82,7 +81,7 @@ export function PhotoUploadPage() {
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'failed' } : item))
           throw reason
         }
-      }, recommendedUploadConcurrency(connection))
+      })
       if (failures.length) throw failures[0]!.reason
       setMessage({ kind: 'success', text: successMessage })
       submissionIdRef.current = crypto.randomUUID()

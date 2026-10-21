@@ -26,6 +26,7 @@ let uploadSessionRequest: Promise<string> | null = null
 let uploadSessionValue: string | null = null
 export const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024
 export const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024
+export const MAX_UPLOAD_CONCURRENCY = 1
 
 export interface UploadTiming {
   finalizationMs: number
@@ -92,7 +93,7 @@ async function fetchWithTimeout(input: RequestInfo | URL, init: RequestInit, mes
   }
 }
 
-async function uploadApi(path: string, body: string, timeoutMessage: string) {
+async function uploadApi(path: string, body: string, timeoutMessage: string, refreshOnUnauthorized = true) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const token = await uploadSession(attempt > 0)
     const response = await fetchWithTimeout(path, {
@@ -100,7 +101,7 @@ async function uploadApi(path: string, body: string, timeoutMessage: string) {
       headers: { 'Content-Type': 'application/json', 'X-Upload-Session': token },
       body,
     }, timeoutMessage)
-    if (response.status !== 401 || attempt > 0) return response
+    if (response.status !== 401 || attempt > 0 || !refreshOnUnauthorized) return response
   }
   throw new Error('Không thể khởi tạo lại phiên gửi ảnh.')
 }
@@ -169,23 +170,12 @@ async function uploadResumableFile(input: { contentType: string; endpoint: strin
   })
 }
 
-export function recommendedUploadConcurrency(connection?: { effectiveType?: string; saveData?: boolean }) {
-  return connection?.saveData || connection?.effectiveType === 'slow-2g' || connection?.effectiveType === '2g' ? 1 : 2
-}
-
-export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, index: number) => Promise<void>, concurrency: number) {
-  let nextIndex = 0
-  const failures: Array<{ index: number; reason: unknown }> = []
-  const run = async () => {
-    while (true) {
-      const index = nextIndex++
-      if (index >= items.length) return
-      try { await worker(items[index]!, index) }
-      catch (reason) { failures.push({ index, reason }) }
-    }
+export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, index: number) => Promise<void>) {
+  for (let index = 0; index < items.length; index += 1) {
+    try { await worker(items[index]!, index) }
+    catch (reason) { return [{ index, reason }] }
   }
-  await Promise.all(Array.from({ length: Math.min(Math.max(1, concurrency), items.length) }, run))
-  return failures.sort((left, right) => left.index - right.index)
+  return []
 }
 
 export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
@@ -201,7 +191,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   const initializationStartedAt = performance.now()
   const metadata = JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId })
   const init = await uploadApi('/api/photo-uploads/init', metadata, 'Chuẩn bị gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
-  const prepared = await jsonOrError(init) as InitResponse
+  let prepared = await jsonOrError(init) as InitResponse
   if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
   const initializationMs = performance.now() - initializationStartedAt
   let transport: UploadTiming['transport'] = 'existing'
@@ -219,7 +209,15 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   }
   const transferMs = performance.now() - transferStartedAt
   const verificationStartedAt = performance.now()
-  const completion = await uploadApi('/api/photo-uploads/complete', JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, completionToken: prepared.completionToken }), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.')
+  const completionBody = () => JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, completionToken: prepared.completionToken })
+  let completion = await uploadApi('/api/photo-uploads/complete', completionBody(), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.', false)
+  if (completion.status === 401) {
+    clearUploadSession()
+    const refreshedInit = await uploadApi('/api/photo-uploads/init', metadata, 'Khởi tạo lại phiên gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
+    prepared = await jsonOrError(refreshedInit) as InitResponse
+    if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
+    completion = await uploadApi('/api/photo-uploads/complete', completionBody(), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.', false)
+  }
   await jsonOrError(completion)
   const verificationMs = performance.now() - verificationStartedAt
   input.onProgress({ loaded: input.file.size, total: input.file.size })

@@ -18,7 +18,7 @@ The existing customer page remains `/upload-anh`. Vercel creates a signed upload
 
 - Files up to 6 MB keep the existing one-request signed upload path.
 - Files over 6 MB use Supabase TUS resumable upload with 6 MB chunks, bounded retries, and a five-minute inactivity timeout. The signed token still targets one exact object and cannot overwrite it.
-- Each customer uploads at most two files concurrently. Save-Data, 2G, and slow-2G connections remain sequential.
+- Each customer uploads exactly one file at a time. The next file cannot start until transfer and server verification of the current file succeed. A failure stops the queue at that file; verified photos stay complete and retry resumes from the failed file before later files.
 - The browser records anonymous stage durations for hashing, initialization, transfer, and verification. Server logs record only duration, coarse size band, and outcome; they never include phone numbers, filenames, object paths, image bytes, or credentials.
 - Completion still streams the private object and validates its exact size, MIME signature, and SHA-256. Vercel functions are configured for Seoul (`icn1`) to keep this mandatory read close to the Supabase Seoul project.
 - There is no database finalization step in this feature. Client timing reports `finalizationMs: 0` explicitly rather than implying database work occurred.

@@ -7,7 +7,7 @@ import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
 import { CUSTOMER_UPLOAD_SESSION_BYTES, CUSTOMER_UPLOAD_SHARED_IP_BYTES, CUSTOMER_UPLOAD_WINDOW_MS, enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { createUploadCompletionToken, createUploadSessionToken, verifyUploadCompletionToken, verifyUploadSessionToken } from '../client/api/_lib/uploadSession.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
-import { calculateOverallUploadProgress, recommendedUploadConcurrency, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
+import { calculateOverallUploadProgress, MAX_UPLOAD_CONCURRENCY, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
@@ -269,28 +269,39 @@ test('clients without a valid signed session keep the conservative fallback quot
   resetRateLimitsForTests()
 })
 
-test('upload queue caps concurrency and keeps processing after one file fails', async () => {
+test('nine photos upload sequentially in exact order with no overlap', async () => {
   let active = 0
   let peak = 0
   const completed: number[] = []
-  const failures = await runUploadQueue([0, 1, 2, 3, 4], async (value) => {
+  const failures = await runUploadQueue([0, 1, 2, 3, 4, 5, 6, 7, 8], async (value) => {
     active += 1
     peak = Math.max(peak, active)
     await new Promise((resolve) => setTimeout(resolve, 2))
     active -= 1
-    if (value === 2) throw new Error('expected failure')
     completed.push(value)
-  }, 2)
-  assert.equal(peak, 2)
-  assert.deepEqual(failures.map(({ index }) => index), [2])
-  assert.deepEqual(completed.sort(), [0, 1, 3, 4])
+  })
+  assert.equal(MAX_UPLOAD_CONCURRENCY, 1)
+  assert.equal(peak, 1)
+  assert.deepEqual(failures, [])
+  assert.deepEqual(completed, [0, 1, 2, 3, 4, 5, 6, 7, 8])
 })
 
-test('upload transport keeps slow networks sequential and uses Supabase-required TUS sizing', () => {
-  assert.equal(recommendedUploadConcurrency({ saveData: true }), 1)
-  assert.equal(recommendedUploadConcurrency({ effectiveType: '2g' }), 1)
-  assert.equal(recommendedUploadConcurrency({ effectiveType: '4g' }), 2)
-  assert.equal(recommendedUploadConcurrency(), 2)
+test('a failed photo stops the queue and retry resumes from that photo without repeating successes', async () => {
+  const uploaded = new Set<number>()
+  const firstAttempt = await runUploadQueue([0, 1, 2, 3], async (value) => {
+    if (value === 2) throw new Error('expected failure')
+    uploaded.add(value)
+  })
+  assert.deepEqual([...uploaded], [0, 1])
+  assert.deepEqual(firstAttempt.map(({ index }) => index), [2])
+  const pending = [0, 1, 2, 3].filter((value) => !uploaded.has(value))
+  const retry = await runUploadQueue(pending, async (value) => { uploaded.add(value) })
+  assert.deepEqual(retry, [])
+  assert.deepEqual([...uploaded], [0, 1, 2, 3])
+})
+
+test('upload transport is always single-file and uses Supabase-required TUS sizing', () => {
+  assert.equal(MAX_UPLOAD_CONCURRENCY, 1)
   assert.equal(RESUMABLE_UPLOAD_THRESHOLD_BYTES, 6 * 1024 * 1024)
   assert.equal(RESUMABLE_CHUNK_BYTES, 6 * 1024 * 1024)
 })
@@ -301,6 +312,15 @@ test('TUS uploads retain bounded retries and resume the previous upload fingerpr
   assert.match(source, /findPreviousUploads\(\)/)
   assert.match(source, /resumeFromPreviousUpload\(previous\[0\]\)/)
   assert.match(source, /removeFingerprintOnSuccess:\s*true/)
+})
+
+test('an expired upload session is refreshed before completion without re-uploading file bytes', () => {
+  const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
+  assert.match(source, /if \(completion\.status === 401\)/)
+  assert.match(source, /clearUploadSession\(\)/)
+  assert.match(source, /const refreshedInit = await uploadApi\('\/api\/photo-uploads\/init'/)
+  const recoveryBlock = source.slice(source.indexOf('if (completion.status === 401)'), source.indexOf('await jsonOrError(completion)'))
+  assert.doesNotMatch(recoveryBlock, /uploadResumableFile|uploadOriginalFile/)
 })
 
 test('Vercel functions run near the Seoul Supabase project for verification', () => {
