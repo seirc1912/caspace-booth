@@ -137,7 +137,7 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
     if (currentSlot === null || !selectedSlot) return
     onTransform(currentSlot, createAutoFitZoomUpdate(selectedSlot.transform.zoom))
   }
-  return <PageShell className="pb-[calc(var(--mobile-editor-controls-height,7rem)+0.5rem)] md:pb-24">
+  return <PageShell className="overflow-x-hidden pb-[calc(var(--mobile-editor-controls-height,7rem)+0.5rem)] md:pb-24">
     <input accept="image/*" aria-label="Choose one photo" className="sr-only" onChange={choosePhoto} ref={photoInput} type="file" />
     <input accept="image/*" aria-label="Choose multiple photos" className="sr-only" multiple onChange={chooseFramePhotos} ref={framePhotoInput} type="file" />
     <input accept="image/*" aria-label="Choose photos for all frames" className="sr-only" multiple onChange={chooseAutoFillPhotos} ref={autoFillPhotoInput} type="file" />
