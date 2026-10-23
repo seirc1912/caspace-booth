@@ -24,8 +24,8 @@ export async function listStaffPhotos(phone: string, offset = 0) {
   return staffFetch(`/api/staff/photos?phone=${encodeURIComponent(phone)}&offset=${offset}`) as Promise<{ items: StaffPhoto[]; hasMore: boolean }>
 }
 
-export async function listStaffPhotoFolders(search = '', offset = 0) {
-  return staffFetch(`/api/staff/folders?search=${encodeURIComponent(search)}&offset=${offset}`) as Promise<{ items: StaffPhotoFolder[]; hasMore: boolean; nextOffset: number }>
+export async function listStaffPhotoFolders(search = '', offset = 0, limit = 24) {
+  return staffFetch(`/api/staff/folders?search=${encodeURIComponent(search)}&offset=${offset}&limit=${limit}`) as Promise<{ items: StaffPhotoFolder[]; hasMore: boolean; nextOffset: number }>
 }
 
 export async function downloadStaffPhoto(phone: string, path: string) {

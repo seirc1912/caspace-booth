@@ -14,6 +14,7 @@ import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCu
 import { newestPrintOrdersFirst } from '../client/src/features/orders/repositories/PrintOrderRepository.ts'
 import { updateCrc32 } from '../client/api/staff/photos/zip.ts'
 import { parseStaffLoginCredentials } from '../client/api/staff/login.ts'
+import { mergeStaffFolders, newestStaffFoldersFirst } from '../client/src/features/staffPhotos/folderOrdering.ts'
 
 const originalPng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, ...Array.from({ length: 4096 }, (_, index) => index % 251)])
 const pngPrefix = originalPng.subarray(0, 16).toString('base64')
@@ -426,9 +427,39 @@ test('staff folder listing reads metadata only and sorts loaded folders by lates
   assert.equal(calls[0]?.search, '09')
 })
 
+test('newest staff folder is first even when its phone sorts beyond the first historical page', async () => {
+  const phones = Array.from({ length: 130 }, (_, index) => `09${String(index).padStart(8, '0')}`)
+  const newestPhone = phones.at(-1)!
+  const client = { storage: { from() { return { async list(path: string, options: { limit: number; offset: number }) {
+    if (!path) return { data: phones.slice(options.offset, options.offset + options.limit).map((name) => ({ name })), error: null }
+    const created_at = path === newestPhone ? '2026-10-23T10:00:00Z' : '2026-01-01T00:00:00Z'
+    return { data: [{ id: path, name: 'photo.jpg', created_at }], error: null }
+  } } } } }
+  const result = await listCustomerFolders(client as never, '', 0, 24)
+  assert.equal(result.items[0]?.phone, newestPhone)
+  assert.equal(result.items.length, 24)
+  assert.equal(result.hasMore, true)
+  assert.equal(result.nextOffset, 24)
+})
+
+test('staff folder ordering is stable for identical timestamps and merges without duplicates', () => {
+  const timestamp = '2026-10-23T10:00:00Z'
+  const first = { phone: '0900000001', photoCount: 1, latestUploadAt: timestamp, countCapped: false }
+  const second = { phone: '0900000002', photoCount: 1, latestUploadAt: timestamp, countCapped: false }
+  assert.deepEqual(newestStaffFoldersFirst([second, first]).map(({ phone }) => phone), [first.phone, second.phone])
+  const updated = { ...first, photoCount: 2, latestUploadAt: '2026-10-23T11:00:00Z' }
+  const merged = mergeStaffFolders([first, second], [updated])
+  assert.deepEqual(merged.map(({ phone }) => phone), [first.phone, second.phone])
+  assert.equal(merged[0]?.photoCount, 2)
+})
+
 test('staff dashboard automatically loads folders and keeps folder navigation controls', () => {
   const page = readFileSync(new URL('../client/src/pages/StaffPhotosPage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /listStaffPhotoFolders\(search\)/)
+  assert.match(page, /listStaffPhotoFolders\(search, 0, folderLimit\)/)
+  assert.match(page, /setInterval\(refresh, folderPollMs\)/)
+  assert.match(page, /const folderPollMs = 15_000/)
+  assert.match(page, /visibilitychange/)
+  assert.match(page, /mergeStaffFolders/)
   assert.match(page, /Tải thêm thư mục/)
   assert.match(page, /← Quay lại danh sách/)
 })

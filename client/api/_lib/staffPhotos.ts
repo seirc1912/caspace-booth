@@ -48,16 +48,29 @@ async function summarizeCustomerFolder(client: SupabaseClient, phone: string) {
   return { phone, photoCount, latestUploadAt, countCapped: true }
 }
 
+async function listAllCustomerFolderNames(client: SupabaseClient, search: string) {
+  const phones: string[] = []
+  let offset = 0
+  const pageSize = 1_000
+  while (offset < 100_000) {
+    const result = await client.storage.from(customerPhotoBucket).list('', { limit: pageSize, offset, search: search || undefined, sortBy: { column: 'name', order: 'asc' } })
+    if (result.error) throw new UploadApiError(502, 'Không thể tải danh sách thư mục khách hàng.')
+    phones.push(...result.data.map((entry) => entry.name).filter((name) => phonePattern.test(name)))
+    offset += result.data.length
+    if (result.data.length < pageSize) return phones
+  }
+  throw new UploadApiError(503, 'Danh sách thư mục quá lớn để tải an toàn.')
+}
+
 export async function listCustomerFolders(client: SupabaseClient, search: string, offset = 0, limit = 24) {
-  const result = await client.storage.from(customerPhotoBucket).list('', { limit: limit + 1, offset, search: search || undefined, sortBy: { column: 'name', order: 'asc' } })
-  if (result.error) throw new UploadApiError(502, 'Không thể tải danh sách thư mục khách hàng.')
-  const candidates = result.data.slice(0, limit).filter((entry) => phonePattern.test(entry.name))
+  const candidates = await listAllCustomerFolderNames(client, search)
   const folders: Awaited<ReturnType<typeof summarizeCustomerFolder>>[] = []
-  for (let index = 0; index < candidates.length; index += 6) {
-    folders.push(...await Promise.all(candidates.slice(index, index + 6).map((entry) => summarizeCustomerFolder(client, entry.name))))
+  for (let index = 0; index < candidates.length; index += 12) {
+    folders.push(...await Promise.all(candidates.slice(index, index + 12).map((phone) => summarizeCustomerFolder(client, phone))))
   }
   folders.sort((left, right) => (Date.parse(right.latestUploadAt ?? '') || 0) - (Date.parse(left.latestUploadAt ?? '') || 0) || left.phone.localeCompare(right.phone))
-  return { items: folders, hasMore: result.data.length > limit, nextOffset: offset + Math.min(result.data.length, limit) }
+  const items = folders.slice(offset, offset + limit)
+  return { items, hasMore: offset + items.length < folders.length, nextOffset: offset + items.length }
 }
 
 export async function listCustomerPhotos(client: SupabaseClient, phone: string, offset = 0, limit = 40) {
