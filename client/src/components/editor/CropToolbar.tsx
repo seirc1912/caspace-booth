@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent } from 'react'
 import { maximumUserPhotoZoom, minimumUserPhotoZoom } from '../../features/photos/photoFit'
 import { adjustmentFromPointer, stepAdjustment } from '../../features/photos/manualAdjustments'
+import { PressHoldButton } from './PressHoldButton'
 
 interface CropToolbarProps {
   onCancel: () => void
@@ -49,16 +50,24 @@ function SliderRow({ ariaLabel, id, label, min, max, value, valueLabel, onChange
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     flush()
   }
-  const decrement = () => onChange(stepAdjustment(value, -step, min, max))
-  const increment = () => onChange(stepAdjustment(value, step, min, max))
+  const valueRef = useRef(value)
+  useEffect(() => { valueRef.current = value }, [value])
+  const adjust = (delta: number) => {
+    const current = valueRef.current
+    const next = stepAdjustment(current, delta, min, max)
+    if (next === current) return false
+    valueRef.current = next
+    onChangeRef.current(next)
+    return true
+  }
   useEffect(() => () => { if (frame.current !== null) { cancelAnimationFrame(frame.current); onChangeRef.current(pendingValue.current) } }, [])
   return <div className="flex min-h-11 min-w-0 flex-1 items-center gap-1">
     <label className="w-9 shrink-0 text-center text-[0.68rem] font-bold text-white" htmlFor={id}>{label}</label>
-    <button aria-label={`Decrease ${ariaLabel ?? label}`} className="grid size-11 shrink-0 place-items-center rounded-xl bg-white/10 text-xl font-black text-white transition active:scale-95 active:bg-white/20 disabled:opacity-30" disabled={value <= min} onClick={decrement} type="button">−</button>
+    <PressHoldButton ariaLabel={`Decrease ${ariaLabel ?? label}`} disabled={value <= min} onStep={() => adjust(-step)}>−</PressHoldButton>
     <div className="relative flex h-11 min-w-0 flex-1 touch-none select-none items-center" onPointerCancel={finishPointer} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); updateFromPointer(event.clientX) }} onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; event.preventDefault(); updateFromPointer(event.clientX) }} onPointerUp={(event) => { updateFromPointer(event.clientX); finishPointer(event) }} ref={track}>
       <input aria-label={ariaLabel ?? label} className="pointer-events-none h-11 min-w-0 w-full accent-sky-400" id={id} max={max} min={min} onChange={(event) => schedule(Number(event.currentTarget.value))} onInput={(event) => schedule(Number(event.currentTarget.value))} step={step} type="range" value={value} />
     </div>
-    <button aria-label={`Increase ${ariaLabel ?? label}`} className="grid size-11 shrink-0 place-items-center rounded-xl bg-white/10 text-xl font-black text-white transition active:scale-95 active:bg-white/20 disabled:opacity-30" disabled={value >= max} onClick={increment} type="button">+</button>
+    <PressHoldButton ariaLabel={`Increase ${ariaLabel ?? label}`} disabled={value >= max} onStep={() => adjust(step)}>+</PressHoldButton>
     <output className="w-10 shrink-0 text-right text-[0.68rem] font-bold tabular-nums text-white/85">{valueLabel}</output>
   </div>
 }
