@@ -99,3 +99,4 @@ Phụ thuộc giữa các PR (gỡ PR ở cột trái thì gỡ luôn cột ph�
 | #86 (chọn ảnh trước + ảnh xem trước nhỏ) | `dpl_7zwDMjacjQHQHpB6TW8mC4hrbhKs` | `aaa2350` | Preview Android: 2 ảnh 34 MB trong 17 s; smoke OK |
 | #87 (song song 2 ảnh, thay #78) | `dpl_7co4sdwJYbC93k6mPieZJcs9fg8X` | `805af55` | Preview Android: 4 ảnh 35 MB trong 13,7 s; smoke OK |
 | #88 (khung JPEG q0.95, thay #77) | `dpl_3YGMybXL6E4L3bykDnHtZXrKSfoP` | `c02091a` | owner duyệt merge trước khi in thử; quay lại PNG = revert `c02091a` hoặc Instant Rollback về `dpl_7co4sd…` |
+| #89 (rate limit riêng từng API, thay #79) | `dpl_CAzYyLvQq3Upv4xrVuv9Qs1eNsF3` | `00624dd` | chỉ API, trong bộ nhớ; smoke OK |
