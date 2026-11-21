@@ -49,9 +49,11 @@ function reserveBytes(key: string, reservationId: string, bytes: number, limitBy
   byteReservations.set(reservationKey, { bytes, time: now })
 }
 
-export function enforceRateLimit(request: ApiRequest, options = { limit: 30, windowMs: 10 * 60_000 }) {
+// `scope` keeps an independent counter (e.g. client timing telemetry must not
+// consume the budget shared by upload/staff endpoints). Omitted → legacy shared key.
+export function enforceRateLimit(request: ApiRequest, options: { limit: number; windowMs: number; scope?: string } = { limit: 30, windowMs: 10 * 60_000 }) {
   const now = Date.now()
-  recordAttempt(`ip:${requestKey(request)}`, options.limit, options.windowMs, now)
+  recordAttempt(options.scope ? `ip:${options.scope}:${requestKey(request)}` : `ip:${requestKey(request)}`, options.limit, options.windowMs, now)
   if (attempts.size > 2_000) {
     for (const [candidate, entries] of attempts) if (entries.every((time) => now - time >= options.windowMs)) attempts.delete(candidate)
   }
