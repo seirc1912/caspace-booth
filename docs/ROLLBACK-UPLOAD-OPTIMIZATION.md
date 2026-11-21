@@ -97,3 +97,5 @@ Phụ thuộc giữa các PR (gỡ PR ở cột trái thì gỡ luôn cột ph�
 | #84 (Android treo file lớn) | `dpl_F5QTSjmxMAnYCxD9DCquZqdr5thH` | `837631b` | đọc file vào bộ nhớ, TUS treo → gửi thường; Preview Android 16 MB OK |
 | #85 (đọc ảnh ngay khi chọn) | `dpl_4AmnT4TecidRtMmrAVUPrd2qn2FZ` | `28772b1` | Preview Android: 16 MB gửi trong 6,6 s; smoke OK |
 | #86 (chọn ảnh trước + ảnh xem trước nhỏ) | `dpl_7zwDMjacjQHQHpB6TW8mC4hrbhKs` | `aaa2350` | Preview Android: 2 ảnh 34 MB trong 17 s; smoke OK |
+| #87 (song song 2 ảnh, thay #78) | `dpl_7co4sdwJYbC93k6mPieZJcs9fg8X` | `805af55` | Preview Android: 4 ảnh 35 MB trong 13,7 s; smoke OK |
+| #88 (khung JPEG q0.95, thay #77) | `dpl_3YGMybXL6E4L3bykDnHtZXrKSfoP` | `c02091a` | owner duyệt merge trước khi in thử; quay lại PNG = revert `c02091a` hoặc Instant Rollback về `dpl_7co4sd…` |
