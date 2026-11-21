@@ -5,6 +5,7 @@ const byteAttempts = new Map<string, Array<{ bytes: number; time: number }>>()
 const byteReservations = new Map<string, { bytes: number; time: number }>()
 
 export const CUSTOMER_UPLOAD_WINDOW_MS = 10 * 60_000
+export const LONGEST_RATE_LIMIT_WINDOW_MS = 15 * 60_000
 export const CUSTOMER_UPLOAD_SESSION_BYTES = 1_000 * 1024 * 1024
 export const CUSTOMER_UPLOAD_SHARED_IP_BYTES = 5_000 * 1024 * 1024
 
@@ -49,13 +50,17 @@ function reserveBytes(key: string, reservationId: string, bytes: number, limitBy
   byteReservations.set(reservationKey, { bytes, time: now })
 }
 
-// `scope` keeps an independent counter (e.g. client timing telemetry must not
-// consume the budget shared by upload/staff endpoints). Omitted → legacy shared key.
-export function enforceRateLimit(request: ApiRequest, options: { limit: number; windowMs: number; scope?: string } = { limit: 30, windowMs: 10 * 60_000 }) {
+// Every endpoint counts in its own bucket (`scope`). Previously all endpoints
+// shared one `ip:<addr>` counter with different limits, so customers uploading
+// on the shop Wi-Fi could push staff/login (limit 5) into 429.
+export function enforceRateLimit(request: ApiRequest, options: { limit: number; windowMs: number; scope: string }) {
   const now = Date.now()
-  recordAttempt(options.scope ? `ip:${options.scope}:${requestKey(request)}` : `ip:${requestKey(request)}`, options.limit, options.windowMs, now)
+  recordAttempt(`ip:${options.scope}:${requestKey(request)}`, options.limit, options.windowMs, now)
   if (attempts.size > 2_000) {
-    for (const [candidate, entries] of attempts) if (entries.every((time) => now - time >= options.windowMs)) attempts.delete(candidate)
+    // Sweep with the longest window in use (staff-login: 15 min) so a 10-minute
+    // caller never drops another scope's still-active attempts.
+    const sweepWindowMs = Math.max(options.windowMs, LONGEST_RATE_LIMIT_WINDOW_MS)
+    for (const [candidate, entries] of attempts) if (entries.every((time) => now - time >= sweepWindowMs)) attempts.delete(candidate)
   }
 }
 
@@ -92,7 +97,8 @@ export function enforceCustomerUploadLimits(request: ApiRequest, bytes: number, 
   if (reservationId) reserveBytes(`shared-ip:${ip}`, `${sessionId}:${reservationId}`, bytes, options.ipBytes, options.windowMs, now)
   else recordBytes(`shared-ip:${ip}`, bytes, options.ipBytes, options.windowMs, now)
   if (attempts.size > 4_000) {
-    for (const [candidate, entries] of attempts) if (entries.every((time) => now - time >= options.windowMs)) attempts.delete(candidate)
+    const sweepWindowMs = Math.max(options.windowMs, LONGEST_RATE_LIMIT_WINDOW_MS)
+    for (const [candidate, entries] of attempts) if (entries.every((time) => now - time >= sweepWindowMs)) attempts.delete(candidate)
   }
   if (byteAttempts.size > 4_000) {
     for (const [candidate, entries] of byteAttempts) if (entries.every((entry) => now - entry.time >= options.windowMs)) byteAttempts.delete(candidate)

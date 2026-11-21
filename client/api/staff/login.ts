@@ -19,7 +19,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   if (request.method !== 'POST') { response.setHeader('Allow', 'POST'); response.status(405).json({ error: 'Phương thức không được hỗ trợ.' }); return }
   try {
     enforceSameOrigin(request)
-    enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000 })
+    enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000, scope: 'staff-login' })
     const { password } = parseStaffLoginCredentials(readJsonBody(request))
     const identity = loadStaffIdentityEnvironment()
     const environment = loadSupabaseStorageEnvironment()

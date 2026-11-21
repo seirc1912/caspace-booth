@@ -20,7 +20,7 @@ function centralHeader(name: Buffer, crc: number, size: number, offset: number) 
 export default async function handler(request: QueryRequest, response: StreamResponse) {
   if (request.method !== 'GET') { response.status(405).json({ error: 'Phương thức không được hỗ trợ.' }); return }
   try {
-    enforceSameOrigin(request); enforceRateLimit(request, { limit: 10, windowMs: 10 * 60_000 })
+    enforceSameOrigin(request); enforceRateLimit(request, { limit: 10, windowMs: 10 * 60_000, scope: 'staff-zip' })
     const { client, environment } = await requireStaff(request)
     const phone = requireCustomerPhone(request.query?.phone)
     const listed = await listCustomerPhotos(client, phone, 0, 1_000, { signUrls: false })

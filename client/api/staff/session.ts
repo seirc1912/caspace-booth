@@ -6,7 +6,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   setPrivateResponse(response)
   try {
     enforceSameOrigin(request)
-    enforceRateLimit(request)
+    enforceRateLimit(request, { limit: 30, windowMs: 10 * 60_000, scope: 'staff-session' })
     if (request.method === 'GET') {
       await requireStaff(request)
       response.status(200).json({ authenticated: true })
