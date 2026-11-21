@@ -3,6 +3,7 @@ import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
 import { newRunId, reportClientTiming, uploadBatchEvent, uploadFileEvent } from '../features/metrics/clientTiming'
 import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
+import { photoSource, preloadPhoto, releasePreload } from '../features/photoUpload/preload'
 import { queueThumbnailUpload } from '../features/photoUpload/thumbnail'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
@@ -10,6 +11,7 @@ interface SelectedPhoto {
   file: File
   id: string
   previewUrl: string
+  prepared: boolean // file bytes read into memory (slow on some Android phones)
   progress: number
   uploadedBytes: number
   state: 'ready' | 'uploading' | 'uploaded' | 'failed'
@@ -18,7 +20,7 @@ interface SelectedPhoto {
 const successMessage = 'Ảnh của bạn đã được gửi thành công đến Cá Space! Vui lòng cung cấp số điện thoại cho nhân viên để nhận ảnh in nhé.'
 
 function makePhoto(file: File): SelectedPhoto {
-  return { file, id: crypto.randomUUID(), previewUrl: URL.createObjectURL(file), progress: 0, uploadedBytes: 0, state: 'ready' }
+  return { file, id: crypto.randomUUID(), previewUrl: URL.createObjectURL(file), prepared: false, progress: 0, uploadedBytes: 0, state: 'ready' }
 }
 
 export function PhotoUploadPage() {
@@ -35,7 +37,8 @@ export function PhotoUploadPage() {
   const validPhone = isValidVietnamesePhone(phone)
 
   useEffect(() => { photosRef.current = photos }, [photos])
-  useEffect(() => () => { for (const photo of photosRef.current) URL.revokeObjectURL(photo.previewUrl) }, [])
+  useEffect(() => () => { for (const photo of photosRef.current) { URL.revokeObjectURL(photo.previewUrl); releasePreload(photo.file) } }, [])
+  const markPrepared = (file: File) => setPhotos((current) => current.map((item) => item.file === file && !item.prepared ? { ...item, prepared: true } : item))
   // A customer closing/leaving the page mid-upload is reported as an abandoned batch.
   useEffect(() => {
     const onPageHide = (event: PageTransitionEvent) => {
@@ -57,6 +60,8 @@ export function PhotoUploadPage() {
     const error = validateSelectedFiles(nextFiles)
     if (error) { setMessage({ kind: 'error', text: error }); return }
     setPhotos((current) => [...current, ...selectedFiles.map(makePhoto)])
+    // Start reading now (sequential, memory-bounded) so the wait overlaps with typing the phone number.
+    for (const file of selectedFiles) void preloadPhoto(file)?.then(() => markPrepared(file), () => undefined)
     submissionIdRef.current = crypto.randomUUID()
     attemptRef.current = 0
   }
@@ -64,7 +69,7 @@ export function PhotoUploadPage() {
   const removePhoto = (id: string) => {
     setPhotos((current) => {
       const removed = current.find((photo) => photo.id === id)
-      if (removed) URL.revokeObjectURL(removed.previewUrl)
+      if (removed) { URL.revokeObjectURL(removed.previewUrl); releasePreload(removed.file) }
       return current.filter((photo) => photo.id !== id)
     })
     submissionIdRef.current = crypto.randomUUID()
@@ -94,16 +99,21 @@ export function PhotoUploadPage() {
     try {
       const failures = await runUploadQueue(pending, async ({ index, photo }) => {
         setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploading', progress: 0, uploadedBytes: 0 } : item))
+        const source = photoSource(photo.file)
         try {
           await uploadPhotoToStorage({
             file: photo.file,
+            source,
+            onPrepared: () => markPrepared(photo.file),
             phone: normalizedPhone,
             requestId: `${submissionIdRef.current}-${index}`,
             onTiming: (timing) => { reportClientTiming(uploadFileEvent(runId, timing, photo.file)) },
             onProgress: ({ loaded, total }) => setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0, uploadedBytes: total > 0 ? Math.min(item.file.size, Math.round((loaded / total) * item.file.size)) : 0 } : item)),
           })
           okCount += 1
-          void queueThumbnailUpload({ file: photo.file, phone: normalizedPhone, requestId: `${submissionIdRef.current}-${index}` })
+          const thumbnailRequestId = `${submissionIdRef.current}-${index}`
+          // Thumbnail from the in-memory copy, then free it (the original stays selectable for retries).
+          void source.then((file) => queueThumbnailUpload({ file, phone: normalizedPhone, requestId: thumbnailRequestId })).finally(() => releasePreload(photo.file))
           if (activeBatchRef.current?.runId === runId) activeBatchRef.current.okCount = okCount
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
         } catch (reason) {
@@ -137,6 +147,7 @@ export function PhotoUploadPage() {
   }
 
   const failedPhotoCount = photos.filter((photo) => photo.state === 'failed').length
+  const preparing = photos.some((photo) => photo.state === 'uploading' && !photo.prepared)
   const overallProgress = calculateOverallUploadProgress(photos.map((photo) => ({ size: photo.file.size, uploadedBytes: photo.uploadedBytes })))
 
   return <PageShell className="bg-[#f3eee7]">
@@ -149,10 +160,10 @@ export function PhotoUploadPage() {
         {phone.length > 0 && !validPhone ? <p className="mt-2 text-sm font-semibold text-rose-700">Vui lòng nhập đúng số điện thoại Việt Nam.</p> : null}
         <button className="mt-5 min-h-14 w-full rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 px-5 font-black text-stone-700 transition hover:border-stone-950 disabled:opacity-50" disabled={uploading || photos.length >= PHOTO_UPLOAD_MAX_FILES} onClick={() => inputRef.current?.click()} type="button">+ CHỌN ẢNH PNG / JPG</button>
         <input accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="Chọn ảnh để gửi" className="sr-only" disabled={uploading} multiple onChange={(event) => { addFiles(event.currentTarget.files); event.currentTarget.value = '' }} ref={inputRef} type="file" />
-        {photos.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{photos.map((photo) => <article className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 p-3" key={photo.id}><img alt="" className="size-16 shrink-0 rounded-xl object-cover" src={photo.previewUrl} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{photo.file.name}</p><p className="mt-1 text-xs text-stone-500">{(photo.file.size / 1024 / 1024).toFixed(1)} MB · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? `${photo.progress}%` : 'Sẵn sàng'}</p>{photo.state === 'uploading' ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-stone-950 transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}</div><button aria-label={`Xóa ${photo.file.name}`} className="grid size-11 shrink-0 place-items-center rounded-full bg-stone-100 text-lg font-bold disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button">×</button></article>)}</div> : <p className="mt-4 text-center text-sm text-stone-400">Chưa chọn ảnh.</p>}
-        {uploading ? <div className="mt-5" aria-live="polite"><div className="flex justify-between text-sm font-bold"><span>{overallProgress === 0 ? 'Đang chuẩn bị ảnh…' : 'Đang gửi ảnh…'}</span><span>{overallProgress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-rose-700 transition-[width]" style={{ width: `${overallProgress}%` }} /></div></div> : null}
+        {photos.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{photos.map((photo) => <article className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 p-3" key={photo.id}><img alt="" className="size-16 shrink-0 rounded-xl object-cover" src={photo.previewUrl} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{photo.file.name}</p><p className="mt-1 text-xs text-stone-500">{(photo.file.size / 1024 / 1024).toFixed(1)} MB · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? (photo.prepared ? `${photo.progress}%` : 'Đang chuẩn bị…') : photo.prepared ? 'Sẵn sàng' : 'Đang chuẩn bị…'}</p>{photo.state === 'uploading' ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-stone-950 transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}</div><button aria-label={`Xóa ${photo.file.name}`} className="grid size-11 shrink-0 place-items-center rounded-full bg-stone-100 text-lg font-bold disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button">×</button></article>)}</div> : <p className="mt-4 text-center text-sm text-stone-400">Chưa chọn ảnh.</p>}
+        {uploading ? <div className="mt-5" aria-live="polite"><div className="flex justify-between text-sm font-bold"><span>{preparing || overallProgress === 0 ? 'Đang chuẩn bị ảnh…' : 'Đang gửi ảnh…'}</span><span>{overallProgress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-rose-700 transition-[width]" style={{ width: `${overallProgress}%` }} /></div></div> : null}
         {message ? <div className={`mt-5 rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${message.kind === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</div> : null}
-        <button className="mt-5 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40" disabled={uploading || !validPhone || photos.length === 0 || photos.every((photo) => photo.state === 'uploaded')} onClick={submit} type="button">{uploading ? `ĐANG GỬI ${overallProgress}%` : failedPhotoCount > 0 ? `GỬI LẠI ${failedPhotoCount} ẢNH LỖI` : 'GỬI ẢNH'}</button>
+        <button className="mt-5 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40" disabled={uploading || !validPhone || photos.length === 0 || photos.every((photo) => photo.state === 'uploaded')} onClick={submit} type="button">{uploading ? (preparing ? 'ĐANG CHUẨN BỊ ẢNH…' : `ĐANG GỬI ${overallProgress}%`) : failedPhotoCount > 0 ? `GỬI LẠI ${failedPhotoCount} ẢNH LỖI` : 'GỬI ẢNH'}</button>
       </div>
     </section>
   </PageShell>
