@@ -8,7 +8,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   setPrivateResponse(response)
   if (request.method !== 'POST') { response.setHeader('Allow', 'POST'); response.status(405).json({ error: 'Phương thức không được hỗ trợ.' }); return }
   try {
-    enforceSameOrigin(request); enforceRateLimit(request, { limit: 120, windowMs: 10 * 60_000 })
+    enforceSameOrigin(request); enforceRateLimit(request, { limit: 120, windowMs: 10 * 60_000, scope: 'staff-download' })
     const { client } = await requireStaff(request)
     const body = readJsonBody(request) as Record<string, unknown>
     const phone = requireCustomerPhone(body.phone)

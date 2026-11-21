@@ -33,7 +33,7 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
     const timingEvent = isClientTimingBody(body)
     // Timing telemetry uses its own counter so it never crowds out failure
     // diagnostics or the shared upload/staff budget on a shop Wi-Fi IP.
-    enforceRateLimit(request, timingEvent ? { limit: 600, windowMs: 10 * 60_000, scope: 'client-timing' } : { limit: 240, windowMs: 10 * 60_000 })
+    enforceRateLimit(request, timingEvent ? { limit: 600, windowMs: 10 * 60_000, scope: 'client-timing' } : { limit: 240, windowMs: 10 * 60_000, scope: 'upload-diagnostics' })
     const { serviceRoleKey } = loadSupabaseStorageEnvironment()
     if (!verifyUploadSessionToken(request, serviceRoleKey)) throw new UploadApiError(401, 'Phiên gửi ảnh đã hết hạn.')
     if (timingEvent) {

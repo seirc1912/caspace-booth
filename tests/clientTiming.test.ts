@@ -65,8 +65,8 @@ test('timing telemetry has its own rate-limit counter and does not consume the s
   resetRateLimitsForTests()
   const request = { headers: { 'x-forwarded-for': '203.0.113.9' } } as unknown as ApiRequest
   for (let index = 0; index < 50; index += 1) enforceRateLimit(request, { limit: 600, windowMs: 60_000, scope: 'client-timing' })
-  assert.doesNotThrow(() => enforceRateLimit(request, { limit: 1, windowMs: 60_000 }))
-  assert.throws(() => enforceRateLimit(request, { limit: 1, windowMs: 60_000 }), UploadApiError)
+  assert.doesNotThrow(() => enforceRateLimit(request, { limit: 1, windowMs: 60_000, scope: 'upload-diagnostics' }))
+  assert.throws(() => enforceRateLimit(request, { limit: 1, windowMs: 60_000, scope: 'upload-diagnostics' }), UploadApiError)
 })
 
 test('diagnostics endpoint logs timing only through the allow-listed parser and keeps session auth', () => {
