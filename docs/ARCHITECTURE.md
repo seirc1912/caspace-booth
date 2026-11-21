@@ -1,5 +1,7 @@
 # SelfBooth Architecture
 
+> **Thực trạng (21/11/2026, đã đối chiếu code + log Production):** hệ thống đang chạy là `client/` trên Vercel (Vite + Vercel Functions `client/api`, region `icn1`) + Supabase (Seoul), domain `caspace.vn`. Khung in được **render trên trình duyệt** của khách; ảnh khách gửi lên bucket private `customer-photo-uploads`; nhân viên tải ở `/staff/photos`. `server/` (Express/Socket.io, export phía server), `folder-watcher/` và Docker **không được deploy**. Các mục bên dưới mô tả kiến trúc gốc/định hướng — xem `README.md` (luồng thực tế) và `docs/KE-HOACH-TOI-UU-UPLOAD-ANH.md` (kế hoạch hiện tại).
+
 ## 1. Scope and Principles
 
 SelfBooth is a session-oriented public web platform with separate customer and administrator surfaces. The current repository is deployable as a Node.js application with local template and export storage. The architecture deliberately leaves clear boundaries for future capture, cloud storage, authentication, QR handoff, and printing services.

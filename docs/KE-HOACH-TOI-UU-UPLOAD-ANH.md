@@ -261,3 +261,29 @@ Hiện server stream lại toàn bộ object để kiểm byte count, MIME signa
 | Q5 | Cho phép gửi song song (đổi thiết kế Phase 2)? Mấy file? | PR 3 |
 | Q6 | Mức kiểm tra sau khi gửi (phương án 1/2/3)? | PR 4 |
 | Q7 | Giữ hay bỏ `server/`, `folder-watcher/`, bucket `session-photos`? | PR 5 |
+
+---
+
+## 8. Trạng thái thực hiện (21/11/2026)
+
+Kế hoạch đã được điều chỉnh theo kết quả §4.5 (không thấy quá tải server; lỗi nằm ở bước truyền + TUS sai endpoint). Các nhánh **nối tiếp nhau** (mỗi nhánh dựng trên nhánh trước), review/merge theo đúng thứ tự. Chưa push (tài khoản hiện chỉ có quyền READ trên repo).
+
+| # | Nhánh | Nội dung | Mục §3 | Cần owner |
+|---|---|---|---|---|
+| PR 0 | `feat/client-timing-metrics` | Module đo phía điện thoại + báo cáo log 30 ngày | đo | — |
+| PR 1 | `fix/staff-thumbnails-no-transform` | Ảnh xem trước 400px tạo trên điện thoại, staff không dùng Image Transformations | B | Q3 (đã chọn phương án 1) |
+| PR 2 | `fix/upload-retry-stall-timeout` | Tự thử lại 3 lần, báo lỗi sau 45 s không tiến triển (thay 300 s), không dừng cả lượt, nút "Gửi lại ảnh lỗi" | A6 + lỗi mạng | — |
+| PR 3 | `fix/tus-signed-endpoint` | TUS dùng `/upload/resumable/sign` — sửa 100 % lỗi `TUS_CREATE_400` (đã tái hiện + kiểm chứng trên Supabase local) | mới | — |
+| PR 4 | `feat/export-jpeg-q95` | Xuất khung JPEG q0.95, giữ nguyên kích thước | A1 | **Q4: in thử** |
+| PR 5 | `feat/parallel-uploads` | Gửi song song 3 file | A2 | **Q5** |
+| PR 6 | `fix/rate-limit-per-endpoint` | Mỗi endpoint một bộ đếm rate limit (khách không làm staff bị chặn đăng nhập) | mới | — |
+| PR 7 | `feat/scheduled-photo-cleanup` | Cron dọn ảnh 7 ngày (mặc định chỉ đếm), sửa script bỏ sót >1.000 thư mục và `_thumbs/` | C | **bật xoá thật** |
+| PR 8 | `chore/remove-dead-pages` | Xoá 30 file không còn được import | C | — |
+| PR 9 | `docs/align-with-reality` | README theo hệ thống thật, banner thực trạng cho ARCHITECTURE/PROJECT, bỏ `PROJECT.md` trùng | C | — |
+
+**Không làm (có lý do):**
+- *Làm nhẹ bước kiểm tra (A3/A4, Q6):* số liệu cho thấy phần đọc lại toàn bộ file chỉ ~180 ms p50; ~560 ms còn lại là độ trễ phản hồi của Storage mà Range request cũng phải chịu. Lợi ích nhỏ, lại đánh đổi việc kiểm SHA-256 → giữ nguyên. Gửi song song (PR 5) đã che phần lớn thời gian này.
+- *Gỡ folder-watcher phía khách (Q7):* `customer_start_photo_session` còn là **khoá của bản nháp editor** (`useSelfBooth.ts:80`) — gỡ sẽ hỏng khôi phục nháp. Chỉ kênh Realtime `session_photos` là thừa (đỉnh 10/500 kết nối). Bucket `session-photos` public: chờ owner quyết.
+- *Tách Supabase cho Preview:* việc hạ tầng (Supabase Branching hoặc project riêng + env Preview riêng), không phải code.
+
+**Phát hiện thêm khi làm:** `config/env.ts` (`VITE_APP_ROLE`) chưa từng được import — admin chạy chung bundle, route theo `/admin`, bảo vệ bằng RPC `admin_login` (README cũ mô tả sai).
