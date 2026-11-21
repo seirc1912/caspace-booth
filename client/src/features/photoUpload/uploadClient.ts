@@ -364,7 +364,7 @@ export async function inMemoryFile(file: File) {
   catch { return file }
 }
 
-export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; variant?: 'original' | 'thumbnail'; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
+export async function uploadPhotoToStorage(input: { file: File; source?: Promise<File>; phone: string; requestId: string; variant?: 'original' | 'thumbnail'; onPrepared?: () => void; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
   const variant = input.variant ?? 'original'
   const correlationId = uploadCorrelationId()
   if (variant === 'thumbnail') silentCorrelationIds.add(correlationId)
@@ -373,13 +373,16 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   if (!mimeType) throw new Error('Chỉ hỗ trợ ảnh PNG, JPG và JPEG.')
   const hashStartedAt = performance.now()
   // Android can hand us a lazily-read File (gallery/cloud provider); slicing it
-  // per TUS chunk then stalls. Read it once into memory (files are ≤ 25 MB).
-  const file = await inMemoryFile(input.file)
+  // per TUS chunk then stalls. Read it once into memory (files are ≤ 25 MB);
+  // the page may already have started this read when the photo was picked.
+  // hashMs therefore measures the customer's remaining wait for read + hash.
+  const file = await (input.source ?? inMemoryFile(input.file))
   const [prefix, checksum] = await Promise.all([
     file.slice(0, 16).arrayBuffer().then((buffer) => bytesToBase64(new Uint8Array(buffer))),
     sha256Blob(file),
   ])
   const hashMs = performance.now() - hashStartedAt
+  input.onPrepared?.()
   const initializationStartedAt = performance.now()
   const metadata = JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, variant })
   const init = await uploadApi('/api/photo-uploads/init', metadata, 'Chuẩn bị gửi ảnh quá thời gian chờ. Vui lòng thử lại.')

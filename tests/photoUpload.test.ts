@@ -107,7 +107,7 @@ test('customer upload progress is weighted by real file bytes and safely clamped
 
 test('ready customer photos show no percentage or progress bar before submission', () => {
   const page = readFileSync(new URL('../client/src/pages/PhotoUploadPage.tsx', import.meta.url), 'utf8')
-  assert.match(page, /photo\.state === 'uploading' \? `\$\{photo\.progress\}%` : 'Sẵn sàng'/)
+  assert.match(page, /photo\.state === 'uploading' \? \(photo\.prepared \? `\$\{photo\.progress\}%` : 'Đang chuẩn bị…'\) : photo\.prepared \? 'Sẵn sàng' : 'Đang chuẩn bị…'/)
   assert.match(page, /photo\.state === 'uploading' \? <div className="mt-2 h-1\.5/)
   assert.match(page, /\{uploading \? <div className="mt-5" aria-live="polite">/)
 })
