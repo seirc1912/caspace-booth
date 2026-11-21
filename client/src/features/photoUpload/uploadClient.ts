@@ -35,6 +35,8 @@ export interface UploadTiming {
   totalMs: number
   transferMs: number
   transport: 'existing' | 'standard' | 'tus'
+  /** TUS failed and the file was re-sent through the standard signed upload. */
+  tusFallback: boolean
   verificationMs: number
 }
 
@@ -85,15 +87,22 @@ export function isFreshTusUpload(candidate: { creationTime: string; uploadUrl: s
   } catch { return false }
 }
 
-async function reportUploadFailure(diagnostic: UploadFailureDiagnostic) {
+// Shared by failure diagnostics and client timing telemetry. Never throws:
+// diagnostics must never block a customer upload, save or retry.
+export async function sendUploadDiagnostic(payload: object) {
   try {
     const token = await uploadSession()
     await fetchWithTimeout('/api/photo-uploads/diagnostics', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Upload-Session': token },
-      body: JSON.stringify(diagnostic),
+      body: JSON.stringify(payload),
+      keepalive: true,
     }, 'diagnostic timeout')
-  } catch { /* diagnostics must never block a customer upload or retry */ }
+  } catch { /* best effort only */ }
+}
+
+async function reportUploadFailure(diagnostic: UploadFailureDiagnostic) {
+  await sendUploadDiagnostic(diagnostic)
 }
 
 function storedUploadSession() {
@@ -282,6 +291,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
   const initializationMs = performance.now() - initializationStartedAt
   let transport: UploadTiming['transport'] = 'existing'
+  let tusFallback = false
   const transferStartedAt = performance.now()
   if (!prepared.alreadyUploaded) {
     if (!prepared.uploadUrl) throw new Error('Không nhận được phiên gửi ảnh an toàn. Vui lòng thử lại.')
@@ -295,6 +305,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
         // Files are capped at 25 MB. The signed standard upload is the proven
         // pre-TUS path and remains scoped to this exact, non-overwritable object.
         transport = 'standard'
+        tusFallback = true
         input.onProgress({ loaded: 0, total: input.file.size })
         try { await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
         catch (fallbackReason) {
@@ -325,7 +336,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   await uploadApiResult(completion, 'verification', correlationId, verificationStartedAt)
   const verificationMs = performance.now() - verificationStartedAt
   input.onProgress({ loaded: input.file.size, total: input.file.size })
-  const timing: UploadTiming = { finalizationMs: 0, hashMs: Math.round(hashMs), initializationMs: Math.round(initializationMs), totalMs: Math.round(performance.now() - totalStartedAt), transferMs: Math.round(transferMs), transport, verificationMs: Math.round(verificationMs) }
+  const timing: UploadTiming = { finalizationMs: 0, hashMs: Math.round(hashMs), initializationMs: Math.round(initializationMs), totalMs: Math.round(performance.now() - totalStartedAt), transferMs: Math.round(transferMs), transport, tusFallback, verificationMs: Math.round(verificationMs) }
   input.onTiming?.(timing)
   if (!input.onTiming) console.info('[photo-upload:timing]', timing)
 }

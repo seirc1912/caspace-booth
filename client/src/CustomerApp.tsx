@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { EditorErrorBoundary } from './components/editor/EditorErrorBoundary'
 import { useBranding } from './contexts/BrandingContext'
 import { runPerFrameSave, saveComposition } from './features/orders/services/saveComposition'
+import { formatMegabytes, formatSeconds, frameSaveEvent, measurementLabel, newRunId, reportClientTiming } from './features/metrics/clientTiming'
 import { prefetchTemplateExportAssets, RemoteExportAssetCache, RenderAssetCache } from './features/orders/services/renderComposition'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
@@ -62,12 +63,19 @@ export function CustomerApp() {
     const frameNumber = booth.currentFrameIndex + 1
     try {
       await runPerFrameSave(
-        () => saveComposition({ assetCache, branding, slots: booth.slots, template: booth.template }),
-        () => {
+        async () => {
+          const saved = await saveComposition({ assetCache, branding, slots: booth.slots, template: booth.template })
+          reportClientTiming(frameSaveEvent(newRunId(), saved))
+          return saved
+        },
+        (saved) => {
           booth.completeCurrentFrame()
-          setSaveConfirmation(`Frame ${frameNumber} photo saved.`)
+          // Measurement mode (?measure=…): show render time and file size for the tester (§4.4).
+          setSaveConfirmation(measurementLabel()
+            ? `Frame ${frameNumber} saved · ĐO: ${formatSeconds(saved.renderMs)} · ${formatMegabytes(saved.bytes)} · ${saved.width}×${saved.height} ${saved.format.toUpperCase()}`
+            : `Frame ${frameNumber} photo saved.`)
           if (saveConfirmationTimer.current !== null) window.clearTimeout(saveConfirmationTimer.current)
-          saveConfirmationTimer.current = window.setTimeout(() => { saveConfirmationTimer.current = null; setSaveConfirmation(null) }, 2200)
+          saveConfirmationTimer.current = window.setTimeout(() => { saveConfirmationTimer.current = null; setSaveConfirmation(null) }, measurementLabel() ? 8000 : 2200)
         },
       )
     }

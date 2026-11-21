@@ -2,6 +2,7 @@ import { loadSupabaseStorageEnvironment } from '../_lib/supabaseStorage.js'
 import { enforceSameOrigin, readJsonBody, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse, UploadApiError } from '../_lib/http.js'
 import { enforceRateLimit } from '../_lib/rateLimit.js'
 import { verifyUploadSessionToken } from '../_lib/uploadSession.js'
+import { CLIENT_TIMING_LOG_TAGS, isClientTimingBody, parseClientTiming } from '../_lib/clientTiming.js'
 
 export const config = { maxDuration: 10 }
 
@@ -27,10 +28,22 @@ export default function handler(request: ApiRequest, response: ApiResponse) {
   if (request.method !== 'POST') { response.setHeader('Allow', 'POST'); response.status(405).json({ error: 'Phương thức không được hỗ trợ.' }); return }
   try {
     enforceSameOrigin(request)
-    enforceRateLimit(request, { limit: 240, windowMs: 10 * 60_000 })
+    let body: unknown
+    try { body = readJsonBody(request) } catch { body = undefined } // malformed JSON → default limit, then 400
+    const timingEvent = isClientTimingBody(body)
+    // Timing telemetry uses its own counter so it never crowds out failure
+    // diagnostics or the shared upload/staff budget on a shop Wi-Fi IP.
+    enforceRateLimit(request, timingEvent ? { limit: 600, windowMs: 10 * 60_000, scope: 'client-timing' } : { limit: 240, windowMs: 10 * 60_000 })
     const { serviceRoleKey } = loadSupabaseStorageEnvironment()
     if (!verifyUploadSessionToken(request, serviceRoleKey)) throw new UploadApiError(401, 'Phiên gửi ảnh đã hết hạn.')
-    const diagnostic = diagnosticBody(readJsonBody(request))
+    if (timingEvent) {
+      const timing = parseClientTiming(body)
+      // Allow-listed by parseClientTiming: durations, sizes, coarse device/network only.
+      console.info(CLIENT_TIMING_LOG_TAGS[timing.event], timing)
+      response.status(202).json({ accepted: true })
+      return
+    }
+    const diagnostic = diagnosticBody(body)
     // This object is intentionally allow-listed: no phone, filename, path,
     // image bytes, URL, token, user agent, or IP is copied into application logs.
     console.warn('[photo-upload:failure]', diagnostic)

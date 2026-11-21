@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
-import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
+import { measurementLabel, newRunId, reportClientTiming, summarizeBatch, uploadBatchEvent, uploadFileEvent } from '../features/metrics/clientTiming'
+import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage, type UploadTiming } from '../features/photoUpload/uploadClient'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
@@ -23,15 +24,30 @@ export function PhotoUploadPage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const submittingRef = useRef(false)
   const submissionIdRef = useRef(crypto.randomUUID())
+  const attemptRef = useRef(0) // presses of "GỬI ẢNH" for the current selection
+  const activeBatchRef = useRef<{ runId: string; startedAt: number; fileCount: number; totalBytes: number; okCount: number; attempt: number } | null>(null)
   const photosRef = useRef<SelectedPhoto[]>([])
   const [phone, setPhone] = useState('')
   const [photos, setPhotos] = useState<SelectedPhoto[]>([])
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [measureSummary, setMeasureSummary] = useState<string | null>(null)
   const validPhone = isValidVietnamesePhone(phone)
 
   useEffect(() => { photosRef.current = photos }, [photos])
   useEffect(() => () => { for (const photo of photosRef.current) URL.revokeObjectURL(photo.previewUrl) }, [])
+  // A customer closing/leaving the page mid-upload is reported as an abandoned batch.
+  useEffect(() => {
+    const onPageHide = (event: PageTransitionEvent) => {
+      if (event.persisted) return // back/forward cache: the upload may still finish after restore
+      const batch = activeBatchRef.current
+      if (!batch) return
+      activeBatchRef.current = null
+      reportClientTiming(uploadBatchEvent(batch.runId, { fileCount: batch.fileCount, okCount: batch.okCount, failedCount: 0, totalMs: performance.now() - batch.startedAt, totalBytes: batch.totalBytes, attempt: batch.attempt, abandoned: true }))
+    }
+    window.addEventListener('pagehide', onPageHide)
+    return () => window.removeEventListener('pagehide', onPageHide)
+  }, [])
 
   const addFiles = (incoming: FileList | null) => {
     if (!incoming) return
@@ -42,6 +58,7 @@ export function PhotoUploadPage() {
     if (error) { setMessage({ kind: 'error', text: error }); return }
     setPhotos((current) => [...current, ...selectedFiles.map(makePhoto)])
     submissionIdRef.current = crypto.randomUUID()
+    attemptRef.current = 0
   }
 
   const removePhoto = (id: string) => {
@@ -51,6 +68,7 @@ export function PhotoUploadPage() {
       return current.filter((photo) => photo.id !== id)
     })
     submissionIdRef.current = crypto.randomUUID()
+    attemptRef.current = 0
     setMessage(null)
   }
 
@@ -64,9 +82,18 @@ export function PhotoUploadPage() {
     submittingRef.current = true
     setUploading(true)
     setMessage(null)
+    setMeasureSummary(null)
     const normalizedPhone = normalizeVietnamesePhone(phone)
+    // Batch timer: from tapping "GỬI ẢNH" until success/failure is shown (§4.4).
+    const runId = newRunId()
+    const batchStartedAt = performance.now()
+    const fileTimings: UploadTiming[] = []
+    const pending = photos.map((photo, index) => ({ index, photo })).filter(({ photo }) => photo.state !== 'uploaded')
+    let okCount = 0
+    attemptRef.current += 1
+    const totalBytes = pending.reduce((sum, { photo }) => sum + photo.file.size, 0)
+    activeBatchRef.current = { runId, startedAt: batchStartedAt, fileCount: pending.length, totalBytes, okCount: 0, attempt: attemptRef.current }
     try {
-      const pending = photos.map((photo, index) => ({ index, photo })).filter(({ photo }) => photo.state !== 'uploaded')
       const failures = await runUploadQueue(pending, async ({ index, photo }) => {
         setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploading', progress: 0, uploadedBytes: 0 } : item))
         try {
@@ -74,8 +101,11 @@ export function PhotoUploadPage() {
             file: photo.file,
             phone: normalizedPhone,
             requestId: `${submissionIdRef.current}-${index}`,
+            onTiming: (timing) => { fileTimings.push(timing); reportClientTiming(uploadFileEvent(runId, timing, photo.file)) },
             onProgress: ({ loaded, total }) => setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0, uploadedBytes: total > 0 ? Math.min(item.file.size, Math.round((loaded / total) * item.file.size)) : 0 } : item)),
           })
+          okCount += 1
+          if (activeBatchRef.current?.runId === runId) activeBatchRef.current.okCount = okCount
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
         } catch (reason) {
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'failed' } : item))
@@ -85,10 +115,17 @@ export function PhotoUploadPage() {
       if (failures.length) throw failures[0]!.reason
       setMessage({ kind: 'success', text: successMessage })
       submissionIdRef.current = crypto.randomUUID()
+    attemptRef.current = 0
     } catch (reason) {
       setPhotos((current) => current.map((item) => item.state === 'uploading' ? { ...item, state: 'failed' } : item))
       setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : 'Không thể gửi ảnh. Vui lòng thử lại.' })
     } finally {
+      const totalMs = performance.now() - batchStartedAt
+      const failedCount = pending.length - okCount > 0 ? 1 : 0 // the queue stops at the first failure
+      const attempt = activeBatchRef.current?.attempt ?? attemptRef.current
+      activeBatchRef.current = null
+      reportClientTiming(uploadBatchEvent(runId, { fileCount: pending.length, okCount, failedCount, totalMs, totalBytes, attempt }))
+      if (measurementLabel()) setMeasureSummary(summarizeBatch(pending.length, okCount, totalMs, fileTimings))
       submittingRef.current = false
       setUploading(false)
     }
@@ -109,6 +146,7 @@ export function PhotoUploadPage() {
         {photos.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{photos.map((photo) => <article className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 p-3" key={photo.id}><img alt="" className="size-16 shrink-0 rounded-xl object-cover" src={photo.previewUrl} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{photo.file.name}</p><p className="mt-1 text-xs text-stone-500">{(photo.file.size / 1024 / 1024).toFixed(1)} MB · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? `${photo.progress}%` : 'Sẵn sàng'}</p>{photo.state === 'uploading' ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-stone-950 transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}</div><button aria-label={`Xóa ${photo.file.name}`} className="grid size-11 shrink-0 place-items-center rounded-full bg-stone-100 text-lg font-bold disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button">×</button></article>)}</div> : <p className="mt-4 text-center text-sm text-stone-400">Chưa chọn ảnh.</p>}
         {uploading ? <div className="mt-5" aria-live="polite"><div className="flex justify-between text-sm font-bold"><span>{overallProgress === 0 ? 'Đang chuẩn bị ảnh…' : 'Đang gửi ảnh…'}</span><span>{overallProgress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-rose-700 transition-[width]" style={{ width: `${overallProgress}%` }} /></div></div> : null}
         {message ? <div className={`mt-5 rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${message.kind === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</div> : null}
+        {measureSummary ? <pre className="mt-5 whitespace-pre-wrap rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-900" data-testid="measure-summary">{measureSummary}</pre> : null}
         <button className="mt-5 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40" disabled={uploading || !validPhone || photos.length === 0 || photos.every((photo) => photo.state === 'uploaded')} onClick={submit} type="button">{uploading ? `ĐANG GỬI ${overallProgress}%` : 'GỬI ẢNH'}</button>
       </div>
     </section>

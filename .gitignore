@@ -26,3 +26,6 @@ photos/*
 !photos/.gitkeep
 exports/*
 !exports/.gitkeep
+
+# Local cache of read-only Vercel log analysis (scripts/upload-timing-report.mjs)
+.upload-logs/

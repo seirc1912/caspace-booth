@@ -45,9 +45,15 @@ export async function deliverImageFile(blob: Blob, filename: string, options: Fi
 }
 
 export async function saveComposition(input: DownloadCompositionInput) {
+  const renderStartedAt = performance.now()
   const prepared = await prepareCompositionDownload(input)
+  // renderMs = draw + encode on the phone; deliveryMs includes the share sheet (customer interaction).
+  const renderMs = performance.now() - renderStartedAt
+  const deliveryStartedAt = performance.now()
   const delivery = await deliverImageFile(prepared.blob, prepared.filename)
-  return { filename: prepared.filename, bytes: prepared.bytes, width: prepared.width, height: prepared.height, delivery }
+  const deliveryMs = performance.now() - deliveryStartedAt
+  const format: 'png' | 'jpg' = prepared.filename.endsWith('.jpg') ? 'jpg' : 'png'
+  return { filename: prepared.filename, bytes: prepared.bytes, width: prepared.width, height: prepared.height, delivery, renderMs, deliveryMs, format }
 }
 
 export async function runPerFrameSave<T extends { delivery: FileDelivery }>(save: () => Promise<T>, onSaved: (result: T) => void) {
