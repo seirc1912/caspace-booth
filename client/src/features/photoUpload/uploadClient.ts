@@ -25,6 +25,7 @@ const API_TIMEOUT_MS = 30_000
 export const UPLOAD_STALL_TIMEOUT_MS = 45_000
 export const UPLOAD_HARD_TIMEOUT_MS = 10 * 60_000
 export const STANDARD_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000, 8_000]
+export const TUS_STALL_RESTARTS = 3
 const uploadSessionStorageKey = 'caspace.photo-upload-session.v1'
 let uploadSessionRequest: Promise<string> | null = null
 let uploadSessionValue: string | null = null
@@ -222,7 +223,7 @@ export function isDuplicateUploadResponse(status: number, body: string) {
   return status === 409 || (status === 400 && /duplicate|already exists/i.test(body))
 }
 
-function uploadOriginalFileOnce(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string, retryCount: number) {
+function uploadOriginalFileOnce(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string, retryCount: number, mayAlreadyExist: boolean) {
   return new Promise<StandardAttemptResult>((resolve, reject) => {
     const startedAt = performance.now()
     const request = new XMLHttpRequest()
@@ -249,7 +250,7 @@ function uploadOriginalFileOnce(uploadUrl: string, file: File, onProgress: (prog
     request.onload = () => {
       window.clearTimeout(stallTimer)
       if (request.status >= 200 && request.status < 300) resolve('ok')
-      else if (retryCount > 0 && isDuplicateUploadResponse(request.status, request.responseText ?? '')) resolve('exists')
+      else if ((retryCount > 0 || mayAlreadyExist) && isDuplicateUploadResponse(request.status, request.responseText ?? '')) resolve('exists')
       else fail(request.status, `STORAGE_STANDARD_HTTP_${request.status}`)
     }
     const body = new FormData()
@@ -270,10 +271,10 @@ function waitBeforeRetry(delayMs: number) {
 }
 
 /** Signed standard upload with stall detection and automatic retries. Returns how many retries were needed. */
-async function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string) {
+async function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string, mayAlreadyExist = false) {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await uploadOriginalFileOnce(uploadUrl, file, onProgress, correlationId, attempt)
+      await uploadOriginalFileOnce(uploadUrl, file, onProgress, correlationId, attempt, mayAlreadyExist)
       return attempt
     } catch (reason) {
       const status = reason instanceof UploadStageError ? reason.diagnostic.status : -1
@@ -298,10 +299,18 @@ async function uploadResumableFile(input: { contentType: string; correlationId: 
       window.clearTimeout(inactivityTimer)
       callback()
     }
+    let stallRestarts = 0
+    // A stalled TUS transfer is resumed (HEAD + PATCH from the stored offset), not
+    // restarted from byte 0 through the standard upload. After 3 stalls the file
+    // fails with STORAGE_TUS_STALL; a manual retry resumes from the same offset.
     const refreshInactivityTimer = (upload: TusUpload) => {
       window.clearTimeout(inactivityTimer)
       inactivityTimer = window.setTimeout(() => {
-        void upload.abort().finally(() => finish(() => reject(new Error('Gửi ảnh tạm dừng quá lâu. Vui lòng kiểm tra mạng và thử lại để tiếp tục.'))))
+        void upload.abort().finally(() => {
+          if (settled) return
+          if (stallRestarts < TUS_STALL_RESTARTS) { stallRestarts += 1; refreshInactivityTimer(upload); upload.start(); return }
+          finish(() => reject(new UploadStageError('Mạng bị gián đoạn khi gửi ảnh. Vui lòng thử lại ảnh này để gửi tiếp.', { code: 'STORAGE_TUS_STALL', correlationId: input.correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: stallRestarts, stage: 'tus-transfer', status: 0, transport: 'tus' })))
+        })
       }, UPLOAD_STALL_TIMEOUT_MS)
     }
     const upload = new Upload(input.file, {
@@ -319,7 +328,8 @@ async function uploadResumableFile(input: { contentType: string; correlationId: 
     })
     refreshInactivityTimer(upload)
     void upload.findPreviousUploads().then((previous) => {
-      const resumable = previous.find((candidate) => isFreshTusUpload(candidate, input.endpoint))
+      // tus fingerprints ignore the object path; never resume an upload that targeted another object.
+      const resumable = previous.find((candidate) => candidate.metadata?.objectName === input.objectPath && isFreshTusUpload(candidate, input.endpoint))
       if (resumable) upload.resumeFromPreviousUpload(resumable)
       upload.start()
     }).catch((reason) => finish(() => reject(classifyTusFailure(reason, { correlationId: input.correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: Math.max(0, requestCount - 1), transport: 'tus' }))))
@@ -378,12 +388,14 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
         await uploadResumableFile({ contentType: mimeType, correlationId, endpoint: prepared.resumableEndpoint, file: input.file, objectPath: prepared.objectPath, onProgress: input.onProgress, token: prepared.uploadToken })
       } catch (reason) {
         if (reason instanceof UploadStageError) await reportUploadFailure(reason.diagnostic)
+        if (reason instanceof UploadStageError && reason.diagnostic.code === 'STORAGE_TUS_STALL') throw reason // network problem: resume TUS on retry
         // Files are capped at 25 MB. The signed standard upload is the proven
         // pre-TUS path and remains scoped to this exact, non-overwritable object.
         transport = 'standard'
         tusFallback = true
         input.onProgress({ loaded: 0, total: input.file.size })
-        try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
+        // TUS may already have stored the object (lost final response) → a Duplicate answer is accepted and /complete verifies the bytes.
+        try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId, true) }
         catch (fallbackReason) {
           if (fallbackReason instanceof UploadStageError) await reportUploadFailure(fallbackReason.diagnostic)
           throw fallbackReason

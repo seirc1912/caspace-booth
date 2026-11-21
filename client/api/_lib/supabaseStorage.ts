@@ -56,10 +56,14 @@ function encodedObjectPath(path: string) {
   return path.split('/').map(encodeURIComponent).join('/')
 }
 
-function resumableEndpoint(projectUrl: string) {
+// Uploads authorised by a signed-upload token (`x-signature`) must use the
+// `/upload/resumable/sign` route. The plain `/upload/resumable` route expects an
+// Authorization JWT and answers 400 "Invalid Compact JWS" — the cause of every
+// STORAGE_TUS_CREATE_400 seen in production (1,085 in 30 days).
+export function resumableEndpoint(projectUrl: string) {
   const url = new URL(projectUrl)
   const projectId = url.hostname.split('.')[0]
-  return `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable`
+  return `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable/sign`
 }
 
 export class SupabasePhotoUploadService {
