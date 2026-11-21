@@ -89,3 +89,7 @@ Phụ thuộc giữa các PR (gỡ PR ở cột trái thì gỡ luôn cột ph�
 | Sau PR | Vercel deployment ID | Commit | Ghi chú |
 |---|---|---|---|
 | (mốc) | `dpl_2U3971Gf8aJ75u7t3PimGiz1q5ey` | `9625fbd` | trước khi sửa |
+| PR 0 (#73) | `dpl_Ctsu8sPcDxtoHJ2JShqAFqxVQjJz` | `59f3c6f` | 22/11/2026 ~00:00 VN, smoke OK |
+| PR 1 (#74) | `dpl_CJ9jcdp218TMF75cZZUeWz1TCjLR` | `50467be` | smoke OK |
+| PR 2 (#75) | `dpl_4H9AmWazbbzyNbqVerUs5FtaPjbT` | `797af97` | smoke OK |
+| PR 3 (#76) | `dpl_5SmycAHyxSESFixQZyVckxN4Dq9x` | `efe6ff2` | smoke OK; chờ owner test thật trên điện thoại (file > 6 MB) |
