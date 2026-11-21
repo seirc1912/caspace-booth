@@ -287,3 +287,5 @@ Kế hoạch đã được điều chỉnh theo kết quả §4.5 (không thấy
 - *Tách Supabase cho Preview:* việc hạ tầng (Supabase Branching hoặc project riêng + env Preview riêng), không phải code.
 
 **Phát hiện thêm khi làm:** `config/env.ts` (`VITE_APP_ROLE`) chưa từng được import — admin chạy chung bundle, route theo `/admin`, bảo vệ bằng RPC `admin_login` (README cũ mô tả sai).
+
+**Rollback:** xem `docs/ROLLBACK-UPLOAD-OPTIMIZATION.md` (tag mốc `baseline/pre-upload-optimization` = `9625fbd`, Vercel `dpl_2U3971Gf8aJ75u7t3PimGiz1q5ey`, đã diễn tập rollback toàn bộ và từng PR).
