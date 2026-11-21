@@ -3,6 +3,7 @@ import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
 import { measurementLabel, newRunId, reportClientTiming, summarizeBatch, uploadBatchEvent, uploadFileEvent } from '../features/metrics/clientTiming'
 import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage, type UploadTiming } from '../features/photoUpload/uploadClient'
+import { queueThumbnailUpload } from '../features/photoUpload/thumbnail'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
@@ -105,6 +106,7 @@ export function PhotoUploadPage() {
             onProgress: ({ loaded, total }) => setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, progress: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0, uploadedBytes: total > 0 ? Math.min(item.file.size, Math.round((loaded / total) * item.file.size)) : 0 } : item)),
           })
           okCount += 1
+          void queueThumbnailUpload({ file: photo.file, phone: normalizedPhone, requestId: `${submissionIdRef.current}-${index}` })
           if (activeBatchRef.current?.runId === runId) activeBatchRef.current.okCount = okCount
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
         } catch (reason) {

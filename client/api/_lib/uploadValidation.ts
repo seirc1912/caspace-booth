@@ -1,6 +1,9 @@
 import { UploadApiError } from './http.js'
 
 export const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024
+// Staff preview thumbnails (no Supabase Image Transformations): small JPEG beside the original.
+export const MAX_THUMBNAIL_BYTES = 512 * 1024
+export const THUMBNAIL_REQUEST_SUFFIX = '-thumb'
 const phonePattern = /^0(?:3|5|7|8|9)\d{8}$/
 const sha256Pattern = /^[a-f0-9]{64}$/
 const requestIdPattern = /^[a-zA-Z0-9_-]{8,120}$/
@@ -13,6 +16,7 @@ export interface UploadMetadata {
   requestId: string
   sha256: string
   size: number
+  variant: 'original' | 'thumbnail'
 }
 
 export function normalizeVietnamesePhone(value: string) {
@@ -53,6 +57,7 @@ export function parseUploadMetadata(value: unknown): UploadMetadata {
     requestId: String(record.requestId ?? ''),
     sha256: String(record.sha256 ?? '').toLowerCase(),
     size,
+    variant: record.variant === undefined || record.variant === 'original' ? 'original' : record.variant === 'thumbnail' ? 'thumbnail' : (() => { throw new UploadApiError(400, 'Thông tin tải ảnh không hợp lệ.') })(),
   }
   if (!phonePattern.test(phone)) throw new UploadApiError(400, 'Vui lòng nhập đúng số điện thoại Việt Nam.')
   if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_UPLOAD_FILE_BYTES) throw new UploadApiError(413, 'Mỗi ảnh phải có dung lượng từ 1 byte đến 25 MB.')
@@ -60,6 +65,9 @@ export function parseUploadMetadata(value: unknown): UploadMetadata {
   if (!hasValidImageSignature(metadata.prefix, metadata.mimeType)) throw new UploadApiError(415, 'Nội dung tệp không đúng định dạng PNG hoặc JPEG.')
   const extensionMatches = metadata.mimeType === 'image/png' ? /\.png$/i.test(metadata.filename) : /\.jpe?g$/i.test(metadata.filename)
   if (!extensionMatches) throw new UploadApiError(415, 'Phần mở rộng tệp không khớp với định dạng ảnh.')
+  if (metadata.variant === 'thumbnail' && (metadata.mimeType !== 'image/jpeg' || metadata.size > MAX_THUMBNAIL_BYTES || !metadata.requestId.endsWith(THUMBNAIL_REQUEST_SUFFIX))) {
+    throw new UploadApiError(400, 'Ảnh xem trước không hợp lệ.')
+  }
   return metadata
 }
 
@@ -68,6 +76,6 @@ export interface CompletionMetadata extends UploadMetadata { objectPath: string 
 export function parseCompletionMetadata(value: unknown): CompletionMetadata {
   const metadata = parseUploadMetadata(value)
   const objectPath = String((value as Record<string, unknown>).objectPath ?? '')
-  if (!/^[^/]+\/[\p{L}\p{N} _.,()-]+$/u.test(objectPath) || objectPath.length > 240) throw new UploadApiError(400, 'Thông tin xác nhận không hợp lệ.')
+  if (!/^[^/]+\/(?:_thumbs\/)?[\p{L}\p{N} _.,()-]+$/u.test(objectPath) || objectPath.length > 260) throw new UploadApiError(400, 'Thông tin xác nhận không hợp lệ.')
   return { ...metadata, objectPath }
 }

@@ -4,6 +4,7 @@ import { UploadApiError } from './http.js'
 import { hasValidImageSignature, type UploadMetadata } from './uploadValidation.js'
 
 export const customerPhotoBucket = 'customer-photo-uploads'
+export const THUMBNAIL_FOLDER = '_thumbs'
 
 export interface SupabaseStorageEnvironment {
   serviceRoleKey: string
@@ -39,7 +40,16 @@ function splitFilename(filename: string) {
 export function objectPathForUpload(metadata: UploadMetadata) {
   const { base, extension } = splitFilename(metadata.filename)
   const safeBase = base.replace(/[^\p{L}\p{N} _.-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 90) || 'photo'
-  return `${metadata.phone}/${safeBase}--${metadata.requestId}${extension}`
+  const folder = metadata.variant === 'thumbnail' ? `${THUMBNAIL_FOLDER}/` : ''
+  return `${metadata.phone}/${folder}${safeBase}--${metadata.requestId}${extension}`
+}
+
+/** `0901234567/a--req.png` → `0901234567/_thumbs/a--req-thumb.jpg` (same naming as a thumbnail upload). */
+export function thumbnailPathFor(originalPath: string) {
+  const slash = originalPath.indexOf('/')
+  const name = originalPath.slice(slash + 1)
+  const dot = name.lastIndexOf('.')
+  return `${originalPath.slice(0, slash)}/${THUMBNAIL_FOLDER}/${dot > 0 ? name.slice(0, dot) : name}-thumb.jpg`
 }
 
 function encodedObjectPath(path: string) {

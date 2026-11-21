@@ -5,7 +5,7 @@ async function staffFetch(path: string, init?: RequestInit) {
   return body
 }
 
-export interface StaffPhoto { name: string; path: string; previewUrl: string | null; size: number; uploadedAt: string | null }
+export interface StaffPhoto { name: string; path: string; previewUrl: string | null; originalUrl: string | null; size: number; uploadedAt: string | null }
 export interface StaffPhotoFolder { phone: string; photoCount: number; latestUploadAt: string | null; countCapped: boolean }
 
 export async function loginStaff(username: string, password: string) {

@@ -23,7 +23,7 @@ export default async function handler(request: QueryRequest, response: StreamRes
     enforceSameOrigin(request); enforceRateLimit(request, { limit: 10, windowMs: 10 * 60_000 })
     const { client, environment } = await requireStaff(request)
     const phone = requireCustomerPhone(request.query?.phone)
-    const listed = await listCustomerPhotos(client, phone, 0, 1_000)
+    const listed = await listCustomerPhotos(client, phone, 0, 1_000, { signUrls: false })
     if (!listed.items.length) throw new UploadApiError(404, 'Không có ảnh để tải.')
     response.setHeader('Cache-Control', 'no-store, private')
     response.setHeader('Content-Type', 'application/zip')

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { UploadApiError } from './http.js'
-import { customerPhotoBucket } from './supabaseStorage.js'
+import { customerPhotoBucket, thumbnailPathFor } from './supabaseStorage.js'
 import { normalizeVietnamesePhone } from './uploadValidation.js'
 
 const phonePattern = /^0(?:3|5|7|8|9)\d{8}$/
@@ -73,14 +73,27 @@ export async function listCustomerFolders(client: SupabaseClient, search: string
   return { items, hasMore: offset + items.length < folders.length, nextOffset: offset + items.length }
 }
 
-export async function listCustomerPhotos(client: SupabaseClient, phone: string, offset = 0, limit = 40) {
+// Previews use pre-generated thumbnails (`_thumbs/`) through plain signed URLs.
+// No Supabase Image Transformations are requested (quota: 100 origin images/month on Pro).
+// Older photos without a thumbnail get previewUrl = null and the page shows a placeholder;
+// originalUrl opens the untransformed original only when staff click it.
+export async function listCustomerPhotos(client: SupabaseClient, phone: string, offset = 0, limit = 40, options: { signUrls?: boolean } = {}) {
   const result = await client.storage.from(customerPhotoBucket).list(phone, { limit, offset, sortBy: { column: 'created_at', order: 'desc' } })
   if (result.error) throw new UploadApiError(502, 'Không thể tải danh sách ảnh.')
   const files = result.data.filter((file) => file.id && imagePattern.test(file.name))
-  const signed = await Promise.all(files.map(async (file) => {
-    const path = `${phone}/${file.name}`
-    const preview = await client.storage.from(customerPhotoBucket).createSignedUrl(path, 300, { transform: { width: 360, height: 360, resize: 'contain', quality: 70 } })
-    return { path, name: originalFilename(file.name), size: Number(file.metadata?.size ?? 0), uploadedAt: file.created_at, previewUrl: preview.data?.signedUrl ?? null }
-  }))
-  return { items: signed, hasMore: result.data.length === limit }
+  const items = files.map((file) => ({ path: `${phone}/${file.name}`, name: originalFilename(file.name), size: Number(file.metadata?.size ?? 0), uploadedAt: file.created_at, previewUrl: null as string | null, originalUrl: null as string | null }))
+  if (options.signUrls === false || !items.length) return { items, hasMore: result.data.length === limit }
+  const bucket = client.storage.from(customerPhotoBucket)
+  const [thumbs, originals] = await Promise.all([
+    bucket.createSignedUrls(items.map((item) => thumbnailPathFor(item.path)), 300),
+    bucket.createSignedUrls(items.map((item) => item.path), 300),
+  ])
+  // A missing thumbnail comes back as a per-path error, not a failed call.
+  items.forEach((item, index) => {
+    const thumb = thumbs.data?.[index]
+    const original = originals.data?.[index]
+    item.previewUrl = thumb && !thumb.error && thumb.signedUrl ? thumb.signedUrl : null
+    item.originalUrl = original && !original.error && original.signedUrl ? original.signedUrl : null
+  })
+  return { items, hasMore: result.data.length === limit }
 }
