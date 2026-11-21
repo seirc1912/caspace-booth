@@ -31,7 +31,9 @@ let uploadSessionRequest: Promise<string> | null = null
 let uploadSessionValue: string | null = null
 export const RESUMABLE_UPLOAD_THRESHOLD_BYTES = 6 * 1024 * 1024
 export const RESUMABLE_CHUNK_BYTES = 6 * 1024 * 1024
-export const MAX_UPLOAD_CONCURRENCY = 1
+// Up to 3 files in flight per customer (plan PR 5). Each file keeps its own
+// stable request ID, byte reservation and server verification.
+export const MAX_UPLOAD_CONCURRENCY = 3
 
 export interface UploadTiming {
   finalizationMs: number
@@ -414,7 +416,9 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   const verificationStartedAt = performance.now()
   const completionBody = () => JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, variant, completionToken: prepared.completionToken })
   let completion = await uploadApi('/api/photo-uploads/complete', completionBody(), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.', false)
-  if (completion.status === 401) {
+  // 401: session expired. 403: another parallel lane refreshed the session, so this
+  // file's completion token (bound to the old session) no longer matches → re-init and verify.
+  if (completion.status === 401 || completion.status === 403) {
     clearUploadSession()
     const refreshedInit = await uploadApi('/api/photo-uploads/init', metadata, 'Khởi tạo lại phiên gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
     prepared = await uploadApiResult(refreshedInit, 'init', correlationId, verificationStartedAt) as InitResponse

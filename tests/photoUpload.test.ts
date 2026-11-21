@@ -271,21 +271,21 @@ test('clients without a valid signed session keep the conservative fallback quot
   resetRateLimitsForTests()
 })
 
-test('nine photos upload sequentially in exact order with no overlap', async () => {
+test('nine photos upload with at most three in flight and every photo attempted', async () => {
   let active = 0
   let peak = 0
   const completed: number[] = []
   const failures = await runUploadQueue([0, 1, 2, 3, 4, 5, 6, 7, 8], async (value) => {
     active += 1
     peak = Math.max(peak, active)
-    await new Promise((resolve) => setTimeout(resolve, 2))
+    await new Promise((resolve) => setTimeout(resolve, 2 + (value % 3)))
     active -= 1
     completed.push(value)
   })
-  assert.equal(MAX_UPLOAD_CONCURRENCY, 1)
-  assert.equal(peak, 1)
+  assert.equal(MAX_UPLOAD_CONCURRENCY, 3)
+  assert.equal(peak, 3)
   assert.deepEqual(failures, [])
-  assert.deepEqual(completed, [0, 1, 2, 3, 4, 5, 6, 7, 8])
+  assert.deepEqual([...completed].sort(), [0, 1, 2, 3, 4, 5, 6, 7, 8])
 })
 
 test('a failed photo no longer stops the queue; retry re-sends only the failed photos', async () => {
@@ -328,8 +328,8 @@ test('standard uploads retry network-type failures, stop on client errors and ac
   assert.match(source, /request\.upload\.onprogress = \(event\) => \{ armStallTimer\(\)/)
 })
 
-test('upload transport is always single-file and uses Supabase-required TUS sizing', () => {
-  assert.equal(MAX_UPLOAD_CONCURRENCY, 1)
+test('upload transport is bounded to three files and uses Supabase-required TUS sizing', () => {
+  assert.equal(MAX_UPLOAD_CONCURRENCY, 3)
   assert.equal(RESUMABLE_UPLOAD_THRESHOLD_BYTES, 6 * 1024 * 1024)
   assert.equal(RESUMABLE_CHUNK_BYTES, 6 * 1024 * 1024)
 })
@@ -381,10 +381,10 @@ test('failure telemetry is session-authenticated and logs only allow-listed priv
 
 test('an expired upload session is refreshed before completion without re-uploading file bytes', () => {
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
-  assert.match(source, /if \(completion\.status === 401\)/)
+  assert.match(source, /if \(completion\.status === 401 \|\| completion\.status === 403\)/)
   assert.match(source, /clearUploadSession\(\)/)
   assert.match(source, /const refreshedInit = await uploadApi\('\/api\/photo-uploads\/init'/)
-  const recoveryBlock = source.slice(source.indexOf('if (completion.status === 401)'), source.indexOf('await jsonOrError(completion)'))
+  const recoveryBlock = source.slice(source.indexOf('if (completion.status === 401 || completion.status === 403)'), source.indexOf('await jsonOrError(completion)'))
   assert.doesNotMatch(recoveryBlock, /uploadResumableFile|uploadOriginalFile/)
 })
 
@@ -510,6 +510,21 @@ test('streaming ZIP CRC32 matches the standard reference vector', () => {
   const crc = (updateCrc32(0xffffffff, Buffer.from('123456789')) ^ 0xffffffff) >>> 0
   assert.equal(crc, 0xcbf43926)
 })
+
+test('a 9-photo batch with thumbnails and parallel lanes stays inside per-session limits', () => {
+  resetRateLimitsForTests()
+  const request = { headers: { 'x-forwarded-for': '198.51.100.7' } } as unknown as ApiRequest
+  for (let index = 0; index < 9; index += 1) {
+    // original init + complete, thumbnail init + complete, each with its own reservation
+    enforceCustomerUploadLimits(request, 4 * 1024 * 1024, 'session-parallel', `batch-${index}`)
+    enforceCustomerUploadLimits(request, 0, 'session-parallel')
+    enforceCustomerUploadLimits(request, 50 * 1024, 'session-parallel', `batch-${index}-thumb`)
+    enforceCustomerUploadLimits(request, 0, 'session-parallel')
+  }
+  // retries of the same request ID must not double-count bytes
+  assert.doesNotThrow(() => enforceCustomerUploadLimits(request, 4 * 1024 * 1024, 'session-parallel', 'batch-0'))
+})
+
 test('a stalled TUS upload is resumed, never restarted from byte 0 through the standard upload', () => {
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
   assert.match(source, /if \(stallRestarts < TUS_STALL_RESTARTS\) \{ stallRestarts \+= 1; refreshInactivityTimer\(upload\); upload\.start\(\); return \}/)
