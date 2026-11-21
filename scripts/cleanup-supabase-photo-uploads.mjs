@@ -8,20 +8,25 @@ const bucket = 'customer-photo-uploads'
 const apply = process.argv.includes('--apply')
 const cutoff = Date.now() - 7 * 24 * 60 * 60 * 1000
 const client = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } })
-const root = await client.storage.from(bucket).list('', { limit: 1_000 })
-if (root.error) throw root.error
-
-const expired = []
-for (const prefix of root.data.filter((entry) => entry.id === null).map((entry) => entry.name)) {
-  let offset = 0
-  while (true) {
-    const page = await client.storage.from(bucket).list(prefix, { limit: 1_000, offset, sortBy: { column: 'created_at', order: 'asc' } })
+async function listAll(prefix, column) {
+  const entries = []
+  for (let offset = 0; ; offset += 1_000) {
+    const page = await client.storage.from(bucket).list(prefix, { limit: 1_000, offset, sortBy: { column, order: 'asc' } })
     if (page.error) throw page.error
-    for (const object of page.data) {
+    entries.push(...page.data)
+    if (page.data.length < 1_000) return entries
+  }
+}
+
+// Paginates the root (previously capped at 1,000 folders) and includes the
+// `_thumbs/` sub-folder created for staff previews. Same logic as the daily
+// cron in client/api/_lib/photoRetention.ts.
+const expired = []
+for (const folder of (await listAll('', 'name')).filter((entry) => entry.id === null).map((entry) => entry.name)) {
+  for (const prefix of [folder, `${folder}/_thumbs`]) {
+    for (const object of await listAll(prefix, 'created_at')) {
       if (object.id && object.created_at && Date.parse(object.created_at) < cutoff) expired.push(`${prefix}/${object.name}`)
     }
-    if (page.data.length < 1_000) break
-    offset += page.data.length
   }
 }
 
