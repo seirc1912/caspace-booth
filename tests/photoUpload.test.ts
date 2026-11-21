@@ -407,8 +407,8 @@ test('shared staff username is fixed and the session token is only accepted from
 test('staff login attempts are rate limited independently of photo size quotas', () => {
   resetRateLimitsForTests()
   const request: ApiRequest = { headers: { 'x-forwarded-for': '203.0.113.12' } }
-  for (let attempt = 0; attempt < 5; attempt += 1) enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000 })
-  assert.throws(() => enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000 }), UploadApiError)
+  for (let attempt = 0; attempt < 5; attempt += 1) enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000, scope: 'staff-login' })
+  assert.throws(() => enforceRateLimit(request, { limit: 5, windowMs: 15 * 60_000, scope: 'staff-login' }), UploadApiError)
   resetRateLimitsForTests()
 })
 
@@ -543,4 +543,33 @@ test('uploads read the picked file into memory once (Android lazy files)', async
   assert.deepEqual(new Uint8Array(await copy.arrayBuffer()), new Uint8Array([1, 2, 3]))
   const unreadable = { arrayBuffer: async () => { throw new Error('NotReadableError') } } as unknown as File
   assert.equal(await inMemoryFile(unreadable), unreadable, 'falls back to the original file')
+})
+
+test('customer traffic on a shared shop IP cannot lock staff out of login', () => {
+  resetRateLimitsForTests()
+  const shopWifi = { headers: { 'x-forwarded-for': '203.0.113.50' } } as unknown as ApiRequest
+  for (let index = 0; index < 60; index += 1) enforceRateLimit(shopWifi, { limit: 60, windowMs: 10 * 60_000, scope: 'upload-session' })
+  for (let index = 0; index < 200; index += 1) enforceRateLimit(shopWifi, { limit: 240, windowMs: 10 * 60_000, scope: 'upload-diagnostics' })
+  assert.doesNotThrow(() => enforceRateLimit(shopWifi, { limit: 5, windowMs: 15 * 60_000, scope: 'staff-login' }))
+})
+
+test('every rate-limited endpoint declares its own scope', () => {
+  const files = ['photo-uploads/diagnostics.ts', 'photo-uploads/session.ts', 'staff/folders.ts', 'staff/login.ts', 'staff/session.ts', 'staff/photos/download.ts', 'staff/photos/zip.ts', 'staff/photos/index.ts']
+  const scopes = files.map((file) => readFileSync(new URL(`../client/api/${file}`, import.meta.url), 'utf8').match(/scope: '([a-z-]+)' \}\)/g) ?? [])
+  assert.ok(scopes.every((found) => found.length >= 1))
+  assert.equal(new Set(scopes.flat()).size, scopes.flat().length, 'no two endpoints share a counter')
+})
+
+test('a sweep triggered by a 10-minute endpoint keeps staff-login attempts inside their 15-minute window', () => {
+  resetRateLimitsForTests()
+  const realNow = Date.now
+  try {
+    const start = realNow()
+    const staff = { headers: { 'x-forwarded-for': '203.0.113.77' } } as unknown as ApiRequest
+    Date.now = () => start
+    for (let attempt = 0; attempt < 5; attempt += 1) enforceRateLimit(staff, { limit: 5, windowMs: 15 * 60_000, scope: 'staff-login' })
+    Date.now = () => start + 12 * 60_000
+    for (let index = 0; index < 2_001; index += 1) enforceRateLimit({ headers: { 'x-forwarded-for': `198.18.${index >> 8}.${index & 255}` } } as unknown as ApiRequest, { limit: 60, windowMs: 10 * 60_000, scope: 'upload-session' })
+    assert.throws(() => enforceRateLimit(staff, { limit: 5, windowMs: 15 * 60_000, scope: 'staff-login' }), UploadApiError)
+  } finally { Date.now = realNow }
 })
