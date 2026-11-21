@@ -1,3 +1,4 @@
+import { createThumbnail } from './thumbnail'
 import { inMemoryFile } from './uploadClient'
 
 /**
@@ -10,6 +11,7 @@ import { inMemoryFile } from './uploadClient'
 export const PRELOAD_BUDGET_BYTES = 150 * 1024 * 1024
 
 const cache = new Map<File, Promise<File>>()
+const thumbnails = new Map<File, Promise<File | null>>()
 let reservedBytes = 0
 let chain: Promise<unknown> = Promise.resolve()
 
@@ -25,6 +27,22 @@ export function preloadPhoto(file: File, read: (file: File) => Promise<File> = i
   return pending
 }
 
+/**
+ * The 400px JPEG used both as the on-page preview and as the staff thumbnail.
+ * Showing 16 MB originals in <img> kept ~64 MB decoded bitmaps per photo alive
+ * and made typing laggy on Android; the full image is now decoded once here,
+ * in the same one-at-a-time queue, and released immediately.
+ */
+export function photoThumbnail(file: File, make: (file: File) => Promise<File> = createThumbnail): Promise<File | null> {
+  const existing = thumbnails.get(file)
+  if (existing) return existing
+  const source = cache.get(file)
+  const pending = chain.then(async () => make(source ? await source : file)).catch(() => null)
+  chain = pending
+  thumbnails.set(file, pending)
+  return pending
+}
+
 /** The in-memory copy if one was started, otherwise a fresh read (not cached). */
 export function photoSource(file: File, read: (file: File) => Promise<File> = inMemoryFile) {
   return cache.get(file) ?? read(file)
@@ -35,4 +53,7 @@ export function releasePreload(file: File) {
   reservedBytes = Math.max(0, reservedBytes - file.size)
 }
 
-export function resetPreloadForTests() { cache.clear(); reservedBytes = 0; chain = Promise.resolve() }
+/** Called when the photo leaves the selection. */
+export function forgetPhoto(file: File) { releasePreload(file); thumbnails.delete(file) }
+
+export function resetPreloadForTests() { cache.clear(); thumbnails.clear(); reservedBytes = 0; chain = Promise.resolve() }
