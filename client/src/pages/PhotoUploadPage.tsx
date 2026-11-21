@@ -114,7 +114,14 @@ export function PhotoUploadPage() {
           throw reason
         }
       })
-      if (failures.length) throw failures[0]!.reason
+      if (failures.length) {
+        // Other photos were still sent; only the failed ones need a retry.
+        const first = failures[0]!.reason
+        const detail = first instanceof Error ? ` ${first.message}` : ''
+        throw new Error(okCount > 0
+          ? `Đã gửi ${okCount}/${pending.length} ảnh. ${failures.length} ảnh chưa gửi được — bấm "GỬI LẠI ẢNH LỖI".${detail}`
+          : `Chưa gửi được ${failures.length} ảnh — bấm "GỬI LẠI ẢNH LỖI".${detail}`)
+      }
       setMessage({ kind: 'success', text: successMessage })
       submissionIdRef.current = crypto.randomUUID()
     attemptRef.current = 0
@@ -123,7 +130,7 @@ export function PhotoUploadPage() {
       setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : 'Không thể gửi ảnh. Vui lòng thử lại.' })
     } finally {
       const totalMs = performance.now() - batchStartedAt
-      const failedCount = pending.length - okCount > 0 ? 1 : 0 // the queue stops at the first failure
+      const failedCount = pending.length - okCount // every photo is attempted; the rest failed
       const attempt = activeBatchRef.current?.attempt ?? attemptRef.current
       activeBatchRef.current = null
       reportClientTiming(uploadBatchEvent(runId, { fileCount: pending.length, okCount, failedCount, totalMs, totalBytes, attempt }))
@@ -133,6 +140,7 @@ export function PhotoUploadPage() {
     }
   }
 
+  const failedPhotoCount = photos.filter((photo) => photo.state === 'failed').length
   const overallProgress = calculateOverallUploadProgress(photos.map((photo) => ({ size: photo.file.size, uploadedBytes: photo.uploadedBytes })))
 
   return <PageShell className="bg-[#f3eee7]">
@@ -149,7 +157,7 @@ export function PhotoUploadPage() {
         {uploading ? <div className="mt-5" aria-live="polite"><div className="flex justify-between text-sm font-bold"><span>{overallProgress === 0 ? 'Đang chuẩn bị ảnh…' : 'Đang gửi ảnh…'}</span><span>{overallProgress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-rose-700 transition-[width]" style={{ width: `${overallProgress}%` }} /></div></div> : null}
         {message ? <div className={`mt-5 rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${message.kind === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</div> : null}
         {measureSummary ? <pre className="mt-5 whitespace-pre-wrap rounded-2xl bg-amber-50 px-4 py-3 text-xs font-bold leading-5 text-amber-900" data-testid="measure-summary">{measureSummary}</pre> : null}
-        <button className="mt-5 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40" disabled={uploading || !validPhone || photos.length === 0 || photos.every((photo) => photo.state === 'uploaded')} onClick={submit} type="button">{uploading ? `ĐANG GỬI ${overallProgress}%` : 'GỬI ẢNH'}</button>
+        <button className="mt-5 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40" disabled={uploading || !validPhone || photos.length === 0 || photos.every((photo) => photo.state === 'uploaded')} onClick={submit} type="button">{uploading ? `ĐANG GỬI ${overallProgress}%` : failedPhotoCount > 0 ? `GỬI LẠI ${failedPhotoCount} ẢNH LỖI` : 'GỬI ẢNH'}</button>
       </div>
     </section>
   </PageShell>
