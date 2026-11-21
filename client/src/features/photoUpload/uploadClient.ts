@@ -25,7 +25,10 @@ const API_TIMEOUT_MS = 30_000
 export const UPLOAD_STALL_TIMEOUT_MS = 45_000
 export const UPLOAD_HARD_TIMEOUT_MS = 10 * 60_000
 export const STANDARD_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000, 8_000]
-export const TUS_STALL_RESTARTS = 3
+// TUS: after one resume attempt without progress, switch to the standard
+// upload instead of keeping the customer waiting (seen on Android, 21/11/2026).
+export const TUS_STALL_TIMEOUT_MS = 20_000
+export const TUS_STALL_RESTARTS = 1
 const uploadSessionStorageKey = 'caspace.photo-upload-session.v1'
 let uploadSessionRequest: Promise<string> | null = null
 let uploadSessionValue: string | null = null
@@ -300,18 +303,18 @@ async function uploadResumableFile(input: { contentType: string; correlationId: 
       callback()
     }
     let stallRestarts = 0
-    // A stalled TUS transfer is resumed (HEAD + PATCH from the stored offset), not
-    // restarted from byte 0 through the standard upload. After 3 stalls the file
-    // fails with STORAGE_TUS_STALL; a manual retry resumes from the same offset.
+    // A stalled TUS transfer is resumed once (HEAD + PATCH from the stored offset).
+    // If it stalls again it rejects with STORAGE_TUS_STALL and the caller falls
+    // back to the standard signed upload.
     const refreshInactivityTimer = (upload: TusUpload) => {
       window.clearTimeout(inactivityTimer)
       inactivityTimer = window.setTimeout(() => {
         void upload.abort().finally(() => {
           if (settled) return
           if (stallRestarts < TUS_STALL_RESTARTS) { stallRestarts += 1; refreshInactivityTimer(upload); upload.start(); return }
-          finish(() => reject(new UploadStageError('Mạng bị gián đoạn khi gửi ảnh. Vui lòng thử lại ảnh này để gửi tiếp.', { code: 'STORAGE_TUS_STALL', correlationId: input.correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: stallRestarts, stage: 'tus-transfer', status: 0, transport: 'tus' })))
+          finish(() => reject(new UploadStageError('Gửi ảnh lớn bị treo, chuyển sang cách gửi thường.', { code: 'STORAGE_TUS_STALL', correlationId: input.correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: stallRestarts, stage: 'tus-transfer', status: 0, transport: 'tus' })))
         })
-      }, UPLOAD_STALL_TIMEOUT_MS)
+      }, TUS_STALL_TIMEOUT_MS)
     }
     const upload = new Upload(input.file, {
       endpoint: input.endpoint,
@@ -356,6 +359,11 @@ export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, i
   return failures.sort((left, right) => left.index - right.index)
 }
 
+export async function inMemoryFile(file: File) {
+  try { return new File([await file.arrayBuffer()], file.name, { type: file.type, lastModified: file.lastModified }) }
+  catch { return file }
+}
+
 export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; variant?: 'original' | 'thumbnail'; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
   const variant = input.variant ?? 'original'
   const correlationId = uploadCorrelationId()
@@ -364,9 +372,12 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   const mimeType = supportedImageMime(input.file)
   if (!mimeType) throw new Error('Chỉ hỗ trợ ảnh PNG, JPG và JPEG.')
   const hashStartedAt = performance.now()
+  // Android can hand us a lazily-read File (gallery/cloud provider); slicing it
+  // per TUS chunk then stalls. Read it once into memory (files are ≤ 25 MB).
+  const file = await inMemoryFile(input.file)
   const [prefix, checksum] = await Promise.all([
-    input.file.slice(0, 16).arrayBuffer().then((buffer) => bytesToBase64(new Uint8Array(buffer))),
-    sha256Blob(input.file),
+    file.slice(0, 16).arrayBuffer().then((buffer) => bytesToBase64(new Uint8Array(buffer))),
+    sha256Blob(file),
   ])
   const hashMs = performance.now() - hashStartedAt
   const initializationStartedAt = performance.now()
@@ -385,17 +396,16 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
       if (!prepared.uploadToken || !prepared.resumableEndpoint) throw new Error('Không nhận được phiên gửi ảnh có thể tiếp tục. Vui lòng thử lại.')
       transport = 'tus'
       try {
-        await uploadResumableFile({ contentType: mimeType, correlationId, endpoint: prepared.resumableEndpoint, file: input.file, objectPath: prepared.objectPath, onProgress: input.onProgress, token: prepared.uploadToken })
+        await uploadResumableFile({ contentType: mimeType, correlationId, endpoint: prepared.resumableEndpoint, file, objectPath: prepared.objectPath, onProgress: input.onProgress, token: prepared.uploadToken })
       } catch (reason) {
         if (reason instanceof UploadStageError) await reportUploadFailure(reason.diagnostic)
-        if (reason instanceof UploadStageError && reason.diagnostic.code === 'STORAGE_TUS_STALL') throw reason // network problem: resume TUS on retry
         // Files are capped at 25 MB. The signed standard upload is the proven
         // pre-TUS path and remains scoped to this exact, non-overwritable object.
         transport = 'standard'
         tusFallback = true
         input.onProgress({ loaded: 0, total: input.file.size })
         // TUS may already have stored the object (lost final response) → a Duplicate answer is accepted and /complete verifies the bytes.
-        try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId, true) }
+        try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, file, input.onProgress, correlationId, true) }
         catch (fallbackReason) {
           if (fallbackReason instanceof UploadStageError) await reportUploadFailure(fallbackReason.diagnostic)
           throw fallbackReason
@@ -403,7 +413,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
       }
     } else {
       transport = 'standard'
-      try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
+      try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, file, input.onProgress, correlationId) }
       catch (reason) {
         if (reason instanceof UploadStageError) await reportUploadFailure(reason.diagnostic)
         throw reason
