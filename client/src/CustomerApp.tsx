@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { EditorErrorBoundary } from './components/editor/EditorErrorBoundary'
 import { useBranding } from './contexts/BrandingContext'
 import { runPerFrameSave, saveComposition } from './features/orders/services/saveComposition'
-import { formatMegabytes, formatSeconds, frameSaveEvent, measurementLabel, newRunId, reportClientTiming } from './features/metrics/clientTiming'
+import { frameSaveEvent, newRunId, reportClientTiming } from './features/metrics/clientTiming'
 import { prefetchTemplateExportAssets, RemoteExportAssetCache, RenderAssetCache } from './features/orders/services/renderComposition'
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
@@ -68,14 +68,12 @@ export function CustomerApp() {
           reportClientTiming(frameSaveEvent(newRunId(), saved))
           return saved
         },
-        (saved) => {
+        () => {
           booth.completeCurrentFrame()
-          // Measurement mode (?measure=…): show render time and file size for the tester (§4.4).
-          setSaveConfirmation(measurementLabel()
-            ? `Frame ${frameNumber} saved · ĐO: ${formatSeconds(saved.renderMs)} · ${formatMegabytes(saved.bytes)} · ${saved.width}×${saved.height} ${saved.format.toUpperCase()}`
-            : `Frame ${frameNumber} photo saved.`)
+          // Timings are only logged (frame-save); nothing is shown to customers.
+          setSaveConfirmation(`Frame ${frameNumber} photo saved.`)
           if (saveConfirmationTimer.current !== null) window.clearTimeout(saveConfirmationTimer.current)
-          saveConfirmationTimer.current = window.setTimeout(() => { saveConfirmationTimer.current = null; setSaveConfirmation(null) }, measurementLabel() ? 8000 : 2200)
+          saveConfirmationTimer.current = window.setTimeout(() => { saveConfirmationTimer.current = null; setSaveConfirmation(null) }, 2200)
         },
       )
     }

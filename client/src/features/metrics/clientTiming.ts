@@ -101,17 +101,4 @@ export function reportClientTiming(event: ReturnType<typeof uploadFileEvent> | R
   void sendUploadDiagnostic({ ...event, ...environment() })
 }
 
-export const formatSeconds = (ms: number) => `${(ms / 1000).toFixed(1).replace('.', ',')} s`
-export const formatMegabytes = (bytes: number) => `${(bytes / MB).toFixed(2).replace('.', ',')} MB`
 
-const sumTiming = (timings: UploadTiming[], key: 'hashMs' | 'initializationMs' | 'transferMs' | 'verificationMs') => timings.reduce((total, timing) => total + timing[key], 0)
-
-/** On-screen result for the tester in measurement mode (?measure=…). */
-export function summarizeBatch(fileCount: number, okCount: number, totalMs: number, timings: UploadTiming[]) {
-  const fallbacks = timings.filter((timing) => timing.tusFallback).length
-  return [
-    `ĐO [${measurementLabel() ?? '-'}] · ${okCount}/${fileCount} file · tổng ${formatSeconds(totalMs)}`,
-    `Băm ${formatSeconds(sumTiming(timings, 'hashMs'))} · Khởi tạo ${formatSeconds(sumTiming(timings, 'initializationMs'))} · Truyền ${formatSeconds(sumTiming(timings, 'transferMs'))} · Kiểm tra ${formatSeconds(sumTiming(timings, 'verificationMs'))}`,
-    fallbacks ? `TUS hỏng → gửi lại thường: ${fallbacks} file` : '',
-  ].filter(Boolean).join('\n')
-}
