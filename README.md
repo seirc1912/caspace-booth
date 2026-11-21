@@ -1,50 +1,46 @@
-# SelfBooth
+# Cá Space SelfBooth
 
-SelfBooth is a public, mobile-first web application for self-photo booth studios. Customers access the production application at `https://booth.caspace.vn`, receive an isolated signed session, select a print template, fill its frames, and create print-ready files.
+Mobile-first web app for the Cá Space self-photo booth. Customers compose print frames on their own phone and send the finished files to the shop; staff download them for printing.
 
-The frontend provides template selection, photo composition, print preview, and 300-DPI export settings. The export API produces PNG, JPG, and PDF files under session-isolated directories. Photo watching, realtime sync, direct printing, and QR handoff are intentionally not implemented.
+Production: `https://caspace.vn` — Vercel project `caspace` (team `caspace1`, root directory `client/`, functions region `icn1`) + Supabase (Seoul).
 
-Brand name, website, colors, logo, favicon, and copyright settings are centralized in `client/src/config/branding.ts`.
-Print layouts are automatically discovered from package folders under `templates/`. Each package contains `template.json`, `background.png`, and `thumbnail.png`.
+## How it works
 
-The frontend also includes an Admin Template Studio at `/admin`. Build the trusted admin deployment with `VITE_APP_ROLE=admin`; customer builds return a neutral not-found page for every admin route. This build-time boundary is ready to be replaced by server-verified administrator authorization when authentication is introduced.
+| Step | Route | What happens | Main code |
+|---|---|---|---|
+| 1 | `/` → `/rooms` → `/editor` | Customer enters a phone number, picks a room and fills each frame **in the browser**. Drafts live in IndexedDB. | `client/src/CustomerApp.tsx`, `hooks/useSelfBooth.ts`, `features/drafts/` |
+| 2 | `/editor` save | The phone renders the frame at the template's exact canvas size and exports **JPEG q0.95** (PNG before PR 4), then shares/downloads it. | `features/orders/services/` |
+| 3 | `/upload-anh` | Customer sends the saved frames to the private bucket `customer-photo-uploads/{phone}/` via `client/api/photo-uploads/*` (init → direct upload to Supabase, TUS for > 6 MB → server verification). A 400px thumbnail is uploaded to `{phone}/_thumbs/` for staff previews. | `pages/PhotoUploadPage.tsx`, `features/photoUpload/`, `client/api/photo-uploads/` |
+| 4 | `/staff/photos` | Staff log in, open a customer folder, preview thumbnails (no Supabase Image Transformations) and download originals / ZIP. | `pages/StaffPhotosPage.tsx`, `client/api/staff/` |
+| — | `/admin` | Template/room/branding studio, protected by the Supabase `admin_login` RPC. Same bundle as the customer app, routed by path. | `features/admin/` |
+| — | `/color-lab` | Standalone colour tool, not part of the print flow. | `pages/ColorLabPage.tsx` |
 
-## Prerequisites
+Not deployed / legacy: `server/` (Express + Socket.io), `folder-watcher/`, the `Dockerfile`. See `docs/ARCHITECTURE.md` for history and `docs/KE-HOACH-TOI-UU-UPLOAD-ANH.md` for the current upload optimisation plan.
 
-- Node.js 22 or newer
-- npm 10 or newer
+## Development
 
-## Getting started
+Requires Node.js 22+ and npm 10+.
 
 ```bash
 npm install
-npm run dev
+npm run dev            # Vite on http://localhost:5173
+npm test               # node --test, tests/*.test.ts
+npm run typecheck -w client
+npm run lint -w client
+npm run build -w client
 ```
 
-Development uses `http://localhost:5173` with a same-origin `/api` proxy. Production uses relative API requests from `https://booth.caspace.vn` and does not depend on localhost.
+Environment (Vercel → Project Settings → Environment Variables):
 
-Copy `server/.env.example` to `server/.env` before changing server configuration.
+| Variable | Used by |
+|---|---|
+| `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` | browser |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | `client/api` functions only — never in `VITE_*` |
+| `STAFF_PHOTO_AUTH_EMAIL`, `STAFF_PHOTO_AUTH_USER_ID` | staff login |
+| `CRON_SECRET`, `PHOTO_UPLOAD_CLEANUP_ENABLED` | daily 7-day cleanup cron (dry run unless `true`) |
 
-## Commands
+## Operations
 
-```bash
-npm run dev
-npm run build
-npm run lint
-npm run typecheck
-```
-
-See [PROJECT.md](PROJECT.md) for architecture and [TASKS.md](TASKS.md) for the implementation roadmap.
-
-## Production container
-
-```bash
-docker build -t selfbooth .
-docker run --rm -p 3000:3000 \
-  -e SESSION_SECRET="replace-with-a-long-random-production-secret" \
-  -e CLIENT_ORIGINS="https://booth.caspace.vn" \
-  -v selfbooth-exports:/app/exports \
-  selfbooth
-```
-
-Terminate TLS for `booth.caspace.vn` at the deployment platform or reverse proxy and forward traffic to port 3000.
+- Upload performance report (read-only, Vercel logs): `node scripts/upload-timing-report.mjs --since 30d`. Measurement mode on a phone: open any page with `?measure=wifi` (or `4g`, `5g`, `other`).
+- Storage retention: `client/api/cron/cleanup-photo-uploads.ts` (daily 03:00 VN) or `scripts/cleanup-supabase-photo-uploads.mjs [--apply]`.
+- Supabase setup notes: `docs/SUPABASE_PHOTO_UPLOAD.md`, `docs/SUPABASE_STAFF_PHOTOS.md`.
