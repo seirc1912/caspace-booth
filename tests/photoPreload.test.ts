@@ -51,3 +51,12 @@ test('upload page preloads on pick, shows a preparing state and releases memory'
   const client = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
   assert.match(client, /await \(input\.source \?\? inMemoryFile\(input\.file\)\)/)
 })
+
+test('upload page asks for photos first, then the phone number', () => {
+  const page = readFileSync(new URL('../client/src/pages/PhotoUploadPage.tsx', import.meta.url), 'utf8')
+  const picker = page.indexOf('1. Chọn ảnh cần in')
+  const phone = page.indexOf('2. Số điện thoại nhận ảnh')
+  assert.ok(picker > 0 && phone > picker, 'photo picker is above the phone field')
+  assert.ok(page.indexOf('+ CHỌN ẢNH PNG / JPG') < page.indexOf('id="upload-phone"'))
+  assert.match(page, /if \(!validPhone\) window\.setTimeout\(\(\) => phoneRef\.current\?\.focus\(\), 0\)/)
+})
