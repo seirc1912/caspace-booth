@@ -140,7 +140,7 @@ test('signed permission targets one exact object, disables overwrite, and expose
   assert.equal(mock.calls.at(-1)?.upsert, false)
   assert.match(result.uploadUrl ?? '', /\/object\/upload\/sign\/customer-photo-uploads\//)
   assert.equal(result.uploadToken, 'signed')
-  assert.equal(result.resumableEndpoint, 'https://project.storage.supabase.co/storage/v1/upload/resumable')
+  assert.equal(result.resumableEndpoint, 'https://project.storage.supabase.co/storage/v1/upload/resumable/sign')
   assert.equal('downloadUrl' in result, false)
   assert.equal('serviceRoleKey' in result, false)
 })
@@ -324,7 +324,7 @@ test('standard uploads retry network-type failures, stop on client errors and ac
   assert.equal(isDuplicateUploadResponse(400, '{"error":"InvalidKey"}'), false)
   assert.ok(UPLOAD_STALL_TIMEOUT_MS <= 60_000, 'customers no longer wait 5 minutes before an error')
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
-  assert.match(source, /retryCount > 0 && isDuplicateUploadResponse/, 'duplicate is only trusted on a retry; verification still checks the bytes')
+  assert.match(source, /\(retryCount > 0 \|\| mayAlreadyExist\) && isDuplicateUploadResponse/, 'duplicate is only trusted on a retry or after TUS; verification still checks the bytes')
   assert.match(source, /request\.upload\.onprogress = \(event\) => \{ armStallTimer\(\)/)
 })
 
@@ -341,7 +341,7 @@ test('TUS uploads retain bounded retries and only resume a fresh same-origin upl
   assert.match(source, /resumeFromPreviousUpload\(resumable\)/)
   assert.match(source, /removeFingerprintOnSuccess:\s*true/)
   const now = Date.parse('2026-10-21T10:00:00Z')
-  const endpoint = 'https://project.storage.supabase.co/storage/v1/upload/resumable'
+  const endpoint = 'https://project.storage.supabase.co/storage/v1/upload/resumable/sign'
   assert.equal(isFreshTusUpload({ creationTime: '2026-10-21T09:00:00Z', uploadUrl: `${endpoint}/fresh` }, endpoint, now), true)
   assert.equal(isFreshTusUpload({ creationTime: '2026-10-20T09:00:00Z', uploadUrl: `${endpoint}/expired` }, endpoint, now), false)
   assert.equal(isFreshTusUpload({ creationTime: '2026-10-21T09:00:00Z', uploadUrl: 'https://attacker.example/resume' }, endpoint, now), false)
@@ -509,4 +509,11 @@ test('print queue ignores stale overlapping refresh responses', () => {
 test('streaming ZIP CRC32 matches the standard reference vector', () => {
   const crc = (updateCrc32(0xffffffff, Buffer.from('123456789')) ^ 0xffffffff) >>> 0
   assert.equal(crc, 0xcbf43926)
+})
+test('a stalled TUS upload is resumed, never restarted from byte 0 through the standard upload', () => {
+  const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
+  assert.match(source, /if \(stallRestarts < TUS_STALL_RESTARTS\) \{ stallRestarts \+= 1; refreshInactivityTimer\(upload\); upload\.start\(\); return \}/)
+  assert.match(source, /reason\.diagnostic\.code === 'STORAGE_TUS_STALL'\) throw reason/)
+  assert.match(source, /uploadOriginalFile\(prepared\.uploadUrl, input\.file, input\.onProgress, correlationId, true\)/, 'TUS fallback accepts Duplicate')
+  assert.match(source, /candidate\.metadata\?\.objectName === input\.objectPath && isFreshTusUpload/, 'resume only the same object path')
 })
