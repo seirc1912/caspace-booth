@@ -56,10 +56,10 @@ export async function createThumbnail(file: File) {
 let chain: Promise<void> = Promise.resolve()
 
 /** Queues one thumbnail after its original was verified; runs one at a time in the background. */
-export function queueThumbnailUpload(input: { file: File; phone: string; requestId: string }) {
+export function queueThumbnailUpload(input: { file: File; thumbnail?: Promise<File | null>; phone: string; requestId: string }) {
   chain = chain.then(async () => {
     try {
-      const thumbnail = await createThumbnail(input.file)
+      const thumbnail = (await input.thumbnail) ?? await createThumbnail(input.file)
       await uploadPhotoToStorage({ file: thumbnail, phone: input.phone, requestId: `${input.requestId}-thumb`, variant: 'thumbnail', onProgress: () => {}, onTiming: () => {} })
     } catch (reason) {
       console.warn('[photo-upload] thumbnail skipped', reason instanceof Error ? reason.name : 'unknown')

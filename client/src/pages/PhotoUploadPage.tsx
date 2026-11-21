@@ -3,14 +3,14 @@ import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
 import { newRunId, reportClientTiming, uploadBatchEvent, uploadFileEvent } from '../features/metrics/clientTiming'
 import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
-import { photoSource, preloadPhoto, releasePreload } from '../features/photoUpload/preload'
+import { forgetPhoto, photoSource, photoThumbnail, preloadPhoto, releasePreload } from '../features/photoUpload/preload'
 import { queueThumbnailUpload } from '../features/photoUpload/thumbnail'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, PHOTO_UPLOAD_MAX_FILES, snapshotSelectedFiles, validateSelectedFiles } from '../features/photoUpload/validation'
 
 interface SelectedPhoto {
   file: File
   id: string
-  previewUrl: string
+  previewUrl: string | null // small JPEG made on the phone; never the full-size original
   prepared: boolean // file bytes read into memory (slow on some Android phones)
   progress: number
   uploadedBytes: number
@@ -20,7 +20,7 @@ interface SelectedPhoto {
 const successMessage = 'Ảnh của bạn đã được gửi thành công đến Cá Space! Vui lòng cung cấp số điện thoại cho nhân viên để nhận ảnh in nhé.'
 
 function makePhoto(file: File): SelectedPhoto {
-  return { file, id: crypto.randomUUID(), previewUrl: URL.createObjectURL(file), prepared: false, progress: 0, uploadedBytes: 0, state: 'ready' }
+  return { file, id: crypto.randomUUID(), previewUrl: null, prepared: false, progress: 0, uploadedBytes: 0, state: 'ready' }
 }
 
 export function PhotoUploadPage() {
@@ -38,7 +38,7 @@ export function PhotoUploadPage() {
   const validPhone = isValidVietnamesePhone(phone)
 
   useEffect(() => { photosRef.current = photos }, [photos])
-  useEffect(() => () => { for (const photo of photosRef.current) { URL.revokeObjectURL(photo.previewUrl); releasePreload(photo.file) } }, [])
+  useEffect(() => () => { for (const photo of photosRef.current) { if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl); forgetPhoto(photo.file) } }, [])
   const markPrepared = (file: File) => setPhotos((current) => current.map((item) => item.file === file && !item.prepared ? { ...item, prepared: true } : item))
   // A customer closing/leaving the page mid-upload is reported as an abandoned batch.
   useEffect(() => {
@@ -62,7 +62,14 @@ export function PhotoUploadPage() {
     if (error) { setMessage({ kind: 'error', text: error }); return }
     setPhotos((current) => [...current, ...selectedFiles.map(makePhoto)])
     // Start reading now (sequential, memory-bounded) so the wait overlaps with typing the phone number.
-    for (const file of selectedFiles) void preloadPhoto(file)?.then(() => markPrepared(file), () => undefined)
+    for (const file of selectedFiles) {
+      void preloadPhoto(file)?.then(() => markPrepared(file), () => undefined)
+      void photoThumbnail(file).then((thumbnail) => {
+        if (!photosRef.current.some((item) => item.file === file)) return // removed meanwhile
+        const previewUrl = URL.createObjectURL(thumbnail ?? file)
+        setPhotos((current) => current.map((item) => item.file === file && !item.previewUrl ? { ...item, previewUrl } : item))
+      })
+    }
     // Photos first, then the phone number: the photos are read while the customer types.
     if (!validPhone) window.setTimeout(() => phoneRef.current?.focus(), 0)
     submissionIdRef.current = crypto.randomUUID()
@@ -72,7 +79,7 @@ export function PhotoUploadPage() {
   const removePhoto = (id: string) => {
     setPhotos((current) => {
       const removed = current.find((photo) => photo.id === id)
-      if (removed) { URL.revokeObjectURL(removed.previewUrl); releasePreload(removed.file) }
+      if (removed) { if (removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); forgetPhoto(removed.file) }
       return current.filter((photo) => photo.id !== id)
     })
     submissionIdRef.current = crypto.randomUUID()
@@ -115,8 +122,8 @@ export function PhotoUploadPage() {
           })
           okCount += 1
           const thumbnailRequestId = `${submissionIdRef.current}-${index}`
-          // Thumbnail from the in-memory copy, then free it (the original stays selectable for retries).
-          void source.then((file) => queueThumbnailUpload({ file, phone: normalizedPhone, requestId: thumbnailRequestId })).finally(() => releasePreload(photo.file))
+          // Upload the preview JPEG made at pick time as the staff thumbnail, then free the in-memory copy.
+          void queueThumbnailUpload({ file: photo.file, thumbnail: photoThumbnail(photo.file), phone: normalizedPhone, requestId: thumbnailRequestId }).finally(() => releasePreload(photo.file))
           if (activeBatchRef.current?.runId === runId) activeBatchRef.current.okCount = okCount
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
         } catch (reason) {
@@ -161,7 +168,7 @@ export function PhotoUploadPage() {
         <p className="text-sm font-black">1. Chọn ảnh cần in</p>
         <button className="mt-2 min-h-14 w-full rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 px-5 font-black text-stone-700 transition hover:border-stone-950 disabled:opacity-50" disabled={uploading || photos.length >= PHOTO_UPLOAD_MAX_FILES} onClick={() => inputRef.current?.click()} type="button">+ CHỌN ẢNH PNG / JPG</button>
         <input accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="Chọn ảnh để gửi" className="sr-only" disabled={uploading} multiple onChange={(event) => { addFiles(event.currentTarget.files); event.currentTarget.value = '' }} ref={inputRef} type="file" />
-        {photos.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{photos.map((photo) => <article className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 p-3" key={photo.id}><img alt="" className="size-16 shrink-0 rounded-xl object-cover" src={photo.previewUrl} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{photo.file.name}</p><p className="mt-1 text-xs text-stone-500">{(photo.file.size / 1024 / 1024).toFixed(1)} MB · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? (photo.prepared ? `${photo.progress}%` : 'Đang chuẩn bị…') : photo.prepared ? 'Sẵn sàng' : 'Đang chuẩn bị…'}</p>{photo.state === 'uploading' ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-stone-950 transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}</div><button aria-label={`Xóa ${photo.file.name}`} className="grid size-11 shrink-0 place-items-center rounded-full bg-stone-100 text-lg font-bold disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button">×</button></article>)}</div> : <p className="mt-4 text-center text-sm text-stone-400">Chưa chọn ảnh.</p>}
+        {photos.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{photos.map((photo) => <article className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 p-3" key={photo.id}>{photo.previewUrl ? <img alt="" className="size-16 shrink-0 rounded-xl object-cover" src={photo.previewUrl} /> : <div aria-hidden className="size-16 shrink-0 animate-pulse rounded-xl bg-stone-100" />}<div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{photo.file.name}</p><p className="mt-1 text-xs text-stone-500">{(photo.file.size / 1024 / 1024).toFixed(1)} MB · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? (photo.prepared ? `${photo.progress}%` : 'Đang chuẩn bị…') : photo.prepared ? 'Sẵn sàng' : 'Đang chuẩn bị…'}</p>{photo.state === 'uploading' ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-stone-950 transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}</div><button aria-label={`Xóa ${photo.file.name}`} className="grid size-11 shrink-0 place-items-center rounded-full bg-stone-100 text-lg font-bold disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button">×</button></article>)}</div> : <p className="mt-4 text-center text-sm text-stone-400">Chưa chọn ảnh.</p>}
         <label className="mt-6 block text-sm font-black" htmlFor="upload-phone">2. Số điện thoại nhận ảnh</label>
         <input aria-invalid={phone.length > 0 && !validPhone} autoComplete="tel" className="mt-2 min-h-14 w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-100" disabled={uploading} id="upload-phone" ref={phoneRef} inputMode="tel" onChange={(event) => { setPhone(event.target.value); setMessage(null) }} placeholder="Nhập số điện thoại của bạn" type="tel" value={phone} />
         {phone.length > 0 && !validPhone ? <p className="mt-2 text-sm font-semibold text-rose-700">Vui lòng nhập đúng số điện thoại Việt Nam.</p> : null}
