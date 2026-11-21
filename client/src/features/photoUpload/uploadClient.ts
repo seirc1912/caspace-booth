@@ -101,7 +101,12 @@ export async function sendUploadDiagnostic(payload: object) {
   } catch { /* best effort only */ }
 }
 
+// Thumbnail uploads are best effort; their failures must not be counted as
+// customer upload failures in [photo-upload:failure].
+const silentCorrelationIds = new Set<string>()
+
 async function reportUploadFailure(diagnostic: UploadFailureDiagnostic) {
+  if (silentCorrelationIds.has(diagnostic.correlationId)) return
   await sendUploadDiagnostic(diagnostic)
 }
 
@@ -273,8 +278,10 @@ export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, i
   return []
 }
 
-export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
+export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; variant?: 'original' | 'thumbnail'; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
+  const variant = input.variant ?? 'original'
   const correlationId = uploadCorrelationId()
+  if (variant === 'thumbnail') silentCorrelationIds.add(correlationId)
   const totalStartedAt = performance.now()
   const mimeType = supportedImageMime(input.file)
   if (!mimeType) throw new Error('Chỉ hỗ trợ ảnh PNG, JPG và JPEG.')
@@ -285,7 +292,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   ])
   const hashMs = performance.now() - hashStartedAt
   const initializationStartedAt = performance.now()
-  const metadata = JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId })
+  const metadata = JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, variant })
   const init = await uploadApi('/api/photo-uploads/init', metadata, 'Chuẩn bị gửi ảnh quá thời gian chờ. Vui lòng thử lại.')
   let prepared = await uploadApiResult(init, 'init', correlationId, initializationStartedAt) as InitResponse
   if (!prepared.completionToken) throw new Error('Không nhận được phiên xác minh ảnh an toàn. Vui lòng thử lại.')
@@ -324,7 +331,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   }
   const transferMs = performance.now() - transferStartedAt
   const verificationStartedAt = performance.now()
-  const completionBody = () => JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, completionToken: prepared.completionToken })
+  const completionBody = () => JSON.stringify({ phone: normalizeVietnamesePhone(input.phone), filename: input.file.name, objectPath: prepared.objectPath, mimeType, size: input.file.size, prefix, sha256: checksum, requestId: input.requestId, variant, completionToken: prepared.completionToken })
   let completion = await uploadApi('/api/photo-uploads/complete', completionBody(), 'Xác minh ảnh quá thời gian chờ. Ảnh vẫn được giữ để bạn thử lại.', false)
   if (completion.status === 401) {
     clearUploadSession()
