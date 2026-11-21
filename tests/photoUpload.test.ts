@@ -7,7 +7,7 @@ import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
 import { CUSTOMER_UPLOAD_SESSION_BYTES, CUSTOMER_UPLOAD_SHARED_IP_BYTES, CUSTOMER_UPLOAD_WINDOW_MS, enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { createUploadCompletionToken, createUploadSessionToken, verifyUploadCompletionToken, verifyUploadSessionToken } from '../client/api/_lib/uploadSession.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
-import { calculateOverallUploadProgress, classifyTusFailure, isFreshTusUpload, MAX_UPLOAD_CONCURRENCY, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
+import { calculateOverallUploadProgress, classifyTusFailure, isDuplicateUploadResponse, isFreshTusUpload, isRetryableUploadStatus, MAX_UPLOAD_CONCURRENCY, STANDARD_UPLOAD_RETRY_DELAYS_MS, UPLOAD_STALL_TIMEOUT_MS, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
@@ -288,18 +288,44 @@ test('nine photos upload sequentially in exact order with no overlap', async () 
   assert.deepEqual(completed, [0, 1, 2, 3, 4, 5, 6, 7, 8])
 })
 
-test('a failed photo stops the queue and retry resumes from that photo without repeating successes', async () => {
+test('a failed photo no longer stops the queue; retry re-sends only the failed photos', async () => {
   const uploaded = new Set<number>()
   const firstAttempt = await runUploadQueue([0, 1, 2, 3], async (value) => {
     if (value === 2) throw new Error('expected failure')
     uploaded.add(value)
   })
-  assert.deepEqual([...uploaded], [0, 1])
+  assert.deepEqual([...uploaded].sort(), [0, 1, 3])
   assert.deepEqual(firstAttempt.map(({ index }) => index), [2])
   const pending = [0, 1, 2, 3].filter((value) => !uploaded.has(value))
   const retry = await runUploadQueue(pending, async (value) => { uploaded.add(value) })
   assert.deepEqual(retry, [])
-  assert.deepEqual([...uploaded], [0, 1, 2, 3])
+  assert.deepEqual([...uploaded].sort(), [0, 1, 2, 3])
+})
+
+test('queue honours an explicit concurrency bound and reports every failure in order', async () => {
+  let active = 0
+  let peak = 0
+  const failures = await runUploadQueue([0, 1, 2, 3, 4, 5, 6, 7, 8], async (value) => {
+    active += 1; peak = Math.max(peak, active)
+    await new Promise((resolve) => setTimeout(resolve, 3))
+    active -= 1
+    if (value % 4 === 1) throw new Error(`fail ${value}`)
+  }, 3)
+  assert.equal(peak, 3)
+  assert.deepEqual(failures.map(({ index }) => index), [1, 5])
+})
+
+test('standard uploads retry network-type failures, stop on client errors and accept a duplicate after a lost response', () => {
+  for (const status of [0, 408, 429, 500, 502, 503]) assert.equal(isRetryableUploadStatus(status), true, String(status))
+  for (const status of [400, 401, 403, 404, 413, 415]) assert.equal(isRetryableUploadStatus(status), false, String(status))
+  assert.deepEqual(STANDARD_UPLOAD_RETRY_DELAYS_MS, [1_000, 3_000, 8_000])
+  assert.equal(isDuplicateUploadResponse(409, ''), true)
+  assert.equal(isDuplicateUploadResponse(400, '{"statusCode":"409","error":"Duplicate","message":"The resource already exists"}'), true)
+  assert.equal(isDuplicateUploadResponse(400, '{"error":"InvalidKey"}'), false)
+  assert.ok(UPLOAD_STALL_TIMEOUT_MS <= 60_000, 'customers no longer wait 5 minutes before an error')
+  const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
+  assert.match(source, /retryCount > 0 && isDuplicateUploadResponse/, 'duplicate is only trusted on a retry; verification still checks the bytes')
+  assert.match(source, /request\.upload\.onprogress = \(event\) => \{ armStallTimer\(\)/)
 })
 
 test('upload transport is always single-file and uses Supabase-required TUS sizing', () => {

@@ -8,11 +8,11 @@ import { deviceClass, frameSaveEvent, networkClass, parseMeasureParam, sizeBand,
 
 const runId = '0f3c2a1e-5b6d-4c7e-8f90-123456789abc'
 const env = { device: 'ios', network: 'unknown', measure: 'wifi' }
-const timing = { finalizationMs: 0, hashMs: 310, initializationMs: 120, transferMs: 2400, verificationMs: 780, totalMs: 3610, transport: 'standard' as const, tusFallback: false }
+const timing = { finalizationMs: 0, hashMs: 310, initializationMs: 120, transferMs: 2400, verificationMs: 780, totalMs: 3610, transport: 'standard' as const, tusFallback: false, transferRetries: 1 }
 
 test('builders emit only allow-listed fields and round-trip through the server schema', () => {
   const file = uploadFileEvent(runId, timing, { size: 4 * 1024 * 1024, type: 'image/png', name: '0901234567-khung.png' })
-  assert.deepEqual(parseClientTiming({ ...file, ...env }), { event: 'upload-file', runId, ...env, hashMs: 310, initializationMs: 120, transferMs: 2400, verificationMs: 780, totalMs: 3610, transport: 'standard', tusFallback: false, sizeBand: '3-6MB', mime: 'png', bytes: 4 * 1024 * 1024 })
+  assert.deepEqual(parseClientTiming({ ...file, ...env }), { event: 'upload-file', runId, ...env, hashMs: 310, initializationMs: 120, transferMs: 2400, verificationMs: 780, totalMs: 3610, transport: 'standard', tusFallback: false, sizeBand: '3-6MB', mime: 'png', bytes: 4 * 1024 * 1024, transferRetries: 1 })
   assert.ok(!JSON.stringify(file).includes('0901234567'), 'filename must never be sent')
 
   const batch = uploadBatchEvent(runId, { fileCount: 9, okCount: 8, failedCount: 1, totalMs: 35_123.4, totalBytes: 9 * 4 * 1024 * 1024, attempt: 2 })

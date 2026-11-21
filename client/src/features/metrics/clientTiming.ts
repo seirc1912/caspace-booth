@@ -76,7 +76,7 @@ export function uploadFileEvent(runId: string, timing: UploadTiming, file: { siz
   return {
     kind: 'timing', event: 'upload-file', runId,
     hashMs: timing.hashMs, initializationMs: timing.initializationMs, transferMs: timing.transferMs, verificationMs: timing.verificationMs, totalMs: timing.totalMs,
-    transport: timing.transport, tusFallback: timing.tusFallback, sizeBand: sizeBand(file.size), mime, bytes: file.size,
+    transport: timing.transport, tusFallback: timing.tusFallback, sizeBand: sizeBand(file.size), mime, bytes: file.size, transferRetries: timing.transferRetries,
   } as const
 }
 

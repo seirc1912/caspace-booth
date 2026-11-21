@@ -20,7 +20,11 @@ interface InitResponse {
 }
 
 const API_TIMEOUT_MS = 30_000
-const UPLOAD_TIMEOUT_MS = 5 * 60_000
+// Standard upload: fail fast when no byte moves for this long (instead of a fixed
+// 5-minute wait), then retry automatically on network-type failures.
+export const UPLOAD_STALL_TIMEOUT_MS = 45_000
+export const UPLOAD_HARD_TIMEOUT_MS = 10 * 60_000
+export const STANDARD_UPLOAD_RETRY_DELAYS_MS = [1_000, 3_000, 8_000]
 const uploadSessionStorageKey = 'caspace.photo-upload-session.v1'
 let uploadSessionRequest: Promise<string> | null = null
 let uploadSessionValue: string | null = null
@@ -37,6 +41,8 @@ export interface UploadTiming {
   transport: 'existing' | 'standard' | 'tus'
   /** TUS failed and the file was re-sent through the standard signed upload. */
   tusFallback: boolean
+  /** Automatic standard-upload retries that were needed for this file. */
+  transferRetries: number
   verificationMs: number
 }
 
@@ -205,27 +211,77 @@ export async function sha256Blob(blob: Blob) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string) {
-  return new Promise<string>((resolve, reject) => {
+type StandardAttemptResult = 'ok' | 'exists'
+
+export function isRetryableUploadStatus(status: number) {
+  return status === 0 || status === 408 || status === 429 || status >= 500
+}
+
+/** A retry may hit an object the previous (lost) response already stored; verification proves its bytes. */
+export function isDuplicateUploadResponse(status: number, body: string) {
+  return status === 409 || (status === 400 && /duplicate|already exists/i.test(body))
+}
+
+function uploadOriginalFileOnce(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string, retryCount: number) {
+  return new Promise<StandardAttemptResult>((resolve, reject) => {
     const startedAt = performance.now()
     const request = new XMLHttpRequest()
+    let stallTimer = 0
+    let stalled = false
+    const armStallTimer = () => {
+      window.clearTimeout(stallTimer)
+      stallTimer = window.setTimeout(() => { stalled = true; request.abort() }, UPLOAD_STALL_TIMEOUT_MS)
+    }
+    const fail = (status: number, code: string, message = uploadErrorMessage(status)) => {
+      window.clearTimeout(stallTimer)
+      reject(new UploadStageError(message, { code, correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount, stage: 'standard-transfer', status, transport: 'standard' }))
+    }
     request.open('PUT', uploadUrl)
-    request.timeout = UPLOAD_TIMEOUT_MS
+    request.timeout = UPLOAD_HARD_TIMEOUT_MS
     request.setRequestHeader('x-upsert', 'false')
-    request.upload.onprogress = (event) => onProgress({ loaded: event.loaded, total: event.lengthComputable ? event.total : file.size })
-    const fail = (status: number, code: string, message = uploadErrorMessage(status)) => reject(new UploadStageError(message, { code, correlationId, durationMs: Math.round(performance.now() - startedAt), retryCount: 0, stage: 'standard-transfer', status, transport: 'standard' }))
+    request.upload.onprogress = (event) => { armStallTimer(); onProgress({ loaded: event.loaded, total: event.lengthComputable ? event.total : file.size }) }
+    request.upload.onload = armStallTimer // body sent; now waiting for Storage's response
     request.onerror = () => fail(0, 'STORAGE_STANDARD_NETWORK')
-    request.onabort = () => reject(new Error('Đã hủy gửi ảnh.'))
+    request.onabort = () => stalled
+      ? fail(0, 'STORAGE_STANDARD_STALL', 'Mạng bị gián đoạn khi gửi ảnh. Vui lòng thử lại ảnh này.')
+      : (window.clearTimeout(stallTimer), reject(new Error('Đã hủy gửi ảnh.')))
     request.ontimeout = () => fail(0, 'STORAGE_STANDARD_TIMEOUT', 'Gửi ảnh quá thời gian chờ. Vui lòng thử lại ảnh này.')
     request.onload = () => {
+      window.clearTimeout(stallTimer)
       if (request.status >= 200 && request.status < 300) resolve('ok')
+      else if (retryCount > 0 && isDuplicateUploadResponse(request.status, request.responseText ?? '')) resolve('exists')
       else fail(request.status, `STORAGE_STANDARD_HTTP_${request.status}`)
     }
     const body = new FormData()
     body.append('cacheControl', '3600')
     body.append('', file, file.name)
+    armStallTimer()
     request.send(body)
   })
+}
+
+function waitBeforeRetry(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    const finish = () => { window.clearTimeout(timer); window.removeEventListener('online', finish); resolve() }
+    // When the phone is offline, wait for the connection to come back (up to 30 s) instead of a blind delay.
+    const timer = window.setTimeout(finish, navigator.onLine === false ? 30_000 : delayMs)
+    if (navigator.onLine === false) window.addEventListener('online', finish)
+  })
+}
+
+/** Signed standard upload with stall detection and automatic retries. Returns how many retries were needed. */
+async function uploadOriginalFile(uploadUrl: string, file: File, onProgress: (progress: UploadProgress) => void, correlationId: string) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await uploadOriginalFileOnce(uploadUrl, file, onProgress, correlationId, attempt)
+      return attempt
+    } catch (reason) {
+      const status = reason instanceof UploadStageError ? reason.diagnostic.status : -1
+      if (!(reason instanceof UploadStageError) || !isRetryableUploadStatus(status) || attempt >= STANDARD_UPLOAD_RETRY_DELAYS_MS.length) throw reason
+      onProgress({ loaded: 0, total: file.size })
+      await waitBeforeRetry(STANDARD_UPLOAD_RETRY_DELAYS_MS[attempt]!)
+    }
+  }
 }
 
 async function uploadResumableFile(input: { contentType: string; correlationId: string; endpoint: string; file: File; objectPath: string; onProgress: (progress: UploadProgress) => void; token: string }) {
@@ -246,7 +302,7 @@ async function uploadResumableFile(input: { contentType: string; correlationId: 
       window.clearTimeout(inactivityTimer)
       inactivityTimer = window.setTimeout(() => {
         void upload.abort().finally(() => finish(() => reject(new Error('Gửi ảnh tạm dừng quá lâu. Vui lòng kiểm tra mạng và thử lại để tiếp tục.'))))
-      }, UPLOAD_TIMEOUT_MS)
+      }, UPLOAD_STALL_TIMEOUT_MS)
     }
     const upload = new Upload(input.file, {
       endpoint: input.endpoint,
@@ -270,12 +326,24 @@ async function uploadResumableFile(input: { contentType: string; correlationId: 
   })
 }
 
-export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, index: number) => Promise<void>) {
-  for (let index = 0; index < items.length; index += 1) {
-    try { await worker(items[index]!, index) }
-    catch (reason) { return [{ index, reason }] }
+/**
+ * Runs uploads with at most `concurrency` in flight. A failed photo no longer
+ * stops the batch: every photo is attempted and all failures are returned so
+ * the customer can retry only the failed ones.
+ */
+export async function runUploadQueue<T>(items: readonly T[], worker: (item: T, index: number) => Promise<void>, concurrency = MAX_UPLOAD_CONCURRENCY) {
+  const failures: Array<{ index: number; reason: unknown }> = []
+  let next = 0
+  const lane = async () => {
+    while (next < items.length) {
+      const index = next
+      next += 1
+      try { await worker(items[index]!, index) }
+      catch (reason) { failures.push({ index, reason }) }
+    }
   }
-  return []
+  await Promise.all(Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, lane))
+  return failures.sort((left, right) => left.index - right.index)
 }
 
 export async function uploadPhotoToStorage(input: { file: File; phone: string; requestId: string; variant?: 'original' | 'thumbnail'; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
@@ -299,6 +367,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   const initializationMs = performance.now() - initializationStartedAt
   let transport: UploadTiming['transport'] = 'existing'
   let tusFallback = false
+  let transferRetries = 0
   const transferStartedAt = performance.now()
   if (!prepared.alreadyUploaded) {
     if (!prepared.uploadUrl) throw new Error('Không nhận được phiên gửi ảnh an toàn. Vui lòng thử lại.')
@@ -314,7 +383,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
         transport = 'standard'
         tusFallback = true
         input.onProgress({ loaded: 0, total: input.file.size })
-        try { await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
+        try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
         catch (fallbackReason) {
           if (fallbackReason instanceof UploadStageError) await reportUploadFailure(fallbackReason.diagnostic)
           throw fallbackReason
@@ -322,7 +391,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
       }
     } else {
       transport = 'standard'
-      try { await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
+      try { transferRetries = await uploadOriginalFile(prepared.uploadUrl, input.file, input.onProgress, correlationId) }
       catch (reason) {
         if (reason instanceof UploadStageError) await reportUploadFailure(reason.diagnostic)
         throw reason
@@ -343,7 +412,7 @@ export async function uploadPhotoToStorage(input: { file: File; phone: string; r
   await uploadApiResult(completion, 'verification', correlationId, verificationStartedAt)
   const verificationMs = performance.now() - verificationStartedAt
   input.onProgress({ loaded: input.file.size, total: input.file.size })
-  const timing: UploadTiming = { finalizationMs: 0, hashMs: Math.round(hashMs), initializationMs: Math.round(initializationMs), totalMs: Math.round(performance.now() - totalStartedAt), transferMs: Math.round(transferMs), transport, tusFallback, verificationMs: Math.round(verificationMs) }
+  const timing: UploadTiming = { finalizationMs: 0, hashMs: Math.round(hashMs), initializationMs: Math.round(initializationMs), totalMs: Math.round(performance.now() - totalStartedAt), transferMs: Math.round(transferMs), transport, tusFallback, transferRetries, verificationMs: Math.round(verificationMs) }
   input.onTiming?.(timing)
   if (!input.onTiming) console.info('[photo-upload:timing]', timing)
 }

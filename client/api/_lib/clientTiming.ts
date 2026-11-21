@@ -27,7 +27,7 @@ const MAX_BYTES = 50 * 25 * 1024 * 1024
 
 const commonKeys = ['kind', 'event', 'runId', 'device', 'network', 'measure'] as const
 const eventKeys: Record<ClientTimingEvent, readonly string[]> = {
-  'upload-file': ['hashMs', 'initializationMs', 'transferMs', 'verificationMs', 'totalMs', 'transport', 'tusFallback', 'sizeBand', 'mime', 'bytes'],
+  'upload-file': ['hashMs', 'initializationMs', 'transferMs', 'verificationMs', 'totalMs', 'transport', 'tusFallback', 'sizeBand', 'mime', 'bytes', 'transferRetries'],
   'upload-batch': ['fileCount', 'okCount', 'failedCount', 'totalMs', 'totalBytes', 'outcome', 'attempt'],
   'frame-save': ['renderMs', 'deliveryMs', 'bytes', 'width', 'height', 'format', 'delivery'],
 }
@@ -81,6 +81,7 @@ export function parseClientTiming(value: unknown) {
     sizeBand: oneOf(body.sizeBand, sizeBands),
     mime: oneOf(body.mime, mimes),
     bytes: integer(body.bytes, 25 * 1024 * 1024),
+    transferRetries: body.transferRetries === undefined ? 0 : integer(body.transferRetries, 10),
   }
   if (event === 'upload-batch') {
     const fileCount = integer(body.fileCount, 50)
