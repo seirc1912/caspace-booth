@@ -7,7 +7,7 @@ import { UploadApiError, type ApiRequest } from '../client/api/_lib/http.ts'
 import { CUSTOMER_UPLOAD_SESSION_BYTES, CUSTOMER_UPLOAD_SHARED_IP_BYTES, CUSTOMER_UPLOAD_WINDOW_MS, enforceCustomerUploadLimits, enforceRateLimit, enforceUploadByteQuota, resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { createUploadCompletionToken, createUploadSessionToken, verifyUploadCompletionToken, verifyUploadSessionToken } from '../client/api/_lib/uploadSession.ts'
 import { hasValidImageSignature, normalizeVietnamesePhone as normalizeServerPhone, parseCompletionMetadata, parseUploadMetadata, sanitizeFilename } from '../client/api/_lib/uploadValidation.ts'
-import { calculateOverallUploadProgress, classifyTusFailure, isDuplicateUploadResponse, isFreshTusUpload, isRetryableUploadStatus, MAX_UPLOAD_CONCURRENCY, STANDARD_UPLOAD_RETRY_DELAYS_MS, UPLOAD_STALL_TIMEOUT_MS, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
+import { calculateOverallUploadProgress, classifyTusFailure, inMemoryFile, TUS_STALL_RESTARTS, TUS_STALL_TIMEOUT_MS, isDuplicateUploadResponse, isFreshTusUpload, isRetryableUploadStatus, MAX_UPLOAD_CONCURRENCY, STANDARD_UPLOAD_RETRY_DELAYS_MS, UPLOAD_STALL_TIMEOUT_MS, RESUMABLE_CHUNK_BYTES, RESUMABLE_UPLOAD_THRESHOLD_BYTES, runUploadQueue, sha256Blob } from '../client/src/features/photoUpload/uploadClient.ts'
 import { isValidVietnamesePhone, normalizeVietnamesePhone, snapshotSelectedFiles, validateSelectedFiles } from '../client/src/features/photoUpload/validation.ts'
 import { clearStaffSessionCookie, STAFF_PUBLIC_USERNAME, staffSessionCookie, staffSessionToken } from '../client/api/_lib/staffAuth.ts'
 import { listCustomerFolders, normalizeFolderSearch, originalFilename, requireCustomerObjectPath, requireCustomerPhone } from '../client/api/_lib/staffPhotos.ts'
@@ -367,7 +367,7 @@ test('TUS HTTP failures preserve safe stage, status, code, correlation, retry, a
 test('TUS failure falls back to the exact-object standard signed upload without weakening validation', () => {
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
   assert.match(source, /await uploadResumableFile/)
-  assert.match(source, /await uploadOriginalFile\(prepared\.uploadUrl, input\.file/)
+  assert.match(source, /await uploadOriginalFile\(prepared\.uploadUrl, file/)
   assert.match(source, /request\.setRequestHeader\('x-upsert', 'false'\)/)
   assert.match(source, /await reportUploadFailure\(reason\.diagnostic\)/)
 })
@@ -510,10 +510,22 @@ test('streaming ZIP CRC32 matches the standard reference vector', () => {
   const crc = (updateCrc32(0xffffffff, Buffer.from('123456789')) ^ 0xffffffff) >>> 0
   assert.equal(crc, 0xcbf43926)
 })
-test('a stalled TUS upload is resumed, never restarted from byte 0 through the standard upload', () => {
+test('a stalled TUS upload is resumed once, then falls back to the standard upload', () => {
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
   assert.match(source, /if \(stallRestarts < TUS_STALL_RESTARTS\) \{ stallRestarts \+= 1; refreshInactivityTimer\(upload\); upload\.start\(\); return \}/)
-  assert.match(source, /reason\.diagnostic\.code === 'STORAGE_TUS_STALL'\) throw reason/)
-  assert.match(source, /uploadOriginalFile\(prepared\.uploadUrl, input\.file, input\.onProgress, correlationId, true\)/, 'TUS fallback accepts Duplicate')
+  assert.equal(TUS_STALL_RESTARTS, 1)
+  assert.ok(TUS_STALL_TIMEOUT_MS <= 20_000, 'a stalled TUS chunk switches path within ~40 s')
+  assert.doesNotMatch(source, /'STORAGE_TUS_STALL'\) throw reason/, 'a TUS stall no longer fails the photo')
+  assert.match(source, /uploadOriginalFile\(prepared\.uploadUrl, file, input\.onProgress, correlationId, true\)/, 'TUS fallback accepts Duplicate')
   assert.match(source, /candidate\.metadata\?\.objectName === input\.objectPath && isFreshTusUpload/, 'resume only the same object path')
+})
+
+test('uploads read the picked file into memory once (Android lazy files)', async () => {
+  const original = new File([new Uint8Array([1, 2, 3])], 'a.jpg', { type: 'image/jpeg', lastModified: 123 })
+  const copy = await inMemoryFile(original)
+  assert.notEqual(copy, original)
+  assert.equal(copy.name, 'a.jpg'); assert.equal(copy.type, 'image/jpeg'); assert.equal(copy.lastModified, 123)
+  assert.deepEqual(new Uint8Array(await copy.arrayBuffer()), new Uint8Array([1, 2, 3]))
+  const unreadable = { arrayBuffer: async () => { throw new Error('NotReadableError') } } as unknown as File
+  assert.equal(await inMemoryFile(unreadable), unreadable, 'falls back to the original file')
 })
