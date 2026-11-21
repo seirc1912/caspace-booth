@@ -93,3 +93,4 @@ Phụ thuộc giữa các PR (gỡ PR ở cột trái thì gỡ luôn cột ph�
 | PR 1 (#74) | `dpl_CJ9jcdp218TMF75cZZUeWz1TCjLR` | `50467be` | smoke OK |
 | PR 2 (#75) | `dpl_4H9AmWazbbzyNbqVerUs5FtaPjbT` | `797af97` | smoke OK |
 | PR 3 (#76) | `dpl_5SmycAHyxSESFixQZyVckxN4Dq9x` | `efe6ff2` | smoke OK; chờ owner test thật trên điện thoại (file > 6 MB) |
+| #83 (ẩn khung số đo) | `dpl_F7C5e6kop3pJS2sgwZFonEAJXXhp` | `c621410` | chỉ ẩn UI, log giữ nguyên; smoke OK |
