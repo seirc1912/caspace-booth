@@ -28,4 +28,13 @@ Mốc trước khi sửa: deployment Production hiện tại lúc merge PR đầ
 
 | PR | Vercel deployment ID | Commit | Ghi chú |
 |---|---|---|---|
-| (mốc) | | | trước khi merge |
+| (mốc) | `dpl_CAzYyLvQq3Upv4xrVuv9Qs1eNsF3` | `00624dd` | trước khi merge (= sau #89) |
+| #90 spec + plan | `dpl_HYgTkHfK8Sx5VLQuHst2L8DAG46y` | `1c888b7` | 24/11/2026 01:15, chỉ tài liệu |
+| #91 A · API booth | `dpl_HrGJDoBmfHymYzDxZEk8uFNjNMXD` | `11759d6` | `/api/booth/*` trả 503 tới khi có `BOOTH_UPLOAD_KEYS` Production |
+| #92 B · booth-agent | `dpl_ZLoC2RDiAfVh54qHfYxe4TBbjTXQ` | `f88df4b` | không đổi web |
+| #93 C · chọn ảnh phòng chụp | `dpl_3inahejhN9swa2v2NduGQesFY5KM` | `52863cd` | bỏ RPC `customer_start_photo_session`; không có ảnh → vào editor như cũ |
+| #94 D · gửi nhiều khung | `dpl_HLsref5QDx9N8YcWfPu2tHu1J1Hp` | `a3f3a8f` | |
+| #95 E · staff mở lại 6 giờ | `dpl_7TQBcYrbeEserjVfEzNXVnZatPYE` | `c0e9d9e` | |
+| #96 F · cron 3 ngày | `dpl_6VgbtovzMJ9xVHDZDe6gXpnK7Ko5` | `33b95c7` | cron trả 401 tới khi có `CRON_SECRET` Production → không xoá gì |
+| #97 G · tài liệu | `dpl_Euzf7Z8p4kP7tnF1oMePCNJ2KWid` | `c5f940b` | |
+| #98 H · Setup.exe, tab ảnh gốc staff | `dpl_Cv3oyMRccQd1ByFVTFRerLyPe9DJ` | `7cf2cdf` | smoke OK, 0 runtime error sau 1 giờ đầu |
