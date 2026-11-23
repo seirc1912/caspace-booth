@@ -14,7 +14,7 @@
 
 - Bucket stays `customer-photo-uploads` (private). Booth originals: `{phone}/_booth/{filename}`; booth thumbnails: `{phone}/_booth/_thumbs/{base}-thumb.jpg`; reopen marker: `{phone}/_booth/_access.json`.
 - Phone pattern: `^0(?:3|5|7|8|9)\d{8}$`. Folder → phone: first 10-digit run in the folder name that matches it.
-- Same name, different content → keep both: `{base}~{sha256[0..8]}{ext}`.
+- Same name, different content → keep both: `{base}__{sha256[0..8]}{ext}` (Supabase keys reject `~`).
 - Viewing window: `max(newest booth object created_at, _access.json.reopenedAt) + 6h > now`. Reopen writes `{"reopenedAt": <ISO now>}`.
 - Agent automatic rescan: session folders modified in the last 24 h. Manual "Gửi lại thư mục": any age.
 - Retention: 3 days for every object in the bucket; cron dry-run unless `PHOTO_UPLOAD_CLEANUP_ENABLED=true`.
@@ -60,7 +60,7 @@
   - `POST /api/booth/init` body `{ phone, filename, size, sha256, mimeType:'image/jpeg', prefix, variant:'original'|'thumbnail', originalPath? }` → `{ alreadyUploaded, objectPath, uploadUrl?, uploadToken?, completionToken }`.
   - `POST /api/booth/complete` body `{ …same, objectPath, completionToken }` → `{ ok: true, objectPath }`.
 
-- [ ] Step 1: Tests: `requireBooth` accepts `Authorization: Bearer k1` when `BOOTH_UPLOAD_KEYS={"booth-1":sha256("k1")}`, rejects wrong/missing key (401) and malformed env (503); `boothOriginalPath('0947860616','0947860616-103333.jpg') === '0947860616/_booth/0947860616-103333.jpg'`; `boothThumbnailPath(...) === '0947860616/_booth/_thumbs/0947860616-103333-thumb.jpg'`; `withContentSuffix('p/_booth/a.jpg','abcdef0123…') === 'p/_booth/a~abcdef01.jpg'`; init with an existing same-hash object → `alreadyUploaded:true`; existing different-hash object → objectPath gets the `~sha8` suffix; thumbnail variant requires `originalPath` under `{phone}/_booth/` and ≤ 512 KB.
+- [ ] Step 1: Tests: `requireBooth` accepts `Authorization: Bearer k1` when `BOOTH_UPLOAD_KEYS={"booth-1":sha256("k1")}`, rejects wrong/missing key (401) and malformed env (503); `boothOriginalPath('0947860616','0947860616-103333.jpg') === '0947860616/_booth/0947860616-103333.jpg'`; `boothThumbnailPath(...) === '0947860616/_booth/_thumbs/0947860616-103333-thumb.jpg'`; `withContentSuffix('p/_booth/a.jpg','abcdef0123…') === 'p/_booth/a~abcdef01.jpg'`; init with an existing same-hash object → `alreadyUploaded:true`; existing different-hash object → objectPath gets the `__sha8` suffix; thumbnail variant requires `originalPath` under `{phone}/_booth/` and ≤ 512 KB.
 - [ ] Step 2: Run `npm test` → new tests fail.
 - [ ] Step 3: Implement. Completion token = HMAC(serviceRoleKey, `caspace-booth-completion:v1:{boothId}:{objectPath}:{sha256}:{size}`). Rate limit `enforceRateLimit(request,{limit:600,windowMs:600_000,scope:'booth-upload'})`. No `enforceSameOrigin`. Logs: `[booth-upload:timing] { stage, durationMs, boothId, outcome }`.
 - [ ] Step 4: `npm test && npm run typecheck -w client` pass.
