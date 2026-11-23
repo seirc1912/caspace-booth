@@ -21,26 +21,44 @@ export async function fetchBoothPhotos(phone: string, fetchImpl: typeof fetch = 
 }
 
 /**
- * Downloads the originals of the ticked photos only (thumbnails are all the grid
- * ever loads), two at a time so weak phones are not flooded.
+ * Downloads originals of booth photos, two at a time, once each. The picker calls
+ * `prefetch` as soon as a photo is ticked, so "DÙNG N ẢNH" usually finds them ready.
  */
-export async function loadBoothPhotoFiles(photos: BoothPhoto[], onProgress?: (done: number, total: number) => void, fetchImpl: typeof fetch = fetch) {
-  const files: Array<File | null> = photos.map(() => null)
-  let next = 0
-  let done = 0
-  const worker = async () => {
-    while (next < photos.length) {
-      const index = next++
-      const photo = photos[index]!
-      const response = await fetchImpl(photo.originalUrl)
-      if (!response.ok) throw new Error('Không tải được ảnh gốc. Vui lòng thử lại.')
-      const blob = await response.blob()
-      files[index] = new File([blob], photo.name, { type: 'image/jpeg', lastModified: Date.parse(photo.uploadedAt) || Date.now() })
-      onProgress?.(++done, photos.length)
-    }
+export function createBoothPhotoLoader(fetchImpl: typeof fetch = fetch, concurrency = BOOTH_DOWNLOAD_CONCURRENCY) {
+  const cache = new Map<string, Promise<File>>()
+  const waiting: Array<() => void> = []
+  let active = 0
+  const acquire = async () => {
+    while (active >= concurrency) await new Promise<void>((resolve) => waiting.push(resolve))
+    active += 1
   }
-  await Promise.all(Array.from({ length: Math.min(BOOTH_DOWNLOAD_CONCURRENCY, photos.length) }, worker))
-  return files as File[]
+  const release = () => { active -= 1; waiting.shift()?.() }
+  const load = (photo: BoothPhoto) => {
+    let pending = cache.get(photo.id)
+    if (!pending) {
+      pending = (async () => {
+        await acquire()
+        try {
+          const response = await fetchImpl(photo.originalUrl)
+          if (!response.ok) throw new Error('Không tải được ảnh gốc. Vui lòng thử lại.')
+          const blob = await response.blob()
+          return new File([blob], photo.name, { type: 'image/jpeg', lastModified: Date.parse(photo.uploadedAt) || Date.now() })
+        } finally { release() }
+      })()
+      pending.catch(() => cache.delete(photo.id))
+      cache.set(photo.id, pending)
+    }
+    return pending
+  }
+  return { load, prefetch: (photo: BoothPhoto) => { load(photo).catch(() => undefined) } }
+}
+
+export type BoothPhotoLoader = ReturnType<typeof createBoothPhotoLoader>
+
+/** Originals of the ticked photos only (thumbnails are all the grid ever loads). */
+export async function loadBoothPhotoFiles(photos: BoothPhoto[], onProgress?: (done: number, total: number) => void, fetchImpl: typeof fetch = fetch, loader: BoothPhotoLoader = createBoothPhotoLoader(fetchImpl)) {
+  let done = 0
+  return Promise.all(photos.map((photo) => loader.load(photo).then((file) => { onProgress?.(++done, photos.length); return file })))
 }
 
 const selectionKey = (phone: string) => `caspace.booth-selection.${phone}`

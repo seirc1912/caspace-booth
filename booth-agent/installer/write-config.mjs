@@ -11,7 +11,8 @@ const next = {
   boothId: (boothId || current.boothId || '').trim(),
   boothKey: (boothKey || current.boothKey || '').trim(),
   watchRoot: (watchRoot || current.watchRoot || 'C:\\Users\\ADMIN\\Pictures').trim(),
-  concurrency: current.concurrency ?? 1,
+  // 2 photos at a time: booth photos reach customers sooner (upgrades from 1 too).
+  concurrency: 2,
   statusPort: current.statusPort ?? 47821,
 }
 // Exit codes (no text: NSIS reads child output as ANSI, Vietnamese would be garbled;

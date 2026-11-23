@@ -150,7 +150,7 @@ test('Setup.exe pieces: config writer keeps old values on upgrade and rejects ba
   assert.equal(spawnSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn', dir]).stdout.length, 0, 'no text output for NSIS to garble')
   execFileSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn/', dir])
   execFileSync('node', [script, file, '', '', '', ''])
-  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 1, statusPort: 47821 })
+  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 2, statusPort: 47821 })
   const task = read('booth-agent/installer/task.xml', 'utf8')
   assert.match(task, /<RestartOnFailure><Interval>PT1M<\/Interval><Count>999<\/Count><\/RestartOnFailure>/)
   assert.match(task, /<LogonTrigger>/)
@@ -182,4 +182,26 @@ test('Setup stops the running agent by its own process name before overwriting f
   assert.ok(nsi.indexOf('Call StopAgent') < nsi.indexOf('File /r'))
   assert.match(read('booth-agent/installer/launcher.vbs', 'utf8'), /caspace-booth-agent\.exe/)
   assert.match(read('booth-agent/installer/build.mjs', 'utf8'), /renameSync\(path\.join\(payload, 'node', 'node\.exe'\), path\.join\(payload, 'node', 'caspace-booth-agent\.exe'\)\)/)
+})
+
+test('30-second rescans skip uploaded exports before the queue and ignore old sessions', async () => {
+  const { pendingJobs, PERIODIC_RESCAN_MS } = await import('../booth-agent/src/scanner.ts')
+  assert.equal(PERIODIC_RESCAN_MS, 30_000)
+  const state = tempState()
+  state.mark(StateStore.key('/p/a.jpg', 10, 1), 'x')
+  const jobs = [{ filePath: '/p/a.jpg', phone: '0912345678', sessionFolder: 's' }, { filePath: '/p/b.jpg', phone: '0912345678', sessionFolder: 's' }]
+  const pending = await pendingJobs(jobs, state, async () => ({ size: 10, mtimeMs: 1 }))
+  assert.deepEqual(pending.map((job) => job.filePath), ['/p/b.jpg'], 'already-sent file never re-queued')
+  const edited = await pendingJobs(jobs, state, async () => ({ size: 11, mtimeMs: 2 }))
+  assert.equal(edited.length, 2, 're-exported (changed) file is sent again; the server keeps both copies')
+  const root = mkdtempSync(path.join(tmpdir(), 'pictures-'))
+  for (const [folder, ageMs] of [['0912345678', 60_000], ['0947860616', 3 * AUTOMATIC_RESCAN_MS]] as const) {
+    mkdirSync(path.join(root, folder, 'Output'), { recursive: true })
+    writeFileSync(path.join(root, folder, 'Output', 'x.jpg'), jpeg)
+    const time = (Date.now() - ageMs) / 1000
+    utimesSync(path.join(root, folder, 'Output', 'x.jpg'), time, time)
+    utimesSync(path.join(root, folder, 'Output'), time, time)
+  }
+  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  assert.deepEqual(recent.jobs.map((job) => job.phone), ['0912345678'], 'old sessions skipped by Output folder mtime')
 })

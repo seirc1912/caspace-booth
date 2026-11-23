@@ -5,7 +5,7 @@ import { loadConfig } from './config.ts'
 import { notifyOnce } from './notify.ts'
 import { classifyExport } from './phoneFolder.ts'
 import { UploadQueue } from './queue.ts'
-import { AUTOMATIC_RESCAN_MS, scanExports } from './scanner.ts'
+import { AUTOMATIC_RESCAN_MS, PERIODIC_RESCAN_MS, pendingJobs, scanExports } from './scanner.ts'
 import { StateStore } from './stateStore.ts'
 import { startStatusServer } from './statusServer.ts'
 import { makeThumbnail } from './thumbnail.ts'
@@ -58,10 +58,19 @@ async function resend(folder: string) {
   return `Đang gửi lại ${result.jobs.length} ảnh của ${folder}.`
 }
 
-const initial = await scanExports(config.watchRoot, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
-initial.unrecognized.forEach(reportUnrecognized)
-initial.jobs.forEach((job) => queue.enqueue(job))
-log(`[start] ${config.boothId} theo dõi ${config.watchRoot}; ${initial.jobs.length} ảnh trong 24 giờ cần kiểm tra`)
+async function rescanRecent() {
+  const result = await scanExports(config.watchRoot, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  result.unrecognized.forEach(reportUnrecognized)
+  const pending = await pendingJobs(result.jobs, state)
+  pending.forEach((job) => queue.enqueue(job))
+  return pending.length
+}
+
+const initialPending = await rescanRecent()
+log(`[start] ${config.boothId} → ${config.apiBaseUrl}; theo dõi ${config.watchRoot}; ${initialPending} ảnh trong 24 giờ chưa gửi`)
+setInterval(() => {
+  void rescanRecent().then((count) => { if (count) log(`[rescan] tìm thấy ${count} ảnh chưa gửi`) }).catch((error) => log(`[rescan-error] ${error instanceof Error ? error.message : String(error)}`))
+}, PERIODIC_RESCAN_MS)
 
 chokidar.watch(config.watchRoot, { ignoreInitial: true, depth: 2, ignored: (file) => path.basename(file).startsWith('.') })
   .on('add', handle)

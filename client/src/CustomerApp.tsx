@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { EditorErrorBoundary } from './components/editor/EditorErrorBoundary'
 import { useBranding } from './contexts/BrandingContext'
 import { runPerFrameSave, saveComposition } from './features/orders/services/saveComposition'
@@ -8,7 +8,7 @@ import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
 import { createCustomerSession, type CustomerSession } from './features/photos/customerSession'
-import { loadBoothPhotoFiles, loadBoothSelection, saveBoothSelection, type BoothPhoto, type BoothPoolPhoto } from './features/boothPhotos/boothPhotosClient'
+import { createBoothPhotoLoader, loadBoothPhotoFiles, loadBoothSelection, saveBoothSelection, type BoothPhoto, type BoothPoolPhoto } from './features/boothPhotos/boothPhotosClient'
 import { useBoothPhotos } from './features/boothPhotos/useBoothPhotos'
 import { BoothPhotoPickerPage } from './pages/BoothPhotoPickerPage'
 import { SendFramesSheet, type SendFrameRow } from './components/editor/SendFramesSheet'
@@ -43,12 +43,19 @@ export function CustomerApp() {
   const boothForPhone = boothState.phone === validPhone ? boothState : { phone: validPhone, pool: [], selection: validPhone ? loadBoothSelection(validPhone) : [] }
   const boothPool = boothForPhone.pool
   const boothSelection = boothForPhone.selection
-  const setBoothSelection = (ids: string[]) => { setBoothState({ ...boothForPhone, selection: ids }); if (validPhone) saveBoothSelection(validPhone, ids) }
+  // One loader per phone: ticking a photo starts downloading its original right away.
+  const boothLoader = useMemo(() => (validPhone ? createBoothPhotoLoader() : null), [validPhone])
+  const setBoothSelection = (ids: string[]) => {
+    setBoothState({ ...boothForPhone, selection: ids })
+    if (validPhone) saveBoothSelection(validPhone, ids)
+    const added = new Set(ids.filter((id) => !boothSelection.includes(id)))
+    if (boothLoader && boothPhotos.list?.status === 'ok') boothPhotos.list.photos.filter((photo) => added.has(photo.id)).forEach(boothLoader.prefetch)
+  }
   const setBoothPool = (pool: BoothPoolPhoto[]) => setBoothState({ ...boothForPhone, pool })
   const applyBoothPhotoSelection = async (photos: BoothPhoto[]) => {
     const known = new Map(boothPool.map((photo) => [photo.id, photo]))
     const missing = photos.filter((photo) => !known.has(photo.id))
-    const files = await loadBoothPhotoFiles(missing)
+    const files = await loadBoothPhotoFiles(missing, undefined, fetch, boothLoader ?? undefined)
     missing.forEach((photo, index) => known.set(photo.id, { id: photo.id, thumbUrl: photo.thumbUrl, file: files[index]! }))
     setBoothPool(photos.map((photo) => known.get(photo.id)!))
     navigate('/editor')

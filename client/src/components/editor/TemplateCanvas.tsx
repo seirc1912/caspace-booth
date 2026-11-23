@@ -40,6 +40,7 @@ export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cro
                 active={activeSlot === index}
                 cropMode={cropSlot === index}
                 index={index}
+                slotLabel={template.slots.length > 1 ? `Hình ${index + 1}` : undefined}
                 onActivate={() => onActiveSlotChange(index)}
                 onAdd={() => onAdd(index)}
                 onBeginCrop={() => onBeginCrop(index)}
