@@ -446,3 +446,5 @@ export async function uploadPhotoToStorage(input: { file: File; source?: Promise
   input.onTiming?.(timing)
   if (!input.onTiming) console.info('[photo-upload:timing]', timing)
 }
+
+export { uploadSession as ensureUploadSession, clearUploadSession }

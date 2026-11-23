@@ -7,8 +7,10 @@ import { prefetchTemplateExportAssets, RemoteExportAssetCache, RenderAssetCache 
 import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
-import { startPhotoLibrarySession, useSessionPhotos } from './features/photos/useSessionPhotos'
-import type { PhotoLibrarySession } from './features/photos/useSessionPhotos'
+import { createCustomerSession, type CustomerSession } from './features/photos/customerSession'
+import { loadBoothPhotoFiles, loadBoothSelection, saveBoothSelection, type BoothPhoto, type BoothPoolPhoto } from './features/boothPhotos/boothPhotosClient'
+import { useBoothPhotos } from './features/boothPhotos/useBoothPhotos'
+import { BoothPhotoPickerPage } from './pages/BoothPhotoPickerPage'
 import { prefetchAdjacentTemplateDetails } from './features/templates/templateDetailLookahead'
 import { commitTransitionAfterLoad } from './features/templates/frameSelection'
 import { ComposerPage } from './pages/ComposerPage'
@@ -19,9 +21,9 @@ import { TemplateSelectionPage } from './pages/TemplateSelectionPage'
 
 export function CustomerApp() {
   const branding = useBranding(); const { pathname, navigate } = usePathname()
-  const [customerSession, setCustomerSession] = useState<PhotoLibrarySession | null>(() => {
+  const [customerSession, setCustomerSession] = useState<CustomerSession | null>(() => {
     try {
-      return JSON.parse(sessionStorage.getItem('selfbooth.photo-library-session') ?? 'null') as PhotoLibrarySession | null
+      return JSON.parse(sessionStorage.getItem('selfbooth.photo-library-session') ?? 'null') as CustomerSession | null
     } catch { return null }
   })
   const booth = useSelfBooth(customerSession)
@@ -31,7 +33,24 @@ export function CustomerApp() {
   const [remoteExportAssets] = useState(() => new RemoteExportAssetCache())
   const [editorBackground, setEditorBackground] = useState<{ canonical: string; local: string } | null>(null)
   const debugAssetPrefetch = import.meta.env.DEV || sessionStorage.getItem('selfbooth.debug-order-timing') === '1'
-  useSessionPhotos(customerSession, booth.addUploadedAssets, booth.reportPhotoError, booth.clearPhotoError)
+  const validPhone = isValidPhoneNumber(booth.phoneNumber) ? booth.phoneNumber : null
+  const boothPhotos = useBoothPhotos(validPhone, pathname === '/booth-photos')
+  const hasBoothPhotos = boothPhotos.list?.status === 'ok' && boothPhotos.list.photos.length > 0
+  // Ticks and downloaded originals belong to one phone; a new number starts empty.
+  const [boothState, setBoothState] = useState<{ phone: string | null; pool: BoothPoolPhoto[]; selection: string[] }>(() => ({ phone: validPhone, pool: [], selection: validPhone ? loadBoothSelection(validPhone) : [] }))
+  const boothForPhone = boothState.phone === validPhone ? boothState : { phone: validPhone, pool: [], selection: validPhone ? loadBoothSelection(validPhone) : [] }
+  const boothPool = boothForPhone.pool
+  const boothSelection = boothForPhone.selection
+  const setBoothSelection = (ids: string[]) => { setBoothState({ ...boothForPhone, selection: ids }); if (validPhone) saveBoothSelection(validPhone, ids) }
+  const setBoothPool = (pool: BoothPoolPhoto[]) => setBoothState({ ...boothForPhone, pool })
+  const applyBoothPhotoSelection = async (photos: BoothPhoto[]) => {
+    const known = new Map(boothPool.map((photo) => [photo.id, photo]))
+    const missing = photos.filter((photo) => !known.has(photo.id))
+    const files = await loadBoothPhotoFiles(missing)
+    missing.forEach((photo, index) => known.set(photo.id, { id: photo.id, thumbUrl: photo.thumbUrl, file: files[index]! }))
+    setBoothPool(photos.map((photo) => known.get(photo.id)!))
+    navigate('/editor')
+  }
 
   const requiredFrameCount = booth.roomTemplateSummaries.length
 
@@ -42,18 +61,16 @@ export function CustomerApp() {
         () => {
           remoteExportAssets.clear()
           booth.detachDraftRecovery()
-          setCustomerSession(null)
-          sessionStorage.removeItem('selfbooth.photo-library-session')
           booth.resetSessionPhotos()
-          navigate('/editor')
+          // Draft scope for this visit (was a Supabase RPC; now created on the device).
+          const session = createCustomerSession(boothId, booth.phoneNumber)
+          try { sessionStorage.setItem('selfbooth.photo-library-session', JSON.stringify(session)) } catch { /* in-memory only */ }
+          setCustomerSession(session)
+          navigate(hasBoothPhotos ? '/booth-photos' : '/editor')
         },
       )
     }
-    catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to load this Room’s first frame.'); return }
-    void startPhotoLibrarySession(boothId, booth.phoneNumber).then((session) => {
-      sessionStorage.setItem('selfbooth.photo-library-session', JSON.stringify(session))
-      setCustomerSession(session)
-    }).catch((error) => booth.reportPhotoError(error instanceof Error ? error.message : 'Unable to start customer session'))
+    catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to load this Room’s first frame.') }
   }
 
   const saveCurrentFrame = async () => {
@@ -137,10 +154,11 @@ export function CustomerApp() {
 
   if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/booth-photos') return validPhone ? <BoothPhotoPickerPage error={boothPhotos.error} list={boothPhotos.list} onBack={() => navigate('/rooms')} onContinue={applyBoothPhotoSelection} onSelectedIdsChange={setBoothSelection} onSkip={() => navigate('/editor')} phone={validPhone} selectedIds={boothSelection} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
   if (pathname === '/editor' && !booth.draftReady) return null
   if (pathname === '/editor' && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/editor' && !booth.selectedTemplateId) return <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} />
-  if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} autoFillHasExistingPhotos={booth.autoFillHasExistingPhotos} autoFillPhotoCount={booth.autoFillPhotoCount} autoFillPreparing={booth.autoFillPreparing} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAutoFillPhotos={booth.autoFillAllFrames} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} onFitChange={booth.updateFit} saveConfirmation={saveConfirmation} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
+  if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} autoFillHasExistingPhotos={booth.autoFillHasExistingPhotos} autoFillPhotoCount={booth.autoFillPhotoCount} autoFillPreparing={booth.autoFillPreparing} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAutoFillPhotos={booth.autoFillAllFrames} boothPool={boothPool} onOpenBoothPhotos={hasBoothPhotos ? () => navigate('/booth-photos') : undefined} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} onFitChange={booth.updateFit} saveConfirmation={saveConfirmation} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} /></EditorErrorBoundary>
   return <NotFoundPage />
 }
