@@ -5,7 +5,7 @@
   "workspaces": [
     "client",
     "server",
-    "folder-watcher"
+    "booth-agent"
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",

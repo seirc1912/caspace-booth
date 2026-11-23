@@ -1,0 +1,8 @@
+{
+  "apiBaseUrl": "https://caspace.vn",
+  "boothId": "booth-1",
+  "boothKey": "<mã riêng của máy này>",
+  "watchRoot": "C:\\Users\\ADMIN\\Pictures",
+  "concurrency": 1,
+  "statusPort": 47821
+}

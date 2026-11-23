@@ -1,0 +1,23 @@
+{
+  "name": "@caspace/booth-agent",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Gửi ảnh Capture One (Pictures\\<sđt>\\Output) từ máy phòng chụp lên caspace.vn",
+  "scripts": {
+    "start": "node --import tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "engines": { "node": ">=22.0.0" },
+  "dependencies": {
+    "chokidar": "^5.0.0",
+    "node-notifier": "^10.0.1",
+    "sharp": "^0.34.5",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/node-notifier": "^8.0.5",
+    "typescript": "~6.0.2"
+  }
+}

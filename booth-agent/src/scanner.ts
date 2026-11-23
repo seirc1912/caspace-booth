@@ -1,0 +1,41 @@
+import { readdir, stat } from 'node:fs/promises'
+import path from 'node:path'
+import { classifyExport } from './phoneFolder.ts'
+import type { QueueJob } from './queue.ts'
+
+export const AUTOMATIC_RESCAN_MS = 24 * 60 * 60_000
+
+export interface ScanResult { jobs: QueueJob[]; unrecognized: string[] }
+
+async function outputFiles(root: string, sessionFolder: string) {
+  const output = await readdir(path.join(root, sessionFolder), { withFileTypes: true })
+  const folder = output.find((entry) => entry.isDirectory() && entry.name.toLowerCase() === 'output')
+  if (!folder) return []
+  const dir = path.join(root, sessionFolder, folder.name)
+  return (await readdir(dir, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => path.join(dir, entry.name))
+}
+
+/**
+ * Startup scan: Output JPEGs modified since `sinceMs` (24 h by default, so reinstalling
+ * the agent never reopens old customers' viewing window). `onlyFolder` = manual resend.
+ */
+export async function scanExports(root: string, options: { sinceMs?: number; onlyFolder?: string } = {}): Promise<ScanResult> {
+  const jobs: QueueJob[] = []
+  const unrecognized = new Set<string>()
+  const sessions = (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && (!options.onlyFolder || entry.name === options.onlyFolder))
+  for (const session of sessions) {
+    let files: string[]
+    try { files = await outputFiles(root, session.name) } catch { continue }
+    for (const file of files) {
+      const classified = classifyExport(file, root)
+      if (!classified) continue
+      if (options.sinceMs !== undefined) {
+        try { if ((await stat(file)).mtimeMs < options.sinceMs) continue } catch { continue }
+      }
+      if (classified.kind === 'unrecognized') unrecognized.add(classified.sessionFolder)
+      else jobs.push({ filePath: file, phone: classified.phone, sessionFolder: classified.sessionFolder })
+    }
+  }
+  return { jobs, unrecognized: [...unrecognized] }
+}
+
