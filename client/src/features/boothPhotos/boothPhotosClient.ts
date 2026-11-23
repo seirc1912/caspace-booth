@@ -42,7 +42,9 @@ export function createBoothPhotoLoader(fetchImpl: typeof fetch = fetch, concurre
           const response = await fetchImpl(photo.originalUrl)
           if (!response.ok) throw new Error('Không tải được ảnh gốc. Vui lòng thử lại.')
           const blob = await response.blob()
-          return new File([blob], photo.name, { type: 'image/jpeg', lastModified: Date.parse(photo.uploadedAt) || Date.now() })
+          // Booth photos are JPEG; customer uploads may be PNG.
+          const type = blob.type.startsWith('image/') ? blob.type : /\.png$/i.test(photo.name) ? 'image/png' : 'image/jpeg'
+          return new File([blob], photo.name, { type, lastModified: Date.parse(photo.uploadedAt) || Date.now() })
         } finally { release() }
       })()
       pending.catch(() => cache.delete(photo.id))

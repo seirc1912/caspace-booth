@@ -126,3 +126,31 @@ test('tapping an empty slot lets the customer pick several booth photos: tapped 
   const next = assignPhotosToFrameTarget({}, reordered, [photo('a'), photo('b')])
   assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'first pick → tapped Hình 2, second → Hình 1')
 })
+
+test('photos the customer uploaded via /upload-anh are offered too; exported frames (caspace-…) are not', async () => {
+  const byPrefix: Record<string, Array<{ id: string | null; name: string; created_at: string | null }>> = {
+    '0906314807/_booth': [photo('0906314807-100001.jpg', 2 * HOUR)],
+    '0906314807': [
+      { id: null, name: '_booth', created_at: null }, { id: null, name: '_thumbs', created_at: null },
+      photo('IMG_1234--req_12345678-0.jpg', HOUR), photo('selfie--req_12345678-1.png', HOUR),
+      photo('caspace-20261124-004137-khung1--abc12345-f1.jpg', HOUR),
+    ],
+  }
+  const bucket = {
+    list: async (prefix: string) => ({ data: byPrefix[prefix] ?? [], error: null }),
+    download: async () => ({ data: null, error: { message: 'missing' } }),
+    createSignedUrls: async (paths: string[]) => ({ data: paths.map((path) => ({ path, signedUrl: `https://signed/${path}`, error: null })), error: null }),
+  }
+  const result = await listBoothPhotos({ storage: { from: () => bucket } } as never, '0906314807', now)
+  assert.equal(result.status, 'ok')
+  assert.deepEqual(result.photos.map((item) => [item.id, item.name]), [
+    ['0906314807-100001.jpg', '0906314807-100001.jpg'],
+    ['upload:IMG_1234--req_12345678-0.jpg', 'IMG_1234.jpg'],
+    ['upload:selfie--req_12345678-1.png', 'selfie.png'],
+  ])
+  assert.equal(result.photos[1]!.thumbUrl, 'https://signed/0906314807/_thumbs/IMG_1234--req_12345678-0-thumb.jpg')
+  const onlyUploads = await listBoothPhotos({ storage: { from: () => ({ ...bucket, list: async (prefix: string) => ({ data: prefix === '0906314807' ? [photo('a--req_12345678-0.jpg', HOUR)] : [], error: null }) }) } } as never, '0906314807', now)
+  assert.equal(onlyUploads.photos.length, 1, 'customer uploads alone open the picker')
+  const old = await listBoothPhotos({ storage: { from: () => ({ ...bucket, list: async (prefix: string) => ({ data: prefix === '0906314807' ? [photo('a--req_12345678-0.jpg', 7 * HOUR)] : [], error: null }) }) } } as never, '0906314807', now)
+  assert.equal(old.status, 'unavailable', 'same 6-hour window')
+})
