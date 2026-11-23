@@ -3,6 +3,7 @@ Unicode true
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "WinMessages.nsh"
 
 !ifndef VERSION
   !define VERSION "1.0.0"
@@ -41,6 +42,7 @@ Page custom ConfigPage ConfigPageLeave
 Var Dialog
 Var BoothBox
 Var KeyBox
+Var ShowKey
 Var ServerBox
 Var FolderBox
 Var BoothId
@@ -74,8 +76,11 @@ Function ConfigPage
   ${NSD_CB_AddString} $BoothBox "booth-4"
   ${NSD_CreateLabel} 0 44u 30% 12u "Mã bí mật:"
   Pop $0
-  ${NSD_CreatePassword} 32% 42u 68% 12u ""
+  ${NSD_CreatePassword} 32% 42u 46% 12u ""
   Pop $KeyBox
+  ${NSD_CreateCheckbox} 81% 42u 19% 12u "Hiện mã"
+  Pop $ShowKey
+  ${NSD_OnClick} $ShowKey ToggleKeyVisibility
   ${NSD_CreateLabel} 0 64u 30% 12u "Máy chủ:"
   Pop $0
   ${If} $HasConfig == "1"
@@ -98,6 +103,16 @@ Function ConfigPage
   ${NSD_CreateLabel} 0 104u 100% 30u "Ảnh trong <thư mục>\<số điện thoại>\Output sẽ tự gửi lên hệ thống. Mã bí mật chỉ lưu trên máy này."
   Pop $0
   nsDialogs::Show
+FunctionEnd
+
+Function ToggleKeyVisibility
+  ${NSD_GetState} $ShowKey $0
+  ${If} $0 == ${BST_CHECKED}
+    SendMessage $KeyBox ${EM_SETPASSWORDCHAR} 0 0
+  ${Else}
+    SendMessage $KeyBox ${EM_SETPASSWORDCHAR} 9679 0
+  ${EndIf}
+  System::Call "user32::InvalidateRect(p$KeyBox, p0, i1)"
 FunctionEnd
 
 Function BrowseFolder
@@ -125,8 +140,8 @@ Function ConfigPageLeave
   StrLen $0 $BoothKey
   ${If} $HasConfig == "0"
   ${OrIf} $0 > 0
-    ${If} $0 < 16
-      MessageBox MB_ICONEXCLAMATION "Mã bí mật chưa đúng: cần dán đủ mã chủ quán cung cấp (ít nhất 16 ký tự, hiện có $0)."
+    ${If} $0 < 8
+      MessageBox MB_ICONEXCLAMATION "Mã bí mật chưa đúng: cần đủ mã chủ quán cung cấp (ít nhất 8 ký tự, hiện có $0)."
       Abort
     ${EndIf}
   ${EndIf}
@@ -187,7 +202,7 @@ Section "Install"
       ${Case} "11"
         StrCpy $1 "Mã phòng không hợp lệ (ví dụ booth-1)."
       ${Case} "12"
-        StrCpy $1 "Mã bí mật phải có ít nhất 16 ký tự."
+        StrCpy $1 "Mã bí mật phải có ít nhất 8 ký tự."
       ${Case} "13"
         StrCpy $1 "Không thấy thư mục ảnh."
       ${CaseElse}

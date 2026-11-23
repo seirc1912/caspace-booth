@@ -64,6 +64,12 @@ export function enforceRateLimit(request: ApiRequest, options: { limit: number; 
   }
 }
 
+/** Throws 429 when `scope` already has `limit` attempts in the window, without recording one. */
+export function assertBelowLimit(request: ApiRequest, options: { limit: number; windowMs: number; scope: string }) {
+  const active = pruneAttempts(`ip:${options.scope}:${requestKey(request)}`, options.windowMs, Date.now())
+  if (active.length >= options.limit) throw new UploadApiError(429, 'Bạn đã gửi quá nhiều yêu cầu. Vui lòng chờ một lúc rồi thử lại.', Math.ceil(options.windowMs / 1_000))
+}
+
 export function enforceUploadByteQuota(request: ApiRequest, bytes: number, options = { limitBytes: 250 * 1024 * 1024, windowMs: 10 * 60_000 }) {
   const now = Date.now()
   recordBytes(`ip:${requestKey(request)}`, bytes, options.limitBytes, options.windowMs, now)

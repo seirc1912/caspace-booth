@@ -29,7 +29,7 @@ thư mục sai tên, ô "Gửi lại thư mục".
 2. Chép file **`CaspaceBoothSetup-<phiên bản>.exe`** sang máy phòng chụp (USB hoặc Drive) và bấm đúp.
    - Windows có thể báo "Windows protected your PC" (file chưa ký số): bấm **More info → Run anyway**.
    - Bấm **Yes** khi Windows hỏi quyền quản trị.
-3. Màn "Thông tin máy phòng chụp": chọn **Mã phòng**, dán **Mã bí mật**, giữ nguyên
+3. Màn "Thông tin máy phòng chụp": chọn **Mã phòng**, nhập **Mã bí mật** (8 ký tự; tick "Hiện mã" để kiểm tra), giữ nguyên
    **Máy chủ** `https://caspace.vn` và **Thư mục ảnh** `C:\Users\ADMIN\Pictures` (đổi nếu Capture One lưu chỗ khác) → **Install**.
 4. Màn cuối tick "Mở trang trạng thái" → **Finish**. Trang phải báo "Mạng / máy chủ: bình thường".
 5. Chụp thử 1 phiên với số điện thoại test → mở caspace.vn, nhập số đó → thấy ảnh.

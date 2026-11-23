@@ -13,6 +13,6 @@ export function loadConfig(file: string): AgentConfig {
     statusPort: Number(raw.statusPort ?? 47821) || 47821,
   }
   if (!/^https?:\/\//.test(config.apiBaseUrl)) throw new Error('config.json: apiBaseUrl phải bắt đầu bằng http(s)://')
-  if (!config.boothId || config.boothKey.length < 16 || !config.watchRoot) throw new Error('config.json: cần boothId, boothKey (≥ 16 ký tự) và watchRoot')
+  if (!config.boothId || config.boothKey.length < 8 || !config.watchRoot) throw new Error('config.json: cần boothId, boothKey (≥ 8 ký tự) và watchRoot')
   return config
 }
