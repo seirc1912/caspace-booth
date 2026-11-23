@@ -12,6 +12,6 @@ If fso.FileExists(logFile) Then
   End If
 End If
 Set shell = CreateObject("WScript.Shell")
-cmd = "cmd /c """"" & dir & "\node\node.exe"" """ & dir & "\app\agent.mjs"" """ & dir & "\config.json"" >> """ & logFile & """ 2>&1"""
+cmd = "cmd /c """"" & dir & "\node\caspace-booth-agent.exe"" """ & dir & "\app\agent.mjs"" """ & dir & "\config.json"" >> """ & logFile & """ 2>&1"""
 ' 0 = hidden window, True = wait so Task Scheduler sees when the agent stops (and restarts it).
 WScript.Quit shell.Run(cmd, 0, True)

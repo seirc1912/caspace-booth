@@ -133,7 +133,7 @@ Function ConfigPageLeave
   ${If} $HasConfig == "0"
   ${OrIf} $BoothId != ""
     ${If} $BoothId == ""
-      MessageBox MB_ICONEXCLAMATION "Vui lòng chọn mã phòng (booth-1 … booth-4)."
+      MessageBox MB_ICONEXCLAMATION "Vui lòng chọn mã phòng (booth-1 … booth-4).$\r$\n(Không tìm thấy cấu hình cũ tại $INSTDIR\config.json nên cần nhập đủ.)"
       Abort
     ${EndIf}
   ${EndIf}
@@ -141,7 +141,7 @@ Function ConfigPageLeave
   ${If} $HasConfig == "0"
   ${OrIf} $0 > 0
     ${If} $0 < 8
-      MessageBox MB_ICONEXCLAMATION "Mã bí mật chưa đúng: cần đủ mã chủ quán cung cấp (ít nhất 8 ký tự, hiện có $0)."
+      MessageBox MB_ICONEXCLAMATION "Mã bí mật chưa đúng: cần đủ mã chủ quán cung cấp (ít nhất 8 ký tự, hiện có $0).$\r$\n(Khi đã cài trước đó tại $INSTDIR thì có thể để trống để giữ mã cũ.)"
       Abort
     ${EndIf}
   ${EndIf}
@@ -165,9 +165,13 @@ FunctionEnd
 Function StopAgent
   nsExec::Exec 'schtasks /End /TN "${TASKNAME}"'
   Pop $0
-  nsExec::Exec 'powershell -NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"$INSTDIR\*\" } | Stop-Process -Force"'
+  ; The agent runs as caspace-booth-agent.exe (renamed Node.js). Older builds ran node.exe
+  ; from this folder: stop those by path (backtick-quoted so the path may contain spaces).
+  nsExec::Exec 'taskkill /F /T /IM caspace-booth-agent.exe'
   Pop $0
-  Sleep 1000
+  nsExec::Exec `powershell -NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '$INSTDIR\*' } | Stop-Process -Force"`
+  Pop $0
+  Sleep 2000
 FunctionEnd
 
 Function OpenStatus
@@ -193,7 +197,7 @@ Section "Install"
   File /r "${PAYLOAD}\*.*"
 
   DetailPrint "Lưu cấu hình…"
-  nsExec::Exec '"$INSTDIR\node\node.exe" "$INSTDIR\installer\write-config.mjs" "$INSTDIR\config.json" "$BoothId" "$BoothKey" "$ServerUrl" "$WatchRoot"'
+  nsExec::Exec '"$INSTDIR\node\caspace-booth-agent.exe" "$INSTDIR\installer\write-config.mjs" "$INSTDIR\config.json" "$BoothId" "$BoothKey" "$ServerUrl" "$WatchRoot"'
   Pop $0
   ${If} $0 != "0"
     ${Select} $0
@@ -222,7 +226,7 @@ Section "Install"
   Pop $0
 
   DetailPrint "Đăng ký tự chạy khi đăng nhập Windows…"
-  nsExec::ExecToStack '"$INSTDIR\node\node.exe" "$INSTDIR\installer\register-task.mjs" "$INSTDIR" "$INSTDIR\installer\task.xml"'
+  nsExec::ExecToStack '"$INSTDIR\node\caspace-booth-agent.exe" "$INSTDIR\installer\register-task.mjs" "$INSTDIR" "$INSTDIR\installer\task.xml"'
   Pop $0
   Pop $1
   ${If} $0 != "0"
@@ -249,7 +253,11 @@ Section "Uninstall"
   Pop $0
   nsExec::Exec 'schtasks /Delete /TN "${TASKNAME}" /F'
   Pop $0
-  nsExec::Exec 'powershell -NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like \"$INSTDIR\*\" } | Stop-Process -Force"'
+  ; The agent runs as caspace-booth-agent.exe (renamed Node.js). Older builds ran node.exe
+  ; from this folder: stop those by path (backtick-quoted so the path may contain spaces).
+  nsExec::Exec 'taskkill /F /T /IM caspace-booth-agent.exe'
+  Pop $0
+  nsExec::Exec `powershell -NoProfile -Command "Get-Process node -ErrorAction SilentlyContinue | Where-Object { $$_.Path -like '$INSTDIR\*' } | Stop-Process -Force"`
   Pop $0
   Sleep 1000
   Delete "$DESKTOP\Gửi ảnh Caspace.url"

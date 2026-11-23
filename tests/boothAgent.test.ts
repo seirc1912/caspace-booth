@@ -173,3 +173,13 @@ test('a wrong server address is explained in Vietnamese and keeps retrying', asy
   const api = { baseUrl: 'https://caspace.vn', key: 'k'.repeat(8), fetchImpl: (async () => new Response('<html>', { status: 405 })) as typeof fetch }
   await assert.rejects(() => uploadExport({ api, phone: '0912345678', filePath: '/p/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg }), (error: unknown) => error instanceof AgentUploadError && error.retryable && /Sai địa chỉ máy chủ.*https:\/\/caspace\.vn.*405/.test(error.message))
 })
+
+test('Setup stops the running agent by its own process name before overwriting files', async () => {
+  const { readFileSync: read } = await import('node:fs')
+  const nsi = read('booth-agent/installer/installer.nsi', 'utf8')
+  assert.match(nsi, /taskkill \/F \/T \/IM caspace-booth-agent\.exe/)
+  assert.match(nsi, /`powershell [^`]*-like '\$INSTDIR\\\*'[^`]*`/, 'legacy node.exe stopped with a path that may contain spaces')
+  assert.ok(nsi.indexOf('Call StopAgent') < nsi.indexOf('File /r'))
+  assert.match(read('booth-agent/installer/launcher.vbs', 'utf8'), /caspace-booth-agent\.exe/)
+  assert.match(read('booth-agent/installer/build.mjs', 'utf8'), /renameSync\([^)]*node\.exe[^)]*caspace-booth-agent\.exe/)
+})

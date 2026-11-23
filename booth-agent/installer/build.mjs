@@ -6,7 +6,7 @@
 // so booth PCs need nothing pre-installed and no terminal.
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { build } from 'esbuild'
 
@@ -48,6 +48,8 @@ const expected = sums.split('\n').find((line) => line.endsWith(`  ${zipName}`))?
 const actual = createHash('sha256').update(readFileSync(zipPath)).digest('hex')
 if (!expected || expected !== actual) { rmSync(zipPath); throw new Error(`Node.js checksum mismatch for ${zipName}`) }
 run('unzip', ['-q', '-o', '-j', zipPath, `node-${NODE_VERSION}-win-x64/node.exe`, '-d', path.join(payload, 'node')])
+// Own process name so Setup/uninstall can stop exactly this agent (and Task Manager shows it).
+renameSync(path.join(payload, 'node', 'node.exe'), path.join(payload, 'node', 'caspace-booth-agent.exe'))
 
 console.log('4/4 Installer')
 for (const file of ['write-config.mjs', 'register-task.mjs', 'task.xml']) copyFileSync(path.join(agentDir, 'installer', file), path.join(payload, 'installer', file))
