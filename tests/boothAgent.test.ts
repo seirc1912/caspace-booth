@@ -181,5 +181,5 @@ test('Setup stops the running agent by its own process name before overwriting f
   assert.match(nsi, /`powershell [^`]*-like '\$INSTDIR\\\*'[^`]*`/, 'legacy node.exe stopped with a path that may contain spaces')
   assert.ok(nsi.indexOf('Call StopAgent') < nsi.indexOf('File /r'))
   assert.match(read('booth-agent/installer/launcher.vbs', 'utf8'), /caspace-booth-agent\.exe/)
-  assert.match(read('booth-agent/installer/build.mjs', 'utf8'), /renameSync\([^)]*node\.exe[^)]*caspace-booth-agent\.exe/)
+  assert.match(read('booth-agent/installer/build.mjs', 'utf8'), /renameSync\(path\.join\(payload, 'node', 'node\.exe'\), path\.join\(payload, 'node', 'caspace-booth-agent\.exe'\)\)/)
 })
