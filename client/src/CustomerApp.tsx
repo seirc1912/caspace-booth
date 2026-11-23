@@ -8,9 +8,8 @@ import { isValidPhoneNumber } from './features/orders/phoneNumber'
 import { usePathname } from './hooks/usePathname'
 import { useSelfBooth } from './hooks/useSelfBooth'
 import { createCustomerSession, type CustomerSession } from './features/photos/customerSession'
-import { createBoothPhotoLoader, loadBoothPhotoFiles, loadBoothSelection, saveBoothSelection, type BoothPhoto, type BoothPoolPhoto } from './features/boothPhotos/boothPhotosClient'
+import { createBoothPhotoLoader, loadBoothPhotoFiles, type BoothPhoto } from './features/boothPhotos/boothPhotosClient'
 import { useBoothPhotos } from './features/boothPhotos/useBoothPhotos'
-import { BoothPhotoPickerPage } from './pages/BoothPhotoPickerPage'
 import { SendFramesSheet, type SendFrameRow } from './components/editor/SendFramesSheet'
 import { frameSignature, isFrameFilled, renderFrameFile, sendFrames, type FrameSendState, type SendableFrame } from './features/orders/services/sendFrames'
 import { prefetchAdjacentTemplateDetails } from './features/templates/templateDetailLookahead'
@@ -36,42 +35,13 @@ export function CustomerApp() {
   const [editorBackground, setEditorBackground] = useState<{ canonical: string; local: string } | null>(null)
   const debugAssetPrefetch = import.meta.env.DEV || sessionStorage.getItem('selfbooth.debug-order-timing') === '1'
   const validPhone = isValidPhoneNumber(booth.phoneNumber) ? booth.phoneNumber : null
-  const boothPhotos = useBoothPhotos(validPhone, pathname === '/booth-photos')
-  const hasBoothPhotos = boothPhotos.list?.status === 'ok' && boothPhotos.list.photos.length > 0
-  // Ticks and downloaded originals belong to one phone; a new number starts empty.
-  const [boothState, setBoothState] = useState<{ phone: string | null; pool: BoothPoolPhoto[]; selection: string[] }>(() => ({ phone: validPhone, pool: [], selection: validPhone ? loadBoothSelection(validPhone) : [] }))
-  const boothForPhone = boothState.phone === validPhone ? boothState : { phone: validPhone, pool: [], selection: validPhone ? loadBoothSelection(validPhone) : [] }
-  const boothPool = boothForPhone.pool
-  const boothSelection = boothForPhone.selection
-  // One loader per phone: ticking a photo starts downloading its original right away.
+  // Booth photos + the customer's own uploads go straight into the editor's
+  // "Ảnh phòng chụp" sheet (no separate picker step); refreshed every 10 s there.
+  const boothPhotos = useBoothPhotos(validPhone, pathname === '/editor')
+  const boothPhotoList = boothPhotos.list?.status === 'ok' ? boothPhotos.list.photos : []
+  // One loader per phone: each original is downloaded once, only when it is used.
   const boothLoader = useMemo(() => (validPhone ? createBoothPhotoLoader() : null), [validPhone])
-  const setBoothSelection = (ids: string[]) => {
-    setBoothState({ ...boothForPhone, selection: ids })
-    if (validPhone) saveBoothSelection(validPhone, ids)
-    const added = new Set(ids.filter((id) => !boothSelection.includes(id)))
-    if (boothLoader && boothPhotos.list?.status === 'ok') boothPhotos.list.photos.filter((photo) => added.has(photo.id)).forEach(boothLoader.prefetch)
-  }
-  const setBoothPool = (pool: BoothPoolPhoto[]) => setBoothState({ ...boothForPhone, pool })
-  // Opens the editor at once; originals keep downloading (already started when ticked)
-  // and each pool entry gets its File as soon as it arrives.
-  const applyBoothPhotoSelection = async (photos: BoothPhoto[]) => {
-    const known = new Map(boothPool.map((photo) => [photo.id, photo]))
-    const pool: BoothPoolPhoto[] = photos.map((photo) => known.get(photo.id) ?? {
-      id: photo.id,
-      thumbUrl: photo.thumbUrl,
-      file: null,
-      ready: boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!),
-    })
-    setBoothPool(pool)
-    navigate('/editor')
-    for (const entry of pool) {
-      if (entry.file) continue
-      entry.ready.then(
-        (file) => setBoothState((current) => ({ ...current, pool: current.pool.map((item) => (item.id === entry.id ? { ...item, file } : item)) })),
-        () => booth.reportPhotoError('Một ảnh phòng chụp chưa tải được. Vui lòng kiểm tra mạng rồi chọn lại.'),
-      )
-    }
-  }
+  const loadBoothOriginal = (photo: BoothPhoto) => (boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!))
 
   const requiredFrameCount = booth.roomTemplateSummaries.length
 
@@ -125,7 +95,7 @@ export function CustomerApp() {
           const session = createCustomerSession(boothId, booth.phoneNumber)
           try { sessionStorage.setItem('selfbooth.photo-library-session', JSON.stringify(session)) } catch { /* in-memory only */ }
           setCustomerSession(session)
-          navigate(hasBoothPhotos ? '/booth-photos' : '/editor')
+          navigate('/editor')
         },
       )
     }
@@ -208,16 +178,18 @@ export function CustomerApp() {
     }, 0)
     return () => { active = false; window.clearTimeout(timer) }
   }, [booth.ensureTemplateDetail, booth.roomTemplateSummaries, booth.template.id, booth.templateReady, branding, debugAssetPrefetch, pathname, remoteExportAssets])
+  // Old links to the removed picker step land in the editor.
+  useEffect(() => { if (pathname === '/booth-photos') navigate('/editor') }, [navigate, pathname])
   useEffect(() => () => remoteExportAssets.clear(), [remoteExportAssets])
   useEffect(() => () => { if (saveConfirmationTimer.current !== null) window.clearTimeout(saveConfirmationTimer.current) }, [])
 
   if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/booth-photos') return validPhone ? <BoothPhotoPickerPage error={boothPhotos.error} list={boothPhotos.list} onBack={() => navigate('/rooms')} onContinue={applyBoothPhotoSelection} onSelectedIdsChange={setBoothSelection} onSkip={() => navigate('/editor')} loadOriginal={(photo) => (boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!))} phone={validPhone} selectedIds={boothSelection} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/booth-photos') return null
   if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
   if (pathname === '/editor' && !booth.draftReady) return null
   if (pathname === '/editor' && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/editor' && !booth.selectedTemplateId) return <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} />
-  if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} autoFillHasExistingPhotos={booth.autoFillHasExistingPhotos} autoFillPhotoCount={booth.autoFillPhotoCount} autoFillPreparing={booth.autoFillPreparing} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAutoFillPhotos={booth.autoFillAllFrames} boothPool={boothPool} onOpenBoothPhotos={hasBoothPhotos ? () => navigate('/booth-photos') : undefined} sendableFrameCount={sendRows.filter((row) => row.filled).length} onOpenSendFrames={() => { setSendStates({}); setSendMessage(null); setSendOpen(true) }} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} onFitChange={booth.updateFit} saveConfirmation={saveConfirmation} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} />{sendOpen ? <SendFramesSheet message={sendMessage} onClose={() => setSendOpen(false)} onSend={(ids) => void sendSelectedFrames(ids)} rows={sendRows} sending={sending} /> : null}</EditorErrorBoundary>
+  if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} autoFillHasExistingPhotos={booth.autoFillHasExistingPhotos} autoFillPhotoCount={booth.autoFillPhotoCount} autoFillPreparing={booth.autoFillPreparing} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAutoFillPhotos={booth.autoFillAllFrames} boothPhotos={boothPhotoList} loadBoothOriginal={loadBoothOriginal} sendableFrameCount={sendRows.filter((row) => row.filled).length} onOpenSendFrames={() => { setSendStates({}); setSendMessage(null); setSendOpen(true) }} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} onFitChange={booth.updateFit} saveConfirmation={saveConfirmation} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} />{sendOpen ? <SendFramesSheet message={sendMessage} onClose={() => setSendOpen(false)} onSend={(ids) => void sendSelectedFrames(ids)} rows={sendRows} sending={sending} /> : null}</EditorErrorBoundary>
   return <NotFoundPage />
 }

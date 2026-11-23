@@ -2,12 +2,13 @@ import { clearUploadSession, ensureUploadSession } from '../photoUpload/uploadCl
 
 export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; originalUrl: string; uploadedAt: string }
 export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[] } | { status: 'unavailable'; photos: [] }
-/** A ticked photo in the editor. `file` is null while its original is still downloading. */
-export interface BoothPoolPhoto { id: string; thumbUrl: string | null; file: File | null; ready: Promise<File> }
-
-/** Originals that downloaded; a failed one is skipped instead of blocking the others. */
-export async function readyPoolFiles(pool: BoothPoolPhoto[]) {
-  const settled = await Promise.allSettled(pool.map((photo) => photo.ready))
+/**
+ * Originals for the photos actually used (Auto Fill, Add Image), with progress; a
+ * failed download is skipped instead of blocking the others.
+ */
+export async function loadBoothOriginals(photos: BoothPhoto[], load: (photo: BoothPhoto) => Promise<File>, onProgress?: (done: number, total: number) => void) {
+  let done = 0
+  const settled = await Promise.allSettled(photos.map((photo) => load(photo).finally(() => onProgress?.(++done, photos.length))))
   return settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
 }
 
@@ -70,18 +71,6 @@ export async function loadBoothPhotoFiles(photos: BoothPhoto[], onProgress?: (do
   return Promise.all(photos.map((photo) => loader.load(photo).then((file) => { onProgress?.(++done, photos.length); return file })))
 }
 
-const selectionKey = (phone: string) => `caspace.booth-selection.${phone}`
-
-export function loadBoothSelection(phone: string): string[] {
-  try {
-    const value = JSON.parse(sessionStorage.getItem(selectionKey(phone)) ?? '[]') as unknown
-    return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
-  } catch { return [] }
-}
-
-export function saveBoothSelection(phone: string, ids: string[]) {
-  try { sessionStorage.setItem(selectionKey(phone), JSON.stringify(ids)) } catch { /* private mode: keep in memory only */ }
-}
 
 /**
  * iPhone/iPad can only put images into Photos through the share sheet; Android and
@@ -115,3 +104,6 @@ export async function downloadBoothPhotos(photos: Array<Pick<BoothPhoto, 'origin
     click(boothDownloadUrl(photo))
   }
 }
+
+/** Most booth photos used at once: Auto Fill and "save to phone" (keeps phones responsive). */
+export const MAX_BOOTH_SELECTION = 20

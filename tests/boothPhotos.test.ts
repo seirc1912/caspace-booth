@@ -59,18 +59,18 @@ test('customer endpoint needs a signed browser session and same origin', () => {
   assert.doesNotMatch(source, /console\.\w+\([^)]*phone/)
 })
 
-test('entering a room opens the booth picker when photos exist; the old Supabase RPC session is gone', () => {
+test('entering a room goes straight to the editor; booth photos live in its "Ảnh phòng chụp" sheet', () => {
   const app = readFileSync('client/src/CustomerApp.tsx', 'utf8')
-  assert.doesNotMatch(app, /useSessionPhotos|startPhotoLibrarySession/)
-  assert.match(app, /navigate\(hasBoothPhotos \? '\/booth-photos' : '\/editor'\)/)
+  assert.doesNotMatch(app, /useSessionPhotos|startPhotoLibrarySession|BoothPhotoPickerPage/)
   assert.match(app, /createCustomerSession\(boothId, booth\.phoneNumber\)/)
+  assert.match(app, /useBoothPhotos\(validPhone, pathname === '\/editor'\)/, 'list refreshes while editing')
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
-  assert.match(composer, /if \(boothPool\.length\) \{ setAutoFillDialogOpen\(false\); withPoolFiles\(boothPool, \(files\) => onAutoFillPhotos\?\.\(files\)\); return \}/)
-  const picker = readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8')
-  assert.match(picker, /loading="lazy" src=\{photo\.thumbUrl\}/, 'grid only loads thumbnails')
-  assert.doesNotMatch(picker, /originalUrl/)
+  assert.match(composer, /withBoothFiles\(boothPhotos\.slice\(0, MAX_BOOTH_SELECTION\), \(files\) => onAutoFillPhotos\?\.\(files\)\)/, 'Auto Fill: first 20 booth photos')
+  assert.match(composer, /Ảnh phòng chụp \(\{boothPhotos\.length\}\)/)
+  const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
+  assert.match(sheet, /loading="lazy" src=\{photo\.thumbUrl\}/, 'sheet grid loads thumbnails only')
+  assert.doesNotMatch(sheet, /src=\{photo\.originalUrl\}/)
 })
-
 test('one browser session may look up at most 3 different phone numbers per 10 minutes', async () => {
   const { enforceDistinctLimit, resetRateLimitsForTests } = await import('../client/api/_lib/rateLimit.ts')
   resetRateLimitsForTests()
@@ -92,7 +92,6 @@ test('ticking a photo prefetches its original once; continuing reuses it', async
   const files = await loadBoothPhotoFiles([photo], undefined, fetch, loader)
   assert.equal(files[0]!.name, 'a.jpg')
   assert.deepEqual(fetched, ['o/a'], 'downloaded once')
-  assert.match(readFileSync('client/src/CustomerApp.tsx', 'utf8'), /forEach\(boothLoader\.prefetch\)/)
 })
 
 test('multi-photo frames label empty slots "Hình N" and the sheet says which photo goes where', () => {
@@ -141,19 +140,15 @@ test('photos the customer uploaded via /upload-anh are offered too; exported fra
   assert.equal(old.status, 'ok', 'no viewing window: visible until the 3-day cleanup')
 })
 
-test('"DÙNG N ẢNH" opens the editor at once; originals finish downloading in the background', async () => {
-  const app = readFileSync('client/src/CustomerApp.tsx', 'utf8')
-  const apply = app.slice(app.indexOf('const applyBoothPhotoSelection'), app.indexOf("navigate('/editor')", app.indexOf('const applyBoothPhotoSelection')))
-  assert.doesNotMatch(apply, /await /, 'no download is awaited before navigating')
-  assert.match(app, /file: null,\s+ready: boothLoader \? boothLoader\.load\(photo\)/)
-  const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
-  assert.match(composer, /Đang tải ảnh phòng chụp \$\{poolReady\}\/\$\{boothPool\.length\}…/)
-  const { readyPoolFiles } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
-  const file = new File([new Uint8Array([1])], 'a.jpg')
-  const files = await readyPoolFiles([{ id: 'a', thumbUrl: null, file: null, ready: Promise.resolve(file) }, { id: 'b', thumbUrl: null, file: null, ready: Promise.reject(new Error('net')) }])
-  assert.deepEqual(files, [file], 'one failed download does not block the others')
+test('originals are downloaded only for the photos used, with progress; a failed one does not block the rest', async () => {
+  const { loadBoothOriginals } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  const photo = (id: string): BoothPhoto => ({ id, name: `${id}.jpg`, thumbUrl: null, originalUrl: `o/${id}`, uploadedAt: '' })
+  const progress: string[] = []
+  const files = await loadBoothOriginals([photo('a'), photo('b')], async (item) => { if (item.id === 'b') throw new Error('net'); return new File([new Uint8Array([1])], item.name) }, (done, total) => progress.push(`${done}/${total}`))
+  assert.deepEqual(files.map((file) => file.name), ['a.jpg'])
+  assert.deepEqual(progress.sort(), ['1/2', '2/2'])
+  assert.match(readFileSync('client/src/pages/ComposerPage.tsx', 'utf8'), /Đang tải ảnh phòng chụp \$\{poolProgress\.done\}\/\$\{poolProgress\.total\}…/)
 })
-
 test('saving several photos uses one share sheet, or one download per file when sharing is unavailable', async () => {
   const { deliverImageFiles } = await import('../client/src/features/orders/services/saveComposition.ts')
   const files = [new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' }), new File([new Uint8Array([2])], 'b.jpg', { type: 'image/jpeg' })]
@@ -166,17 +161,19 @@ test('saving several photos uses one share sheet, or one download per file when 
   assert.equal(await deliverImageFiles(files, { navigator: { canShare: () => true, share: async () => { throw Object.assign(new Error('x'), { name: 'AbortError' }) } }, download: () => assert.fail() }), 'cancelled')
 })
 
-test('picker: ⤢ or double tap opens the full-screen viewer with previous/next; download button for ticked photos', () => {
-  const picker = readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8')
-  assert.match(picker, /aria-label=\{`Xem lớn ảnh \$\{index \+ 1\}`\}/)
-  assert.match(picker, /if \(double\) setViewerIndex\(index\)/)
-  assert.match(picker, /`⬇ Lưu \$\{selectedPhotos\.length\} ảnh vào máy`/)
+test('"Ảnh phòng chụp" sheet: ⤢ opens the full-screen viewer; browse mode saves up to 20 photos', async () => {
+  const { MAX_BOOTH_SELECTION } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  assert.equal(MAX_BOOTH_SELECTION, 20)
+  const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
+  assert.match(sheet, /aria-label=\{`Xem lớn ảnh \$\{index \+ 1\}`\}/)
+  assert.match(sheet, /const limit = mode === 'browse' \? MAX_BOOTH_SELECTION : capacity/)
+  assert.match(sheet, /Mỗi lần tải tối đa \$\{MAX_BOOTH_SELECTION\} ảnh\./)
+  assert.match(sheet, /if \(!useShareSheet\) \{ await downloadBoothPhotos\(items\); return \}/)
   const viewer = readFileSync('client/src/components/booth/BoothPhotoViewer.tsx', 'utf8')
   assert.match(viewer, /aria-label="Ảnh trước"/)
   assert.match(viewer, /aria-label="Ảnh sau"/)
   assert.match(viewer, /if \(Math\.abs\(dx\) > 50\) go\(dx < 0 \? 1 : -1\)/, 'swipe left/right')
 })
-
 test('Android/desktop download originals directly; only iPhone/iPad use the share sheet', async () => {
   const { boothDownloadUrl, downloadBoothPhotos, prefersShareSheet } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
   assert.equal(prefersShareSheet('Mozilla/5.0 (Linux; Android 14; 23078PND5G) Chrome/131 Mobile', 5), false)
@@ -195,5 +192,4 @@ test('no viewing window: photos stay visible until the 3-day cleanup deletes the
   assert.equal(twoDaysOld.status, 'ok')
   assert.equal(twoDaysOld.photos.length, 1)
   assert.ok(!('viewableUntil' in twoDaysOld))
-  assert.doesNotMatch(readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8'), /Xem được đến/)
 })
