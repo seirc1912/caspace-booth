@@ -82,3 +82,36 @@ export function loadBoothSelection(phone: string): string[] {
 export function saveBoothSelection(phone: string, ids: string[]) {
   try { sessionStorage.setItem(selectionKey(phone), JSON.stringify(ids)) } catch { /* private mode: keep in memory only */ }
 }
+
+/**
+ * iPhone/iPad can only put images into Photos through the share sheet; Android and
+ * desktop browsers save straight to Downloads (which the gallery shows).
+ */
+export function prefersShareSheet(userAgent = navigator.userAgent, maxTouchPoints = navigator.maxTouchPoints) {
+  return /iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)
+}
+
+/** Signed URL that makes Storage answer with Content-Disposition: attachment. */
+export function boothDownloadUrl(photo: Pick<BoothPhoto, 'originalUrl' | 'name'>) {
+  const url = new URL(photo.originalUrl)
+  url.searchParams.set('download', photo.name)
+  return url.toString()
+}
+
+/**
+ * Direct downloads (no in-page fetch, no "preparing" wait): the browser's download
+ * manager fetches each original. Spaced out so Chrome treats them as separate files.
+ */
+export async function downloadBoothPhotos(photos: Array<Pick<BoothPhoto, 'originalUrl' | 'name'>>, gapMs = 400, click = (href: string) => {
+  const link = document.createElement('a')
+  link.href = href
+  link.rel = 'noopener'
+  document.body.append(link)
+  link.click()
+  link.remove()
+}) {
+  for (const [index, photo] of photos.entries()) {
+    if (index) await new Promise((resolve) => setTimeout(resolve, gapMs))
+    click(boothDownloadUrl(photo))
+  }
+}

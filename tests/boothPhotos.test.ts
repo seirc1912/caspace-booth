@@ -204,3 +204,15 @@ test('picker: ⤢ or double tap opens the full-screen viewer with previous/next;
   assert.match(viewer, /aria-label="Ảnh sau"/)
   assert.match(viewer, /if \(Math\.abs\(dx\) > 50\) go\(dx < 0 \? 1 : -1\)/, 'swipe left/right')
 })
+
+test('Android/desktop download originals directly; only iPhone/iPad use the share sheet', async () => {
+  const { boothDownloadUrl, downloadBoothPhotos, prefersShareSheet } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  assert.equal(prefersShareSheet('Mozilla/5.0 (Linux; Android 14; 23078PND5G) Chrome/131 Mobile', 5), false)
+  assert.equal(prefersShareSheet('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X)', 5), true)
+  assert.equal(prefersShareSheet('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari', 5), true, 'iPadOS reports Macintosh')
+  assert.equal(prefersShareSheet('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome', 0), false)
+  assert.equal(boothDownloadUrl({ originalUrl: 'https://x.supabase.co/storage/v1/object/sign/b/p/a.jpg?token=t', name: 'IMG 1.jpg' }), 'https://x.supabase.co/storage/v1/object/sign/b/p/a.jpg?token=t&download=IMG+1.jpg')
+  const clicked: string[] = []
+  await downloadBoothPhotos([{ originalUrl: 'https://s/o/a?token=1', name: 'a.jpg' }, { originalUrl: 'https://s/o/b?token=2', name: 'b.jpg' }], 0, (href) => clicked.push(href))
+  assert.deepEqual(clicked, ['https://s/o/a?token=1&download=a.jpg', 'https://s/o/b?token=2&download=b.jpg'])
+})
