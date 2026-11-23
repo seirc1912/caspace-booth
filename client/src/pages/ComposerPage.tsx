@@ -13,7 +13,7 @@ import { PageShell } from '../components/layout/PageShell'
 import { CropToolbar } from '../components/editor/CropToolbar'
 import { FrameSelector } from '../components/editor/FrameSelector'
 import { BoothPoolSheet } from '../components/editor/BoothPoolSheet'
-import { readyPoolFiles, type BoothPoolPhoto } from '../features/boothPhotos/boothPhotosClient'
+import { loadBoothOriginals, MAX_BOOTH_SELECTION, type BoothPhoto } from '../features/boothPhotos/boothPhotosClient'
 
 interface ComposerPageProps {
   template: PrintTemplate
@@ -46,9 +46,9 @@ interface ComposerPageProps {
   downloading?: boolean
   onPrevious?: () => void
   saveConfirmation?: string | null
-  /** Booth photos the customer ticked; Auto Fill / Add Photo use these instead of the phone picker. */
-  boothPool?: BoothPoolPhoto[]
-  onOpenBoothPhotos?: () => void
+  /** Booth photos + the customer's own uploads (thumbnails); Auto Fill / Add Photo use these first. */
+  boothPhotos?: BoothPhoto[]
+  loadBoothOriginal?: (photo: BoothPhoto) => Promise<File>
   /** Frames with every slot filled; > 0 shows "Gửi khung cho quán". */
   sendableFrameCount?: number
   onOpenSendFrames?: () => void
@@ -58,7 +58,7 @@ type PoolRequest = { kind: 'slot'; target: DirectPhotoTarget } | { kind: 'frame'
 
 interface CropSnapshot { index: number; transform: ImageTransform; fit: 'contain' | 'cover'; filter: PhotoFilter }
 
-export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBack, onCurrentSlotChange, onRemove, onPickPhoto, onPickFramePhotos, onAutoFillPhotos, autoFillPhotoCount = null, autoFillPreparing = false, autoFillHasExistingPhotos = false, onTransform, onFitChange, onFilterChange, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading, onPrevious, saveConfirmation , boothPool = [], onOpenBoothPhotos , sendableFrameCount = 0, onOpenSendFrames }: ComposerPageProps) {
+export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBack, onCurrentSlotChange, onRemove, onPickPhoto, onPickFramePhotos, onAutoFillPhotos, autoFillPhotoCount = null, autoFillPreparing = false, autoFillHasExistingPhotos = false, onTransform, onFitChange, onFilterChange, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frameCount = 1, completedFrameIds = [], frameIds = [], onSelectFrame, onDownload, downloading, onPrevious, saveConfirmation , boothPhotos = [], loadBoothOriginal , sendableFrameCount = 0, onOpenSendFrames }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
   const bottomControls = useRef<HTMLDivElement>(null)
   const photoInput = useRef<HTMLInputElement>(null)
@@ -66,15 +66,18 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
   const autoFillPhotoInput = useRef<HTMLInputElement>(null)
   const [autoFillDialogOpen, setAutoFillDialogOpen] = useState(false)
   const [poolRequest, setPoolRequest] = useState<PoolRequest | null>(null)
-  const [waitingForPool, setWaitingForPool] = useState(false)
-  const poolReady = boothPool.filter((photo) => photo.file).length
-  /** Waits only for the photos actually used; the editor stays usable meanwhile. */
-  const withPoolFiles = (photos: BoothPoolPhoto[], use: (files: File[]) => void) => {
-    setWaitingForPool(true)
-    void readyPoolFiles(photos).then((files) => { if (files.length) use(files); else onPhotoError('Ảnh phòng chụp chưa tải được. Vui lòng kiểm tra mạng.') }).finally(() => setWaitingForPool(false))
-  }
   const pendingPhotoTarget = useRef<DirectPhotoTarget | null>(null)
   const pendingFramePhotoTarget = useRef<FramePhotoTarget | null>(null)
+  const [browseBooth, setBrowseBooth] = useState(false)
+  const [poolProgress, setPoolProgress] = useState<{ done: number; total: number } | null>(null)
+  /** Downloads only the originals actually used, with a progress chip; the editor stays usable. */
+  const withBoothFiles = (photos: BoothPhoto[], use: (files: File[]) => void) => {
+    if (!loadBoothOriginal || !photos.length) return
+    setPoolProgress({ done: 0, total: photos.length })
+    void loadBoothOriginals(photos, loadBoothOriginal, (done, total) => setPoolProgress({ done, total }))
+      .then((files) => { if (files.length) use(files); else onPhotoError('Ảnh phòng chụp chưa tải được. Vui lòng kiểm tra mạng.') })
+      .finally(() => setPoolProgress(null))
+  }
   useEffect(() => {
     const controls = bottomControls.current
     if (!controls) return
@@ -94,7 +97,7 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
   }
   const openPhotoPicker = (slotIndex: number, fromPhone = false) => {
     const target = { templateId: template.id, slotIndex, slotCount: template.slots.length }
-    if (boothPool.length && !fromPhone) {
+    if (boothPhotos.length && !fromPhone) {
       // Empty slot in a multi-photo frame: pick several booth photos in one go — the first
       // goes into the tapped slot, the rest fill the other empty slots in order.
       const frameTarget = createFramePhotoTarget(template.id, slots)
@@ -120,7 +123,7 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
   }
   const openFramePhotoPicker = (fromPhone = false) => {
     const target = createFramePhotoTarget(template.id, slots)
-    if (boothPool.length && !fromPhone) { setPoolRequest({ kind: 'frame', target }); return }
+    if (boothPhotos.length && !fromPhone) { setPoolRequest({ kind: 'frame', target }); return }
     const input = framePhotoInput.current
     if (!input) return
     pendingFramePhotoTarget.current = target
@@ -135,7 +138,8 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
     if (files.length && target) onPickFramePhotos(target, files)
   }
   const openAutoFillPicker = () => {
-    if (boothPool.length) { setAutoFillDialogOpen(false); withPoolFiles(boothPool, (files) => onAutoFillPhotos?.(files)); return }
+    // Auto Fill uses the first 20 booth photos (shooting order) — at most ~75 MB to download.
+    if (boothPhotos.length) { setAutoFillDialogOpen(false); withBoothFiles(boothPhotos.slice(0, MAX_BOOTH_SELECTION), (files) => onAutoFillPhotos?.(files)); return }
     const input = autoFillPhotoInput.current
     if (!input) return
     setAutoFillDialogOpen(false)
@@ -175,18 +179,18 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
     <input accept="image/*" aria-label="Choose one photo" className="sr-only" onChange={choosePhoto} ref={photoInput} type="file" />
     <input accept="image/*" aria-label="Choose multiple photos" className="sr-only" multiple onChange={chooseFramePhotos} ref={framePhotoInput} type="file" />
     <input accept="image/*" aria-label="Choose photos for all frames" className="sr-only" multiple onChange={chooseAutoFillPhotos} ref={autoFillPhotoInput} type="file" />
-    <header className="mb-3 flex items-center justify-between md:mb-4"><div className="flex items-center"><button className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onBack} type="button">Rooms</button>{onOpenBoothPhotos ? <button className="ml-2 min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onOpenBoothPhotos} type="button">Ảnh phòng chụp{boothPool.length ? ` (${boothPool.length})` : ''}</button> : null}</div><div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Frame {frameIndex + 1} / {frameCount}</p><h1 className="font-bold">{template.name}</h1></div><span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span></header>
+    <header className="mb-3 flex items-center justify-between md:mb-4"><div className="flex items-center"><button className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onBack} type="button">Rooms</button>{boothPhotos.length ? <button className="ml-2 min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={() => setBrowseBooth(true)} type="button">Ảnh phòng chụp ({boothPhotos.length})</button> : null}</div><div className="text-center"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Frame {frameIndex + 1} / {frameCount}</p><h1 className="font-bold">{template.name}</h1></div><span className="grid size-11 place-items-center rounded-full bg-white text-xs font-bold shadow-sm">{slots.filter(Boolean).length}/{slots.length}</span></header>
     <div className="mx-auto mb-3 w-full min-w-0 max-w-4xl md:mb-5"><div aria-label={`Frame progress: ${frameIndex + 1} of ${frameCount}`} aria-valuemax={frameCount} aria-valuemin={1} aria-valuenow={frameIndex + 1} className="h-2 overflow-hidden rounded-full bg-stone-200" role="progressbar"><div className="h-full rounded-full bg-[var(--brand-primary)] transition-[width] duration-300" style={{ width: `${((frameIndex + 1) / Math.max(1, frameCount)) * 100}%` }} /></div>{onSelectFrame && frameIds.length > 1 ? <FrameSelector completedFrameIds={completedFrameIds} frameIds={frameIds} frameIndex={frameIndex} onSelectFrame={onSelectFrame} /> : null}</div>
     <div className="mx-auto grid w-full max-w-4xl items-start gap-3 md:grid-cols-[minmax(18rem,25rem)_1fr] md:gap-5">
       <div className="grid gap-3">{onOpenSendFrames && sendableFrameCount > 0 ? <button className="min-h-12 w-full rounded-2xl bg-[var(--brand-primary)] px-3 text-sm font-black text-white shadow-sm" onClick={onOpenSendFrames} type="button">GỬI KHUNG CHO QUÁN IN ({sendableFrameCount})</button> : null}<div className="grid grid-cols-3 gap-2"><button className="min-h-12 w-full rounded-2xl border-2 border-stone-950 bg-white px-1 text-center text-[0.65rem] font-black leading-tight text-stone-950 shadow-sm sm:px-3 sm:text-sm disabled:cursor-not-allowed disabled:opacity-35" disabled={autoFillPreparing || !autoFillPhotoCount} onClick={() => setAutoFillDialogOpen(true)} type="button">{autoFillPreparing || autoFillPhotoCount === null ? 'Preparing…' : <><span className="block sm:inline">Auto Fill</span><span className="block sm:ml-1 sm:inline">{autoFillPhotoCount} Photos</span></>}</button><button className="min-h-12 w-full rounded-2xl bg-stone-950 px-1 text-center text-[0.65rem] font-black leading-tight text-white shadow-sm sm:px-3 sm:text-sm disabled:cursor-not-allowed disabled:opacity-35" disabled={remainingSlotCount === 0} onClick={openAddImagePicker} type="button">{remainingSlotCount === 0 ? 'All Photos Added' : <><span className="block sm:inline">Add</span><span className="block sm:ml-1 sm:inline">{remainingSlotCount} {remainingSlotCount === 1 ? 'Photo' : 'Photos'}</span></>}</button><button className="min-h-12 w-full rounded-2xl border-2 border-stone-950 bg-white px-1 text-center text-[0.65rem] font-black leading-tight text-stone-950 shadow-sm sm:px-3 sm:text-sm disabled:cursor-not-allowed disabled:opacity-35" disabled={!selectedSlot} onClick={toggleAutoFit} type="button">Auto Fit</button></div><TemplateCanvas activeSlot={currentSlot} backgroundUrl={backgroundUrl} cropSlot={crop?.index ?? null} onImageError={onPhotoError} onActiveSlotChange={selectFrame} onAdd={openPhotoPicker} onBeginCrop={beginCrop} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, createInitialPhotoTransform()); onFitChange(index, 'contain') }} onReplace={openPhotoPicker} onTransform={onTransform} slots={slots} template={template} /></div>
       <aside className="hidden rounded-[1.75rem] bg-white p-5 shadow-sm md:block"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Add photos to this frame.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Use the main Add Photos button to fill empty slots at once. Tap Add Image inside a slot for one photo, or Replace to change it later.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Your existing frames and edits stay in place while you choose from Photos.</div></aside>
     </div>
     <div className="fixed inset-x-0 bottom-0 z-20 bg-white md:contents" ref={bottomControls}>{crop ? <CropToolbar onCancel={cancelCrop} onDone={finishCrop} onPositionXChange={(x) => onTransform(crop.index, { x })} onPositionYChange={(y) => onTransform(crop.index, { y })} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} positionX={slots[crop.index]?.transform.x ?? 0} positionY={slots[crop.index]?.transform.y ?? 0} zoom={slots[crop.index]?.transform.zoom ?? 1} /> : null}<EditorToolbar allBwEnabled={allBwEnabled} canContinue={slots.every(Boolean)} downloading={downloading} filter={selectedSlot?.filter ?? 'none'} filterDisabled={!selectedSlot} onDownload={onDownload} onFilterChange={(filter) => { if (currentSlot !== null && selectedSlot) onFilterChange(currentSlot, filter) }} onPrevious={onPrevious} onSkip={skipFrame} onToggleAllBw={onToggleAllBw} previousDisabled={frameIndex === 0} skipDisabled={frameIndex >= frameCount - 1} /></div>
-    {poolRequest ? <BoothPoolSheet capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(ids) => {
+    {poolRequest ? <BoothPoolSheet loadOriginal={loadBoothOriginal ?? (() => Promise.reject(new Error('unavailable')))} mode="pick" capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(ids) => {
       const request = poolRequest
       setPoolRequest(null)
-      const chosen = ids.map((id) => boothPool.find((photo) => photo.id === id)).filter((photo): photo is BoothPoolPhoto => Boolean(photo))
-      withPoolFiles(chosen, (files) => {
+      const chosen = ids.map((id) => boothPhotos.find((photo) => photo.id === id)).filter((photo): photo is BoothPhoto => Boolean(photo))
+      withBoothFiles(chosen, (files) => {
         if (request.kind === 'slot' && files[0]) onPickPhoto(request.target, files[0])
         if (request.kind === 'frame') onPickFramePhotos(request.target, files)
       })
@@ -195,8 +199,9 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
       setPoolRequest(null)
       if (request.kind === 'slot') openPhotoPicker(request.target.slotIndex, true)
       else openFramePhotoPicker(true)
-    }} photos={boothPool} /> : null}
-    {boothPool.length && (waitingForPool || poolReady < boothPool.length) ? <div className="pointer-events-none fixed inset-x-4 z-[60] mx-auto flex max-w-xs items-center justify-center gap-2 rounded-full bg-stone-950/85 px-4 py-2 text-xs font-bold text-white shadow-xl md:bottom-6" role="status" style={{ bottom: 'calc(var(--mobile-editor-controls-height, 7rem) + 0.75rem)' }}><span className="size-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />{waitingForPool ? 'Đang chờ ảnh tải xong…' : `Đang tải ảnh phòng chụp ${poolReady}/${boothPool.length}…`}</div> : null}
+    }} photos={boothPhotos} /> : null}
+    {browseBooth ? <BoothPoolSheet loadOriginal={loadBoothOriginal ?? (() => Promise.reject(new Error('unavailable')))} mode="browse" onClose={() => setBrowseBooth(false)} photos={boothPhotos} /> : null}
+    {poolProgress ? <div className="pointer-events-none fixed inset-x-4 z-[60] mx-auto flex max-w-xs items-center justify-center gap-2 rounded-full bg-stone-950/85 px-4 py-2 text-xs font-bold text-white shadow-xl md:bottom-6" role="status" style={{ bottom: 'calc(var(--mobile-editor-controls-height, 7rem) + 0.75rem)' }}><span className="size-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />{`Đang tải ảnh phòng chụp ${poolProgress.done}/${poolProgress.total}…`}</div> : null}
     {saveConfirmation ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto max-w-sm rounded-2xl bg-emerald-600 px-4 py-3 text-center text-sm font-bold text-white shadow-2xl" role="status">{saveConfirmation}</div> : null}
     {autoFillDialogOpen && autoFillPhotoCount ? <div aria-labelledby="auto-fill-title" aria-modal="true" className="fixed inset-0 z-[80] grid place-items-center bg-stone-950/60 p-4" role="dialog"><div className="w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl"><h2 className="text-xl font-black" id="auto-fill-title">Auto Fill All Frames</h2><p className="mt-2 text-sm leading-6 text-stone-600">{autoFillHasExistingPhotos ? 'Auto Fill will replace the photos currently added to your Frames. Continue?' : `Select any number of photos to distribute across all Frames. Selecting ${autoFillPhotoCount} fills the whole Room.`}</p>{autoFillHasExistingPhotos ? <p className="mt-2 text-sm font-semibold text-stone-700">Select any number of photos. Selecting {autoFillPhotoCount} fills the whole Room.</p> : null}<div className="mt-5 grid grid-cols-2 gap-3"><button className="min-h-12 rounded-2xl bg-stone-100 px-4 font-bold" onClick={() => setAutoFillDialogOpen(false)} type="button">Cancel</button><button className="min-h-12 rounded-2xl bg-stone-950 px-4 font-bold text-white" onClick={openAutoFillPicker} type="button">Continue</button></div></div></div> : null}
     {photoError ? <div className="fixed inset-x-4 top-4 z-[70] mx-auto flex max-w-md items-center justify-between gap-3 rounded-2xl bg-rose-600 px-4 py-3 text-sm font-semibold text-white shadow-2xl" role="alert"><span>{photoError}</span><button className="min-h-10 shrink-0 rounded-xl bg-white/15 px-3 font-bold" onClick={onClearPhotoError} type="button">Dismiss</button></div> : null}
