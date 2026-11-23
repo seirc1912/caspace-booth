@@ -114,10 +114,34 @@ Function ConfigPageLeave
   ${NSD_GetText} $KeyBox $BoothKey
   ${NSD_GetText} $ServerBox $ServerUrl
   ${NSD_GetText} $FolderBox $WatchRoot
+  ; Check everything here so staff can fix it on this page instead of re-running Setup.
   ${If} $HasConfig == "0"
+  ${OrIf} $BoothId != ""
     ${If} $BoothId == ""
-    ${OrIf} $BoothKey == ""
-      MessageBox MB_ICONEXCLAMATION "Vui lòng chọn mã phòng và nhập mã bí mật."
+      MessageBox MB_ICONEXCLAMATION "Vui lòng chọn mã phòng (booth-1 … booth-4)."
+      Abort
+    ${EndIf}
+  ${EndIf}
+  StrLen $0 $BoothKey
+  ${If} $HasConfig == "0"
+  ${OrIf} $0 > 0
+    ${If} $0 < 16
+      MessageBox MB_ICONEXCLAMATION "Mã bí mật chưa đúng: cần dán đủ mã chủ quán cung cấp (ít nhất 16 ký tự, hiện có $0)."
+      Abort
+    ${EndIf}
+  ${EndIf}
+  ${If} $ServerUrl != ""
+    StrCpy $1 $ServerUrl 7
+    StrCpy $2 $ServerUrl 8
+    ${If} $1 != "http://"
+    ${AndIf} $2 != "https://"
+      MessageBox MB_ICONEXCLAMATION "Địa chỉ máy chủ phải bắt đầu bằng https:// (ví dụ https://caspace.vn)."
+      Abort
+    ${EndIf}
+  ${EndIf}
+  ${If} $WatchRoot != ""
+    ${IfNot} ${FileExists} "$WatchRoot\*.*"
+      MessageBox MB_ICONEXCLAMATION "Không thấy thư mục ảnh: $WatchRoot"
       Abort
     ${EndIf}
   ${EndIf}
@@ -154,11 +178,22 @@ Section "Install"
   File /r "${PAYLOAD}\*.*"
 
   DetailPrint "Lưu cấu hình…"
-  nsExec::ExecToStack '"$INSTDIR\node\node.exe" "$INSTDIR\installer\write-config.mjs" "$INSTDIR\config.json" "$BoothId" "$BoothKey" "$ServerUrl" "$WatchRoot"'
+  nsExec::Exec '"$INSTDIR\node\node.exe" "$INSTDIR\installer\write-config.mjs" "$INSTDIR\config.json" "$BoothId" "$BoothKey" "$ServerUrl" "$WatchRoot"'
   Pop $0
-  Pop $1
   ${If} $0 != "0"
-    MessageBox MB_ICONSTOP "Cấu hình chưa đúng:$\r$\n$1$\r$\nHãy chạy lại Setup."
+    ${Select} $0
+      ${Case} "10"
+        StrCpy $1 "Địa chỉ máy chủ không hợp lệ."
+      ${Case} "11"
+        StrCpy $1 "Mã phòng không hợp lệ (ví dụ booth-1)."
+      ${Case} "12"
+        StrCpy $1 "Mã bí mật phải có ít nhất 16 ký tự."
+      ${Case} "13"
+        StrCpy $1 "Không thấy thư mục ảnh."
+      ${CaseElse}
+        StrCpy $1 "Lỗi không xác định (mã $0)."
+    ${EndSelect}
+    MessageBox MB_ICONSTOP "Cấu hình chưa đúng: $1$\r$\nHãy chạy lại Setup."
     Abort
   ${EndIf}
 
@@ -176,7 +211,7 @@ Section "Install"
   Pop $0
   Pop $1
   ${If} $0 != "0"
-    MessageBox MB_ICONSTOP "Không đăng ký được tác vụ tự chạy:$\r$\n$1"
+    MessageBox MB_ICONSTOP "Không đăng ký được tác vụ tự chạy (mã $0). Hãy chạy lại Setup bằng quyền quản trị."
   ${EndIf}
 
   WriteINIStr "$DESKTOP\Gửi ảnh Caspace.url" "InternetShortcut" "URL" "http://127.0.0.1:47821/"

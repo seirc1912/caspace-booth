@@ -14,11 +14,11 @@ const next = {
   concurrency: current.concurrency ?? 1,
   statusPort: current.statusPort ?? 47821,
 }
-const problems = []
-if (!/^https?:\/\/\S+$/.test(next.apiBaseUrl)) problems.push('Địa chỉ máy chủ phải bắt đầu bằng https://')
-if (!/^[a-z0-9-]{1,32}$/.test(next.boothId)) problems.push('Mã phòng không hợp lệ (ví dụ booth-1)')
-if (next.boothKey.length < 16) problems.push('Mã bí mật phải có ít nhất 16 ký tự')
-if (!existsSync(next.watchRoot)) problems.push(`Không thấy thư mục ảnh: ${next.watchRoot}`)
-if (problems.length) { console.error(problems.join('\n')); process.exit(2) }
+// Exit codes (no text: NSIS reads child output as ANSI, Vietnamese would be garbled;
+// installer.nsi shows the matching Vietnamese message):
+//   10 server URL, 11 booth id, 12 key too short, 13 photo folder missing
+if (!/^https?:\/\/\S+$/.test(next.apiBaseUrl)) process.exit(10)
+if (!/^[a-z0-9-]{1,32}$/.test(next.boothId)) process.exit(11)
+if (next.boothKey.length < 16) process.exit(12)
+if (!existsSync(next.watchRoot)) process.exit(13)
 writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`)
-console.log('ok')
