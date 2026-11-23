@@ -8,8 +8,9 @@ export const BOOTH_THUMBS = '_thumbs'
 export const BOOTH_ACCESS_FILE = '_access.json'
 const phonePattern = /^0(?:3|5|7|8|9)\d{8}$/
 const sha256Pattern = /^[a-f0-9]{64}$/
-// Characters Supabase object keys accept safely; Capture One names are `0947860616-103333.jpg`.
-const nameCharacters = /[^\p{L}\p{N} _.,()~-]/gu
+// Characters Supabase object keys accept (its key check rejects `~`, `#`, `%`…);
+// Capture One names are `0947860616-103333.jpg`.
+const nameCharacters = /[^\p{L}\p{N} _.,()-]/gu
 
 export interface BoothUploadMetadata extends UploadMetadata {
   originalPath: string | null
@@ -27,10 +28,10 @@ export function boothThumbnailPath(originalPath: string) {
   return `${originalPath.slice(0, slash)}/${BOOTH_THUMBS}/${dot > 0 ? name.slice(0, dot) : name}-thumb.jpg`
 }
 
-/** Same name, different content (two sessions, or a re-export) → keep both: `a.jpg` → `a~1a2b3c4d.jpg`. */
+/** Same name, different content (two sessions, or a re-export) → keep both: `a.jpg` → `a__1a2b3c4d.jpg`. */
 export function withContentSuffix(path: string, sha256: string) {
   const dot = path.lastIndexOf('.')
-  return `${path.slice(0, dot)}~${sha256.slice(0, 8)}${path.slice(dot)}`
+  return `${path.slice(0, dot)}__${sha256.slice(0, 8)}${path.slice(dot)}`
 }
 
 function isBoothOriginalPath(phone: string, path: string) {

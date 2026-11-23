@@ -30,7 +30,7 @@ test('booth keys are checked by SHA-256 hash and map to a booth id', () => {
 test('booth photos of every session of a phone share one folder', () => {
   assert.equal(boothOriginalPath('0947860616', '0947860616-103333.jpg'), '0947860616/_booth/0947860616-103333.jpg')
   assert.equal(boothThumbnailPath('0947860616/_booth/0947860616-103333.jpg'), '0947860616/_booth/_thumbs/0947860616-103333-thumb.jpg')
-  assert.equal(withContentSuffix('0947860616/_booth/a.jpg', 'abcdef0123'.padEnd(64, '0')), '0947860616/_booth/a~abcdef01.jpg')
+  assert.equal(withContentSuffix('0947860616/_booth/a.jpg', 'abcdef0123'.padEnd(64, '0')), '0947860616/_booth/a__abcdef01.jpg')
 })
 
 test('booth metadata accepts only JPEG and validates thumbnails against their original', () => {
@@ -44,8 +44,8 @@ test('booth metadata accepts only JPEG and validates thumbnails against their or
   assert.throws(() => parseBoothUploadMetadata({ ...original(), variant: 'thumbnail', size: 40_000, originalPath: '0999999999/_booth/a.jpg' }), UploadApiError)
   assert.throws(() => parseBoothUploadMetadata({ ...original(), variant: 'thumbnail', size: 40_000, originalPath: '0947860616/a.jpg' }), UploadApiError)
   assert.throws(() => parseBoothUploadMetadata({ ...original(), variant: 'thumbnail', size: 600_000, originalPath: '0947860616/_booth/a.jpg' }), UploadApiError)
-  const completion = parseBoothCompletion({ ...original(), objectPath: '0947860616/_booth/0947860616-103333~abcdef01.jpg', completionToken: 't' })
-  assert.equal(completion.objectPath, '0947860616/_booth/0947860616-103333~abcdef01.jpg')
+  const completion = parseBoothCompletion({ ...original(), objectPath: '0947860616/_booth/0947860616-103333__abcdef01.jpg', completionToken: 't' })
+  assert.equal(completion.objectPath, '0947860616/_booth/0947860616-103333__abcdef01.jpg')
   assert.throws(() => parseBoothCompletion({ ...original(), objectPath: '0947860616/other.jpg', completionToken: 't' }), UploadApiError)
 })
 
@@ -82,7 +82,7 @@ test('re-sending the same photo is idempotent; a different photo with the same n
   const other = Buffer.concat([jpeg, Buffer.from([9])])
   const clash = storage({ '0947860616/_booth/0947860616-103333.jpg': jpeg })
   const result = await prepareBoothUpload(clash.service, original({ size: other.length, sha256: sha(other) }))
-  assert.equal(result.objectPath, `0947860616/_booth/0947860616-103333~${sha(other).slice(0, 8)}.jpg`)
+  assert.equal(result.objectPath, `0947860616/_booth/0947860616-103333__${sha(other).slice(0, 8)}.jpg`)
   assert.equal(result.alreadyUploaded, false)
 })
 
