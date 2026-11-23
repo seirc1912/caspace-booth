@@ -128,3 +128,12 @@ test('status page escapes folder names', () => {
   assert.ok(!html.includes('<script>'))
   assert.match(html, /Gửi lại thư mục/)
 })
+
+test('status page only answers loopback Host headers and embeds the CSRF token', async () => {
+  const { isLocalHost } = await import('../booth-agent/src/statusServer.ts')
+  assert.equal(isLocalHost('127.0.0.1:47821', 47821), true)
+  assert.equal(isLocalHost('localhost:47821', 47821), true)
+  for (const host of ['evil.example:47821', '127.0.0.1:80', undefined]) assert.equal(isLocalHost(host, 47821), false)
+  const html = renderStatusPage({ boothId: 'b', watchRoot: 'r', apiBaseUrl: 'a', pending: 0, uploaded: 0, lastError: null, unrecognized: [], failures: [] }, '', 'tok123')
+  assert.match(html, /name="token" value="tok123"/)
+})

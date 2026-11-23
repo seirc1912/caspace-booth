@@ -16,11 +16,18 @@ $nodeMajor = [int]((node --version).TrimStart("v").Split(".")[0])
 if ($nodeMajor -lt 22) { throw "Cần Node.js 22 trở lên (đang có $(node --version))." }
 
 New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+# Code in this folder runs automatically at logon: only Administrators/SYSTEM may change it,
+# the staff account may only read and run it.
+icacls $InstallDir /inheritance:r /grant:r "Administrators:(OI)(CI)F" "SYSTEM:(OI)(CI)F" "$($env:USERNAME):(OI)(CI)RX" | Out-Null
 Copy-Item -Path "$PSScriptRoot\package.json", "$PSScriptRoot\tsconfig.json", "$PSScriptRoot\README.md" -Destination $InstallDir -Force
 Copy-Item -Path "$PSScriptRoot\src" -Destination $InstallDir -Recurse -Force
 Push-Location $InstallDir
 npm install --omit=dev --no-audit --no-fund
 Pop-Location
+
+$stateDir = Join-Path $InstallDir "state"
+New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+icacls $stateDir /grant:r "$($env:USERNAME):(OI)(CI)M" | Out-Null
 
 $configPath = Join-Path $InstallDir "config.json"
 if (-not (Test-Path $configPath)) {
@@ -29,7 +36,7 @@ if (-not (Test-Path $configPath)) {
   $config = [ordered]@{ apiBaseUrl = $ApiBaseUrl; boothId = $boothId; boothKey = $boothKey; watchRoot = $WatchRoot; concurrency = 1; statusPort = 47821 }
   $config | ConvertTo-Json | Set-Content -Path $configPath -Encoding UTF8
   # Chỉ tài khoản đang đăng nhập và Administrators đọc được file chứa mã bí mật.
-  icacls $configPath /inheritance:r /grant:r "$($env:USERNAME):(R,W)" "Administrators:(F)" | Out-Null
+  icacls $configPath /inheritance:r /grant:r "$($env:USERNAME):(R)" "Administrators:(F)" "SYSTEM:(F)" | Out-Null
 }
 
 # Tự chạy khi đăng nhập Windows, chạy nền, tự khởi động lại nếu bị tắt.
