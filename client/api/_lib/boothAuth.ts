@@ -1,5 +1,10 @@
 import { createHash, timingSafeEqual } from 'node:crypto'
 import { header, type ApiRequest, UploadApiError } from './http.js'
+import { assertBelowLimit, enforceRateLimit } from './rateLimit.js'
+
+// Booth keys are 8 characters: after 20 wrong keys from one IP in 10 minutes that IP is
+// refused even with the right key, so guessing is not practical.
+export const BOOTH_AUTH_FAILURES = { limit: 20, windowMs: 10 * 60_000, scope: 'booth-auth-fail' }
 
 const boothIdPattern = /^[a-z0-9-]{1,32}$/
 const hashPattern = /^[a-f0-9]{64}$/
@@ -24,11 +29,13 @@ function loadBoothKeyHashes(env: Record<string, string | undefined>) {
 
 export function requireBooth(request: ApiRequest, env: Record<string, string | undefined> = process.env) {
   const hashes = loadBoothKeyHashes(env)
+  assertBelowLimit(request, BOOTH_AUTH_FAILURES)
+  const fail = (): never => { enforceRateLimit(request, BOOTH_AUTH_FAILURES); throw new UploadApiError(401, 'Máy phòng chụp chưa được xác thực.') }
   const match = /^Bearer\s+(\S{8,256})$/.exec(header(request, 'authorization')?.trim() ?? '')
-  if (!match) throw new UploadApiError(401, 'Máy phòng chụp chưa được xác thực.')
+  if (!match) return fail()
   const supplied = createHash('sha256').update(match[1]!).digest()
   let boothId: string | null = null
   for (const entry of hashes) if (timingSafeEqual(entry.hash, supplied)) boothId = entry.boothId
-  if (!boothId) throw new UploadApiError(401, 'Máy phòng chụp chưa được xác thực.')
+  if (!boothId) return fail()
   return { boothId }
 }

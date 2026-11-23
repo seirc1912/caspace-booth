@@ -3,6 +3,6 @@
   "boothId": "booth-1",
   "boothKey": "<mã riêng của máy này>",
   "watchRoot": "C:\\Users\\ADMIN\\Pictures",
-  "concurrency": 1,
+  "concurrency": 2,
   "statusPort": 47821
 }

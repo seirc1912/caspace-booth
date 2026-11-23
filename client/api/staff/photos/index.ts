@@ -1,7 +1,7 @@
 import { enforceSameOrigin, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse } from '../../_lib/http.js'
 import { enforceRateLimit } from '../../_lib/rateLimit.js'
 import { requireStaff } from '../../_lib/staffAuth.js'
-import { listCustomerPhotos, requireCustomerPhone } from '../../_lib/staffPhotos.js'
+import { listCustomerPhotos, parsePhotoSource, requireCustomerPhone } from '../../_lib/staffPhotos.js'
 
 interface QueryRequest extends ApiRequest { query?: Record<string, string | string[] | undefined> }
 
@@ -13,6 +13,6 @@ export default async function handler(request: QueryRequest, response: ApiRespon
     const { client } = await requireStaff(request)
     const phone = requireCustomerPhone(request.query?.phone)
     const offset = Math.max(0, Math.min(10_000, Number(request.query?.offset ?? 0) || 0))
-    response.status(200).json(await listCustomerPhotos(client, phone, offset))
+    response.status(200).json(await listCustomerPhotos(client, phone, offset, 40, { source: parsePhotoSource(request.query?.source) }))
   } catch (reason) { sendApiError(response, reason) }
 }

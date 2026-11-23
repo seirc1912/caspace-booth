@@ -20,8 +20,10 @@ export async function logoutStaff() {
   await staffFetch('/api/staff/session', { method: 'DELETE' })
 }
 
-export async function listStaffPhotos(phone: string, offset = 0) {
-  return staffFetch(`/api/staff/photos?phone=${encodeURIComponent(phone)}&offset=${offset}`) as Promise<{ items: StaffPhoto[]; hasMore: boolean }>
+export type StaffPhotoSource = 'frames' | 'booth'
+
+export async function listStaffPhotos(phone: string, offset = 0, source: StaffPhotoSource = 'frames') {
+  return staffFetch(`/api/staff/photos?phone=${encodeURIComponent(phone)}&offset=${offset}&source=${source}`) as Promise<{ items: StaffPhoto[]; hasMore: boolean }>
 }
 
 export async function listStaffPhotoFolders(search = '', offset = 0, limit = 24) {
@@ -33,11 +35,11 @@ export async function downloadStaffPhoto(phone: string, path: string) {
   window.location.assign(result.url)
 }
 
-export async function downloadStaffZip(phone: string) {
-  const response = await fetch(`/api/staff/photos/zip?phone=${encodeURIComponent(phone)}`, { credentials: 'same-origin' })
+export async function downloadStaffZip(phone: string, source: StaffPhotoSource = 'frames') {
+  const response = await fetch(`/api/staff/photos/zip?phone=${encodeURIComponent(phone)}&source=${source}`, { credentials: 'same-origin' })
   if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; throw new Error(body.error ?? 'Không thể tải ZIP.') }
   const url = URL.createObjectURL(await response.blob())
-  const link = document.createElement('a'); link.href = url; link.download = `caspace-${phone}.zip`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  const link = document.createElement('a'); link.href = url; link.download = `caspace-${phone}${source === 'booth' ? '-anh-goc' : ''}.zip`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 export interface BoothAccessStatus { boothPhotoCount: number; viewableUntil: string | null; viewable: boolean }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { BrandMark } from '../components/branding/BrandMark'
 import { PageShell } from '../components/layout/PageShell'
-import { checkStaffSession, getBoothAccess, reopenBoothAccess, type BoothAccessStatus, downloadStaffPhoto, downloadStaffZip, listStaffPhotoFolders, listStaffPhotos, loginStaff, logoutStaff, type StaffPhoto, type StaffPhotoFolder } from '../features/staffPhotos/staffClient'
+import { checkStaffSession, getBoothAccess, reopenBoothAccess, type BoothAccessStatus, type StaffPhotoSource, downloadStaffPhoto, downloadStaffZip, listStaffPhotoFolders, listStaffPhotos, loginStaff, logoutStaff, type StaffPhoto, type StaffPhotoFolder } from '../features/staffPhotos/staffClient'
 import { mergeStaffFolders, newestStaffFoldersFirst } from '../features/staffPhotos/folderOrdering'
 
 const folderPageSize = 24
@@ -27,6 +27,7 @@ export function StaffPhotosPage() {
   const [loading, setLoading] = useState(false)
   const [boothAccess, setBoothAccess] = useState<{ phone: string; status: BoothAccessStatus } | null>(null)
   const [reopening, setReopening] = useState(false)
+  const [photoSource, setPhotoSource] = useState<StaffPhotoSource>('frames')
 
   useEffect(() => { void checkStaffSession().then(setAuthenticated).finally(() => setReady(true)) }, [])
   useEffect(() => {
@@ -57,8 +58,9 @@ export function StaffPhotosPage() {
   const login = async () => { setLoading(true); setMessage(''); try { await loginStaff(username, password); setPassword(''); setAuthenticated(true) } catch { setMessage('Tên đăng nhập hoặc mật khẩu không đúng.') } finally { setLoading(false) } }
   const logout = async () => { await logoutStaff().catch(() => undefined); setAuthenticated(false); setSelectedPhone(null); setFolders([]); setPhotos([]); setMessage('') }
   const loadMoreFolders = async () => { setFoldersLoading(true); setFolderError(''); try { const result = await listStaffPhotoFolders(search, folderOffset, folderPageSize); setFolders((current) => mergeStaffFolders(current, result.items)); setFolderOffset(result.nextOffset); setFolderLimit(result.nextOffset); setFoldersHaveMore(result.hasMore) } catch (reason) { setFolderError(reason instanceof Error ? reason.message : 'Không thể tải thêm thư mục.') } finally { setFoldersLoading(false) } }
-  const openFolder = async (phone: string) => { void getBoothAccess(phone).then((status) => setBoothAccess({ phone, status })).catch(() => undefined); setSelectedPhone(phone); setPhotos([]); setMessage(''); setLoading(true); try { const result = await listStaffPhotos(phone); setPhotos(result.items); setPhotosHaveMore(result.hasMore); if (!result.items.length) setMessage('Thư mục này chưa có ảnh.') } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải ảnh.') } finally { setLoading(false) } }
-  const loadMorePhotos = async () => { if (!selectedPhone) return; setLoading(true); try { const result = await listStaffPhotos(selectedPhone, photos.length); setPhotos((current) => [...current, ...result.items]); setPhotosHaveMore(result.hasMore) } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải thêm ảnh.') } finally { setLoading(false) } }
+  const loadPhotos = async (phone: string, source: StaffPhotoSource) => { setPhotoSource(source); setPhotos([]); setMessage(''); setLoading(true); try { const result = await listStaffPhotos(phone, 0, source); setPhotos(result.items); setPhotosHaveMore(result.hasMore); if (!result.items.length) setMessage(source === 'booth' ? 'Chưa có ảnh gốc từ phòng chụp.' : 'Khách chưa gửi khung nào.') } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải ảnh.') } finally { setLoading(false) } }
+  const openFolder = async (phone: string) => { void getBoothAccess(phone).then((status) => setBoothAccess({ phone, status })).catch(() => undefined); setSelectedPhone(phone); await loadPhotos(phone, 'frames') }
+  const loadMorePhotos = async () => { if (!selectedPhone) return; setLoading(true); try { const result = await listStaffPhotos(selectedPhone, photos.length, photoSource); setPhotos((current) => [...current, ...result.items]); setPhotosHaveMore(result.hasMore) } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải thêm ảnh.') } finally { setLoading(false) } }
   const reopenBooth = async () => {
     if (!selectedPhone || reopening) return
     setReopening(true)
@@ -67,7 +69,7 @@ export function StaffPhotosPage() {
     finally { setReopening(false) }
   }
   const booth = boothAccess && boothAccess.phone === selectedPhone ? boothAccess.status : null
-  const downloadAll = async () => { if (!selectedPhone || !photos.length) return; setLoading(true); try { await downloadStaffZip(selectedPhone) } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải ZIP.') } finally { setLoading(false) } }
+  const downloadAll = async () => { if (!selectedPhone || !photos.length) return; setLoading(true); try { await downloadStaffZip(selectedPhone, photoSource) } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải ZIP.') } finally { setLoading(false) } }
 
   if (!ready) return <main className="grid min-h-dvh place-items-center">Đang kiểm tra phiên…</main>
   return <PageShell className="bg-[#f3eee7]">
@@ -76,7 +78,8 @@ export function StaffPhotosPage() {
       <h1 className="text-4xl font-black">Kho ảnh khách</h1>
       {!authenticated ? <form className="mt-6 max-w-md rounded-[2rem] bg-white p-6 shadow-sm" onSubmit={(event) => { event.preventDefault(); void login() }}><label className="text-sm font-bold" htmlFor="staff-username">Tên đăng nhập</label><input autoCapitalize="none" autoComplete="username" className="mt-2 min-h-14 w-full rounded-2xl border px-4" id="staff-username" onChange={(event) => setUsername(event.target.value)} spellCheck={false} value={username} /><label className="mt-4 block text-sm font-bold" htmlFor="staff-password">Mật khẩu</label><input autoComplete="current-password" className="mt-2 min-h-14 w-full rounded-2xl border px-4" id="staff-password" onChange={(event) => setPassword(event.target.value)} type="password" value={password} /><button className="mt-5 min-h-14 w-full rounded-2xl bg-stone-950 font-black text-white disabled:opacity-40" disabled={loading || !username || !password} type="submit">Đăng nhập</button>{message ? <p className="mt-4 text-sm font-bold text-rose-700" role="alert">{message}</p> : null}</form> : selectedPhone ? <>
         <div className="mt-6 flex flex-wrap items-center justify-between gap-3"><button className="min-h-11 rounded-full bg-white px-5 font-black shadow-sm" onClick={() => { setSelectedPhone(null); setPhotos([]); setMessage('') }} type="button">← Quay lại danh sách</button><div className="text-right"><p className="text-sm font-bold text-stone-500">Số điện thoại</p><h2 className="text-2xl font-black">{selectedPhone}</h2></div></div>
-        <button className="mt-4 min-h-12 rounded-2xl bg-white px-5 font-black shadow-sm disabled:opacity-40" disabled={loading || !photos.length} onClick={downloadAll} type="button">Tải tất cả (.ZIP)</button>
+        <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-white/70 p-1.5 shadow-sm" role="tablist">{([['frames', 'Khung khách gửi'], ['booth', `Ảnh gốc phòng chụp${booth ? ` (${booth.boothPhotoCount})` : ''}`]] as const).map(([source, label]) => <button aria-selected={photoSource === source} className={`min-h-12 rounded-xl px-3 text-sm font-black ${photoSource === source ? 'bg-stone-950 text-white' : 'text-stone-600'}`} disabled={loading} key={source} onClick={() => { if (selectedPhone && photoSource !== source) void loadPhotos(selectedPhone, source) }} role="tab" type="button">{label}</button>)}</div>
+        <button className="mt-4 min-h-12 rounded-2xl bg-white px-5 font-black shadow-sm disabled:opacity-40" disabled={loading || !photos.length} onClick={downloadAll} type="button">{photoSource === 'booth' ? 'Tải tất cả ảnh gốc (.ZIP)' : 'Tải tất cả (.ZIP)'}</button>
         {booth && booth.boothPhotoCount > 0 ? <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-4 shadow-sm"><div><p className="font-black">Ảnh phòng chụp: {booth.boothPhotoCount}</p><p className={`text-sm font-bold ${booth.viewable ? 'text-emerald-700' : 'text-stone-500'}`}>{booth.viewable && booth.viewableUntil ? `Khách xem được đến ${new Date(booth.viewableUntil).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}` : 'Khách đã hết hạn xem'}</p></div><button className="min-h-11 rounded-xl bg-stone-950 px-4 font-bold text-white disabled:opacity-40" disabled={reopening} onClick={() => void reopenBooth()} type="button">{reopening ? 'Đang mở…' : 'Mở lại 6 giờ'}</button></div> : null}
         {message ? <p className="mt-4 rounded-2xl bg-white p-4 font-bold" role="status">{message}</p> : null}
         {loading && !photos.length ? <p className="mt-6 text-center font-bold">Đang tải ảnh…</p> : null}

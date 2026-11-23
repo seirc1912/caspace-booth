@@ -87,7 +87,17 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
   }
   const openPhotoPicker = (slotIndex: number, fromPhone = false) => {
     const target = { templateId: template.id, slotIndex, slotCount: template.slots.length }
-    if (boothPool.length && !fromPhone) { setPoolRequest({ kind: 'slot', target }); return }
+    if (boothPool.length && !fromPhone) {
+      // Empty slot in a multi-photo frame: pick several booth photos in one go — the first
+      // goes into the tapped slot, the rest fill the other empty slots in order.
+      const frameTarget = createFramePhotoTarget(template.id, slots)
+      if (!slots[slotIndex] && frameTarget.emptySlotIndices.length > 1) {
+        setPoolRequest({ kind: 'frame', target: { ...frameTarget, emptySlotIndices: [slotIndex, ...frameTarget.emptySlotIndices.filter((index) => index !== slotIndex)] } })
+        return
+      }
+      setPoolRequest({ kind: 'slot', target })
+      return
+    }
     const input = photoInput.current
     if (!input) return
     pendingPhotoTarget.current = target
@@ -165,7 +175,7 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
       <aside className="hidden rounded-[1.75rem] bg-white p-5 shadow-sm md:block"><p className="text-sm font-semibold text-[var(--brand-primary)]">{template.name}</p><h2 className="mt-1 text-xl font-bold tracking-tight">Add photos to this frame.</h2><p className="mt-2 text-sm leading-6 text-stone-500">Use the main Add Photos button to fill empty slots at once. Tap Add Image inside a slot for one photo, or Replace to change it later.</p><div className="mt-4 rounded-2xl bg-sky-50 p-3 text-xs font-semibold text-sky-700">Your existing frames and edits stay in place while you choose from Photos.</div></aside>
     </div>
     <div className="fixed inset-x-0 bottom-0 z-20 bg-white md:contents" ref={bottomControls}>{crop ? <CropToolbar onCancel={cancelCrop} onDone={finishCrop} onPositionXChange={(x) => onTransform(crop.index, { x })} onPositionYChange={(y) => onTransform(crop.index, { y })} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} positionX={slots[crop.index]?.transform.x ?? 0} positionY={slots[crop.index]?.transform.y ?? 0} zoom={slots[crop.index]?.transform.zoom ?? 1} /> : null}<EditorToolbar allBwEnabled={allBwEnabled} canContinue={slots.every(Boolean)} downloading={downloading} filter={selectedSlot?.filter ?? 'none'} filterDisabled={!selectedSlot} onDownload={onDownload} onFilterChange={(filter) => { if (currentSlot !== null && selectedSlot) onFilterChange(currentSlot, filter) }} onPrevious={onPrevious} onSkip={skipFrame} onToggleAllBw={onToggleAllBw} previousDisabled={frameIndex === 0} skipDisabled={frameIndex >= frameCount - 1} /></div>
-    {poolRequest ? <BoothPoolSheet capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} onClose={() => setPoolRequest(null)} onConfirm={(files) => {
+    {poolRequest ? <BoothPoolSheet capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(files) => {
       const request = poolRequest
       setPoolRequest(null)
       if (request.kind === 'slot' && files[0]) onPickPhoto(request.target, files[0])

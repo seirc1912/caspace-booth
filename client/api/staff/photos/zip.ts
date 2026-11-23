@@ -1,10 +1,11 @@
 import { enforceSameOrigin, header, sendApiError, type ApiRequest, type ApiResponse, UploadApiError } from '../../_lib/http.js'
 import { enforceRateLimit } from '../../_lib/rateLimit.js'
 import { requireStaff } from '../../_lib/staffAuth.js'
-import { listCustomerPhotos, requireCustomerPhone } from '../../_lib/staffPhotos.js'
+import { listCustomerPhotos, parsePhotoSource, requireCustomerPhone } from '../../_lib/staffPhotos.js'
 import { customerPhotoBucket } from '../../_lib/supabaseStorage.js'
 
-export const config = { maxDuration: 60 }
+// Booth originals are 3–4 MB each; a full session can be a few hundred MB.
+export const config = { maxDuration: 300 }
 interface QueryRequest extends ApiRequest { query?: Record<string, string | string[] | undefined> }
 interface StreamResponse extends ApiResponse { write(chunk: Uint8Array): boolean; end(chunk?: Uint8Array): void }
 
@@ -23,11 +24,12 @@ export default async function handler(request: QueryRequest, response: StreamRes
     enforceSameOrigin(request); enforceRateLimit(request, { limit: 10, windowMs: 10 * 60_000, scope: 'staff-zip' })
     const { client, environment } = await requireStaff(request)
     const phone = requireCustomerPhone(request.query?.phone)
-    const listed = await listCustomerPhotos(client, phone, 0, 1_000, { signUrls: false })
+    const source = parsePhotoSource(request.query?.source)
+    const listed = await listCustomerPhotos(client, phone, 0, 1_000, { signUrls: false, source })
     if (!listed.items.length) throw new UploadApiError(404, 'Không có ảnh để tải.')
     response.setHeader('Cache-Control', 'no-store, private')
     response.setHeader('Content-Type', 'application/zip')
-    response.setHeader('Content-Disposition', `attachment; filename="caspace-${phone}.zip"`)
+    response.setHeader('Content-Disposition', `attachment; filename="caspace-${phone}${source === 'booth' ? '-anh-goc' : ''}.zip"`)
     const central: Buffer[] = []
     let offset = 0
     for (const item of listed.items) {

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { UploadApiError } from './http.js'
+import { BOOTH_FOLDER, boothThumbnailPath } from './boothPaths.js'
 import { customerPhotoBucket, thumbnailPathFor } from './supabaseStorage.js'
 import { normalizeVietnamesePhone } from './uploadValidation.js'
 
@@ -12,9 +13,17 @@ export function requireCustomerPhone(value: unknown) {
   return phone
 }
 
+/** Staff see two kinds of photos per customer: frames the customer sent, and booth originals. */
+export type PhotoSource = 'frames' | 'booth'
+
+export function parsePhotoSource(value: unknown): PhotoSource {
+  return value === 'booth' ? 'booth' : 'frames'
+}
+
 export function requireCustomerObjectPath(phone: string, value: unknown) {
   const path = String(value ?? '')
-  if (!path.startsWith(`${phone}/`) || path.slice(phone.length + 1).includes('/') || !/\.(?:png|jpe?g)$/i.test(path)) throw new UploadApiError(400, 'Đường dẫn ảnh không hợp lệ.')
+  const rest = path.startsWith(`${phone}/${BOOTH_FOLDER}/`) ? path.slice(phone.length + BOOTH_FOLDER.length + 2) : path.startsWith(`${phone}/`) ? path.slice(phone.length + 1) : null
+  if (rest === null || !rest || rest.includes('/') || rest.startsWith('.') || !/\.(?:png|jpe?g)$/i.test(rest)) throw new UploadApiError(400, 'Đường dẫn ảnh không hợp lệ.')
   return path
 }
 
@@ -77,15 +86,18 @@ export async function listCustomerFolders(client: SupabaseClient, search: string
 // No Supabase Image Transformations are requested (quota: 100 origin images/month on Pro).
 // Older photos without a thumbnail get previewUrl = null and the page shows a placeholder;
 // originalUrl opens the untransformed original only when staff click it.
-export async function listCustomerPhotos(client: SupabaseClient, phone: string, offset = 0, limit = 40, options: { signUrls?: boolean } = {}) {
-  const result = await client.storage.from(customerPhotoBucket).list(phone, { limit, offset, sortBy: { column: 'created_at', order: 'desc' } })
+export async function listCustomerPhotos(client: SupabaseClient, phone: string, offset = 0, limit = 40, options: { signUrls?: boolean; source?: PhotoSource } = {}) {
+  const booth = options.source === 'booth'
+  const prefix = booth ? `${phone}/${BOOTH_FOLDER}` : phone
+  // Booth originals in shooting order (Capture One counter); frames newest first.
+  const result = await client.storage.from(customerPhotoBucket).list(prefix, { limit, offset, sortBy: booth ? { column: 'name', order: 'asc' } : { column: 'created_at', order: 'desc' } })
   if (result.error) throw new UploadApiError(502, 'Không thể tải danh sách ảnh.')
   const files = result.data.filter((file) => file.id && imagePattern.test(file.name))
-  const items = files.map((file) => ({ path: `${phone}/${file.name}`, name: originalFilename(file.name), size: Number(file.metadata?.size ?? 0), uploadedAt: file.created_at, previewUrl: null as string | null, originalUrl: null as string | null }))
+  const items = files.map((file) => ({ path: `${prefix}/${file.name}`, name: booth ? file.name : originalFilename(file.name), size: Number(file.metadata?.size ?? 0), uploadedAt: file.created_at, previewUrl: null as string | null, originalUrl: null as string | null }))
   if (options.signUrls === false || !items.length) return { items, hasMore: result.data.length === limit }
   const bucket = client.storage.from(customerPhotoBucket)
   const [thumbs, originals] = await Promise.all([
-    bucket.createSignedUrls(items.map((item) => thumbnailPathFor(item.path)), 300),
+    bucket.createSignedUrls(items.map((item) => (booth ? boothThumbnailPath(item.path) : thumbnailPathFor(item.path))), 300),
     bucket.createSignedUrls(items.map((item) => item.path), 300),
   ])
   // A missing thumbnail comes back as a per-path error, not a failed call.

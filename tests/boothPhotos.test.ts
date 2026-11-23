@@ -96,3 +96,33 @@ test('one browser session may look up at most 3 different phone numbers per 10 m
   const source = readFileSync('client/api/booth-photos/list.ts', 'utf8')
   assert.match(source, /enforceDistinctLimit\(`booth-session:\$\{sessionId\}`, phone, 3/)
 })
+
+test('ticking a photo prefetches its original once; continuing reuses it', async () => {
+  const { createBoothPhotoLoader } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  const fetched: string[] = []
+  const loader = createBoothPhotoLoader((async (url: string) => { fetched.push(String(url)); return new Response(new Uint8Array([1]), { status: 200 }) }) as typeof fetch)
+  const photo: BoothPhoto = { id: 'a', name: 'a.jpg', thumbUrl: null, originalUrl: 'o/a', uploadedAt: ago(HOUR) }
+  loader.prefetch(photo)
+  const files = await loadBoothPhotoFiles([photo], undefined, fetch, loader)
+  assert.equal(files[0]!.name, 'a.jpg')
+  assert.deepEqual(fetched, ['o/a'], 'downloaded once')
+  assert.match(readFileSync('client/src/CustomerApp.tsx', 'utf8'), /forEach\(boothLoader\.prefetch\)/)
+})
+
+test('multi-photo frames label empty slots "Hình N" and the sheet says which photo goes where', () => {
+  assert.match(readFileSync('client/src/components/editor/TemplateCanvas.tsx', 'utf8'), /slotLabel=\{template\.slots\.length > 1 \? `Hình \$\{index \+ 1\}` : undefined\}/)
+  const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
+  assert.match(sheet, /`→ Hình \$\{target\}`/)
+  assert.match(sheet, /Ảnh chọn trước vào hình trước/)
+})
+
+test('tapping an empty slot lets the customer pick several booth photos: tapped slot first, then the other empty slots', async () => {
+  const { assignPhotosToFrameTarget, createFramePhotoTarget } = await import('../client/src/features/photos/framePhotoTarget.ts')
+  const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
+  assert.match(composer, /emptySlotIndices: \[slotIndex, \.\.\.frameTarget\.emptySlotIndices\.filter\(\(index\) => index !== slotIndex\)\]/)
+  const target = createFramePhotoTarget('t', [null, null, null])
+  const reordered = { ...target, emptySlotIndices: [1, 0, 2] }
+  const photo = (id: string) => ({ id, src: `blob:${id}`, alt: id, source: 'selfbooth' as const })
+  const next = assignPhotosToFrameTarget({}, reordered, [photo('a'), photo('b')])
+  assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'first pick → tapped Hình 2, second → Hình 1')
+})

@@ -137,3 +137,71 @@ test('status page only answers loopback Host headers and embeds the CSRF token',
   const html = renderStatusPage({ boothId: 'b', watchRoot: 'r', apiBaseUrl: 'a', pending: 0, uploaded: 0, lastError: null, unrecognized: [], failures: [] }, '', 'tok123')
   assert.match(html, /name="token" value="tok123"/)
 })
+
+test('Setup.exe pieces: config writer keeps old values on upgrade and rejects bad input', async () => {
+  const { execFileSync, spawnSync } = await import('node:child_process')
+  const { mkdtempSync: mk, readFileSync: read } = await import('node:fs')
+  const dir = mk(path.join(tmpdir(), 'setup-'))
+  const file = path.join(dir, 'config.json')
+  const script = 'booth-agent/installer/write-config.mjs'
+  assert.equal(spawnSync('node', [script, file, 'booth-2', 'abc1234', 'https://caspace.vn', dir]).status, 12, '7 characters is too short')
+  assert.equal(spawnSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'ftp://x', dir]).status, 10)
+  assert.equal(spawnSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn', path.join(dir, 'missing')]).status, 13)
+  assert.equal(spawnSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn', dir]).stdout.length, 0, 'no text output for NSIS to garble')
+  execFileSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn/', dir])
+  execFileSync('node', [script, file, '', '', '', ''])
+  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 2, statusPort: 47821 })
+  const task = read('booth-agent/installer/task.xml', 'utf8')
+  assert.match(task, /<RestartOnFailure><Interval>PT1M<\/Interval><Count>999<\/Count><\/RestartOnFailure>/)
+  assert.match(task, /<LogonTrigger>/)
+  assert.match(task, /<RunLevel>LeastPrivilege<\/RunLevel>/, 'agent never runs elevated')
+  const nsi = read('booth-agent/installer/installer.nsi', 'utf8')
+  assert.match(nsi, /\$\{NSD_CreatePassword\}/, 'key typed into a password box, never baked into the .exe')
+  assert.match(nsi, /Function ConfigPageLeave[\s\S]*\$\{If\} \$0 < 8/, 'key length (8) checked on the input page')
+  assert.match(nsi, /NSD_CreateCheckbox[^\n]*"Hiện mã"/)
+  assert.match(nsi, /EM_SETPASSWORDCHAR\} 0 0/, 'checkbox reveals the key')
+  const { execFileSync: ex } = await import('node:child_process')
+  const keys = ex('node', ['booth-agent/scripts/make-keys.mjs', 'booth-1', 'booth-2'], { encoding: 'utf8' })
+  const generated = [...keys.matchAll(/booth-\d: (\S+)/g)].map((match) => match[1]!)
+  assert.equal(generated.length, 2)
+  assert.ok(generated.every((key) => /^[a-hjkmnp-z2-9]{8}$/.test(key)), 'readable 8-character keys')
+  assert.match(nsi, /InstallDir "\$PROGRAMFILES64\\CaspaceBooth"/)
+  assert.ok(nsi.indexOf("/setowner") < nsi.indexOf("File /r"), "folder locked before files are copied or run")
+})
+
+test('a wrong server address is explained in Vietnamese and keeps retrying', async () => {
+  const api = { baseUrl: 'https://caspace.vn', key: 'k'.repeat(8), fetchImpl: (async () => new Response('<html>', { status: 405 })) as typeof fetch }
+  await assert.rejects(() => uploadExport({ api, phone: '0912345678', filePath: '/p/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg }), (error: unknown) => error instanceof AgentUploadError && error.retryable && /Sai địa chỉ máy chủ.*https:\/\/caspace\.vn.*405/.test(error.message))
+})
+
+test('Setup stops the running agent by its own process name before overwriting files', async () => {
+  const { readFileSync: read } = await import('node:fs')
+  const nsi = read('booth-agent/installer/installer.nsi', 'utf8')
+  assert.match(nsi, /taskkill \/F \/T \/IM caspace-booth-agent\.exe/)
+  assert.match(nsi, /`powershell [^`]*-like '\$INSTDIR\\\*'[^`]*`/, 'legacy node.exe stopped with a path that may contain spaces')
+  assert.ok(nsi.indexOf('Call StopAgent') < nsi.indexOf('File /r'))
+  assert.match(read('booth-agent/installer/launcher.vbs', 'utf8'), /caspace-booth-agent\.exe/)
+  assert.match(read('booth-agent/installer/build.mjs', 'utf8'), /renameSync\(path\.join\(payload, 'node', 'node\.exe'\), path\.join\(payload, 'node', 'caspace-booth-agent\.exe'\)\)/)
+})
+
+test('30-second rescans skip uploaded exports before the queue and ignore old sessions', async () => {
+  const { pendingJobs, PERIODIC_RESCAN_MS } = await import('../booth-agent/src/scanner.ts')
+  assert.equal(PERIODIC_RESCAN_MS, 30_000)
+  const state = tempState()
+  state.mark(StateStore.key('/p/a.jpg', 10, 1), 'x')
+  const jobs = [{ filePath: '/p/a.jpg', phone: '0912345678', sessionFolder: 's' }, { filePath: '/p/b.jpg', phone: '0912345678', sessionFolder: 's' }]
+  const pending = await pendingJobs(jobs, state, async () => ({ size: 10, mtimeMs: 1 }))
+  assert.deepEqual(pending.map((job) => job.filePath), ['/p/b.jpg'], 'already-sent file never re-queued')
+  const edited = await pendingJobs(jobs, state, async () => ({ size: 11, mtimeMs: 2 }))
+  assert.equal(edited.length, 2, 're-exported (changed) file is sent again; the server keeps both copies')
+  const root = mkdtempSync(path.join(tmpdir(), 'pictures-'))
+  for (const [folder, ageMs] of [['0912345678', 60_000], ['0947860616', 3 * AUTOMATIC_RESCAN_MS]] as const) {
+    mkdirSync(path.join(root, folder, 'Output'), { recursive: true })
+    writeFileSync(path.join(root, folder, 'Output', 'x.jpg'), jpeg)
+    const time = (Date.now() - ageMs) / 1000
+    utimesSync(path.join(root, folder, 'Output', 'x.jpg'), time, time)
+    utimesSync(path.join(root, folder, 'Output'), time, time)
+  }
+  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  assert.deepEqual(recent.jobs.map((job) => job.phone), ['0912345678'], 'old sessions skipped by Output folder mtime')
+})

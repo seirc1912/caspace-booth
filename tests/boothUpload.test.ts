@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { UploadApiError } from '../client/api/_lib/http.ts'
 import { requireBooth } from '../client/api/_lib/boothAuth.ts'
+import { resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
 import { boothOriginalPath, boothThumbnailPath, parseBoothCompletion, parseBoothUploadMetadata, prepareBoothUpload, withContentSuffix } from '../client/api/_lib/boothPaths.ts'
 import { isLocalDevelopmentUrl, resumableEndpoint, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
 
@@ -16,6 +17,7 @@ const environment = { url: 'https://project.supabase.co', serviceRoleKey: 'serve
 const original = (overrides: Record<string, unknown> = {}) => parseBoothUploadMetadata({ phone: '0947860616', filename: '0947860616-103333.jpg', mimeType: 'image/jpeg', size: jpeg.length, prefix, sha256: sha(jpeg), variant: 'original', ...overrides })
 
 test('booth keys are checked by SHA-256 hash and map to a booth id', () => {
+  resetRateLimitsForTests()
   const request = (value?: string) => ({ headers: value ? { authorization: value } : {} })
   assert.deepEqual(requireBooth(request('Bearer secret-one'), { BOOTH_UPLOAD_KEYS: keys }), { boothId: 'booth-1' })
   assert.deepEqual(requireBooth(request('Bearer secret-two'), { BOOTH_UPLOAD_KEYS: keys }), { boothId: 'booth-2' })
@@ -111,4 +113,12 @@ test('booth endpoints authenticate the booth, skip same-origin, and never log pa
     assert.match(source, /scope: 'booth-upload'/)
     assert.doesNotMatch(source, /console\.\w+\([^)]*(phone|objectPath|filename)/)
   }
+})
+
+test('20 wrong booth keys from one IP lock that IP out, even for the right key', () => {
+  resetRateLimitsForTests()
+  const from = (ip: string, key: string) => ({ headers: { authorization: `Bearer ${key}`, 'x-forwarded-for': ip } })
+  for (let attempt = 0; attempt < 20; attempt += 1) assert.throws(() => requireBooth(from('198.51.100.7', `guess${attempt}xx`), { BOOTH_UPLOAD_KEYS: keys }), (error: unknown) => error instanceof UploadApiError && error.status === 401)
+  assert.throws(() => requireBooth(from('198.51.100.7', 'secret-one'), { BOOTH_UPLOAD_KEYS: keys }), (error: unknown) => error instanceof UploadApiError && error.status === 429)
+  assert.deepEqual(requireBooth(from('203.0.113.9', 'secret-one'), { BOOTH_UPLOAD_KEYS: keys }), { boothId: 'booth-1' }, 'other IPs (the shop) unaffected')
 })
