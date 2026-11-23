@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { boothAccessStatus, reopenBoothAccess } from '../client/api/_lib/boothPhotos.ts'
+import { boothAccessStatus } from '../client/api/_lib/boothPhotos.ts'
 import { UploadApiError } from '../client/api/_lib/http.ts'
 
 const now = Date.parse('2026-11-23T12:00:00Z')
@@ -23,29 +23,6 @@ function client(entries: Array<{ id: string | null; name: string; created_at: st
   return { uploads, client: { storage: { from: () => bucket } } as never }
 }
 
-test('staff reopen stores the click time and gives exactly 6 more hours', async () => {
-  const fake = client([{ id: '1', name: 'a.jpg', created_at: new Date(now - 30 * HOUR).toISOString() }])
-  assert.deepEqual(await boothAccessStatus(fake.client, '0947860616', now), { boothPhotoCount: 1, pickerPhotoCount: 1, viewableUntil: new Date(now - 24 * HOUR).toISOString(), viewable: false })
-  const reopened = await reopenBoothAccess(fake.client, '0947860616', now)
-  assert.equal(fake.uploads[0]!.path, '0947860616/_booth/_access.json')
-  assert.deepEqual(JSON.parse(fake.uploads[0]!.body), { reopenedAt: new Date(now).toISOString() })
-  assert.deepEqual(fake.uploads[0]!.options, { upsert: true, contentType: 'application/json' })
-  assert.equal(reopened.viewableUntil, new Date(now + 6 * HOUR).toISOString())
-  assert.equal(reopened.viewable, true)
-  assert.equal(reopened.boothPhotoCount, 1, '_access.json is not counted as a photo')
-})
-
-test('reopening a phone without booth photos explains how to resend from the booth PC', async () => {
-  await assert.rejects(() => reopenBoothAccess(client([]).client, '0947860616', now), /Gửi lại thư mục/)
-})
-
-test('booth access endpoint is staff-only and same-origin', () => {
-  const source = readFileSync('client/api/staff/booth-access.ts', 'utf8')
-  assert.match(source, /await requireStaff\(request\)/)
-  assert.match(source, /enforceSameOrigin\(request\)/)
-  assert.match(readFileSync('client/src/pages/StaffPhotosPage.tsx', 'utf8'), /Mở lại 6 giờ/)
-})
-
 test('staff list booth originals in shooting order with their booth thumbnails', async () => {
   const { listCustomerPhotos, requireCustomerObjectPath, parsePhotoSource } = await import('../client/api/_lib/staffPhotos.ts')
   const calls: Array<{ prefix?: string; paths?: string[] }> = []
@@ -63,4 +40,16 @@ test('staff list booth originals in shooting order with their booth thumbnails',
   const page = readFileSync('client/src/pages/StaffPhotosPage.tsx', 'utf8')
   assert.match(page, /Ảnh gốc phòng chụp/)
   assert.match(readFileSync('client/api/staff/photos/zip.ts', 'utf8'), /source === 'booth' \? '-anh-goc' : ''/)
+})
+
+test('staff see how many photos the customer can pick; no reopen button any more', async () => {
+  const entries = [{ id: '1', name: 'a.jpg', created_at: new Date(now - 30 * HOUR).toISOString() }]
+  const fake = { storage: { from: () => ({ list: async (prefix: string) => ({ data: prefix.endsWith('/_booth') ? entries : [], error: null }) }) } } as never
+  assert.deepEqual(await boothAccessStatus(fake, '0947860616'), { boothPhotoCount: 1, pickerPhotoCount: 1 })
+  const source = readFileSync('client/api/staff/booth-access.ts', 'utf8')
+  assert.match(source, /await requireStaff\(request\)/)
+  assert.match(source, /request\.method !== 'GET'/)
+  const page = readFileSync('client/src/pages/StaffPhotosPage.tsx', 'utf8')
+  assert.doesNotMatch(page, /Mở lại 6 giờ/)
+  assert.match(page, /ảnh tự xoá sau 3 ngày/)
 })
