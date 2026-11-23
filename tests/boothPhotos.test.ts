@@ -181,3 +181,26 @@ test('"DÙNG N ẢNH" opens the editor at once; originals finish downloading in 
   const files = await readyPoolFiles([{ id: 'a', thumbUrl: null, file: null, ready: Promise.resolve(file) }, { id: 'b', thumbUrl: null, file: null, ready: Promise.reject(new Error('net')) }])
   assert.deepEqual(files, [file], 'one failed download does not block the others')
 })
+
+test('saving several photos uses one share sheet, or one download per file when sharing is unavailable', async () => {
+  const { deliverImageFiles } = await import('../client/src/features/orders/services/saveComposition.ts')
+  const files = [new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' }), new File([new Uint8Array([2])], 'b.jpg', { type: 'image/jpeg' })]
+  const shared: ShareData[] = []
+  assert.equal(await deliverImageFiles(files, { navigator: { canShare: () => true, share: async (data) => { shared.push(data) } }, download: () => assert.fail('no download when sharing works') }), 'shared')
+  assert.equal(shared[0]!.files!.length, 2, 'one share sheet for all photos')
+  const downloaded: string[] = []
+  assert.equal(await deliverImageFiles(files, { navigator: {}, download: (_blob, name) => downloaded.push(name) }), 'downloaded')
+  assert.deepEqual(downloaded, ['a.jpg', 'b.jpg'])
+  assert.equal(await deliverImageFiles(files, { navigator: { canShare: () => true, share: async () => { throw Object.assign(new Error('x'), { name: 'AbortError' }) } }, download: () => assert.fail() }), 'cancelled')
+})
+
+test('picker: ⤢ or double tap opens the full-screen viewer with previous/next; download button for ticked photos', () => {
+  const picker = readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8')
+  assert.match(picker, /aria-label=\{`Xem lớn ảnh \$\{index \+ 1\}`\}/)
+  assert.match(picker, /if \(double\) setViewerIndex\(index\)/)
+  assert.match(picker, /`⬇ Lưu \$\{selectedPhotos\.length\} ảnh vào máy`/)
+  const viewer = readFileSync('client/src/components/booth/BoothPhotoViewer.tsx', 'utf8')
+  assert.match(viewer, /aria-label="Ảnh trước"/)
+  assert.match(viewer, /aria-label="Ảnh sau"/)
+  assert.match(viewer, /if \(Math\.abs\(dx\) > 50\) go\(dx < 0 \? 1 : -1\)/, 'swipe left/right')
+})
