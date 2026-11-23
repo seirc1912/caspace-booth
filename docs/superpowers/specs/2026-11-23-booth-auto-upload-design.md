@@ -67,7 +67,7 @@ customer-photo-uploads/
 
 - Trang staff hiện chỉ liệt kê file ở cấp `{sđt}/` nên ảnh `_booth/` **không lẫn** vào danh sách khung cần in (đúng như `_thumbs/` hôm nay).
 - **Mọi phiên của cùng SĐT dồn chung một thư mục** (owner chọn): `0947860616`, `0947860616-1`, `0947860616 tim` → `0947860616/_booth/`. Đường dẫn = `{sđt}/_booth/{tên file}`; gửi lại cùng nội dung là idempotent (đã có → chỉ xác minh).
-- **Trùng tên nhưng khác nội dung** (hai phiên cùng bộ đếm, hoặc nhân viên xuất lại): **giữ cả hai**, bản sau thêm đuôi 8 ký tự đầu SHA-256 (`<tên>~<sha8>.jpg`) — không bao giờ mất ảnh; app không thử lại vô hạn khi gặp 409. *(Quyết định của Claude.)*
+- **Trùng tên nhưng khác nội dung** (hai phiên cùng bộ đếm, hoặc nhân viên xuất lại): **giữ cả hai**, bản sau thêm đuôi 8 ký tự đầu SHA-256 (`<tên>__<sha8>.jpg`; Supabase không nhận ký tự `~` trong tên object) — không bao giờ mất ảnh; app không thử lại vô hạn khi gặp 409. *(Quyết định của Claude.)*
 - Không dùng Image Transformations ở bất kỳ đâu; mọi ảnh xem trước là ảnh nhỏ tạo sẵn, đọc qua signed URL thường.
 
 ### 5.2 App phòng chụp (Windows) — `booth-agent/`
