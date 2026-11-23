@@ -21,9 +21,6 @@ export function BrandingProvider({ branding, children }: BrandingProviderProps) 
   useEffect(() => {
     document.title = current.brandName
 
-    const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-    themeColor?.setAttribute('content', current.secondaryColor)
-
     const existingFavicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
     if (current.faviconUrl) {
       const favicon = existingFavicon ?? document.head.appendChild(document.createElement('link'))

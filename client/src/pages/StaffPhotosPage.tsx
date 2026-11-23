@@ -64,7 +64,7 @@ export function StaffPhotosPage() {
   const downloadAll = async () => { if (!selectedPhone || !photos.length) return; setLoading(true); try { await downloadStaffZip(selectedPhone, photoSource) } catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Không thể tải ZIP.') } finally { setLoading(false) } }
 
   if (!ready) return <main className="grid min-h-dvh place-items-center">Đang kiểm tra phiên…</main>
-  return <PageShell className="bg-[#f3eee7]">
+  return <PageShell wide>
     <header className="flex items-center justify-between gap-2 sm:gap-3"><BrandMark compact />{authenticated ? <nav aria-label="Điều hướng nhân viên" className="flex shrink-0 items-center gap-2"><a className="grid min-h-11 shrink-0 place-items-center whitespace-nowrap rounded-full bg-white px-3 text-xs font-bold shadow-sm sm:px-4 sm:text-sm" href="/">Trang chủ</a><button className="min-h-11 shrink-0 whitespace-nowrap rounded-full bg-white px-3 text-xs font-bold shadow-sm sm:px-4 sm:text-sm" onClick={logout} type="button">Đăng xuất</button></nav> : null}</header>
     <section className="mx-auto mt-8 w-full max-w-5xl">
       <h1 className="text-4xl font-black">Kho ảnh khách</h1>
