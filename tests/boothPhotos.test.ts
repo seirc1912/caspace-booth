@@ -79,7 +79,7 @@ test('entering a room opens the booth picker when photos exist; the old Supabase
   assert.match(app, /navigate\(hasBoothPhotos \? '\/booth-photos' : '\/editor'\)/)
   assert.match(app, /createCustomerSession\(boothId, booth\.phoneNumber\)/)
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
-  assert.match(composer, /if \(boothPool\.length\) \{ setAutoFillDialogOpen\(false\); onAutoFillPhotos\?\.\(boothPool\.map/)
+  assert.match(composer, /if \(boothPool\.length\) \{ setAutoFillDialogOpen\(false\); withPoolFiles\(boothPool, \(files\) => onAutoFillPhotos\?\.\(files\)\); return \}/)
   const picker = readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8')
   assert.match(picker, /loading="lazy" src=\{photo\.thumbUrl\}/, 'grid only loads thumbnails')
   assert.doesNotMatch(picker, /originalUrl/)
@@ -167,4 +167,17 @@ test('a customer upload never reopens booth photos or older uploads (anyone can 
   }
   const result = await listBoothPhotos({ storage: { from: () => bucket } } as never, '0906314807', now)
   assert.deepEqual(result.photos.map((item) => item.id), ['upload:junk--req_12345678-1.jpg'], 'only the fresh upload itself; expired booth photo and older upload stay hidden')
+})
+
+test('"DÙNG N ẢNH" opens the editor at once; originals finish downloading in the background', async () => {
+  const app = readFileSync('client/src/CustomerApp.tsx', 'utf8')
+  const apply = app.slice(app.indexOf('const applyBoothPhotoSelection'), app.indexOf("navigate('/editor')", app.indexOf('const applyBoothPhotoSelection')))
+  assert.doesNotMatch(apply, /await /, 'no download is awaited before navigating')
+  assert.match(app, /file: null,\s+ready: boothLoader \? boothLoader\.load\(photo\)/)
+  const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
+  assert.match(composer, /Đang tải ảnh phòng chụp \$\{poolReady\}\/\$\{boothPool\.length\}…/)
+  const { readyPoolFiles } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  const file = new File([new Uint8Array([1])], 'a.jpg')
+  const files = await readyPoolFiles([{ id: 'a', thumbUrl: null, file: null, ready: Promise.resolve(file) }, { id: 'b', thumbUrl: null, file: null, ready: Promise.reject(new Error('net')) }])
+  assert.deepEqual(files, [file], 'one failed download does not block the others')
 })
