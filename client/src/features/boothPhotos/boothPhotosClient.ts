@@ -115,3 +115,12 @@ export async function downloadBoothPhotos(photos: Array<Pick<BoothPhoto, 'origin
     click(boothDownloadUrl(photo))
   }
 }
+
+/** Most photos per download / share sheet: keeps phones (especially iPhone) responsive. */
+export const DOWNLOAD_BATCH = 20
+
+export function chunk<T>(items: T[], size: number) {
+  const out: T[][] = []
+  for (let index = 0; index < items.length; index += size) out.push(items.slice(index, index + size))
+  return out
+}

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BoothPhotoViewer } from '../components/booth/BoothPhotoViewer'
 import { deliverImageFiles } from '../features/orders/services/saveComposition'
 import { PageShell } from '../components/layout/PageShell'
-import { downloadBoothPhotos, prefersShareSheet, type BoothPhoto, type BoothPhotoList } from '../features/boothPhotos/boothPhotosClient'
+import { chunk, DOWNLOAD_BATCH, downloadBoothPhotos, prefersShareSheet, type BoothPhoto, type BoothPhotoList } from '../features/boothPhotos/boothPhotosClient'
 
 interface BoothPhotoPickerPageProps {
   phone: string
@@ -47,10 +47,11 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
    * download first and the button turns into "Lưu … vào máy" for a second tap.
    */
   const useShareSheet = prefersShareSheet()
-  const download = async (items: BoothPhoto[]) => {
-    if (!items.length || preparing) return
-    if (!useShareSheet) { await downloadBoothPhotos(items); return }
-    if (items.every((photo) => readyFiles[photo.id])) { await deliverImageFiles(items.map((photo) => readyFiles[photo.id]!)); return }
+  /** Returns true once the photos were handed to the phone (downloaded or shared). */
+  const download = async (items: BoothPhoto[]): Promise<boolean> => {
+    if (!items.length || preparing) return false
+    if (!useShareSheet) { await downloadBoothPhotos(items); return true }
+    if (items.every((photo) => readyFiles[photo.id])) return (await deliverImageFiles(items.map((photo) => readyFiles[photo.id]!))) !== 'cancelled'
     setPreparing(true)
     setLoadError(null)
     try {
@@ -58,8 +59,26 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
       setReadyFiles((current) => ({ ...current, ...Object.fromEntries(items.map((photo, index) => [photo.id, files[index]!])) }))
     } catch { setLoadError('Không tải được ảnh. Vui lòng kiểm tra mạng rồi thử lại.') }
     finally { setPreparing(false) }
+    return false
   }
-  const selectedReady = selectedPhotos.length > 0 && selectedPhotos.every((photo) => readyFiles[photo.id])
+  // At most DOWNLOAD_BATCH photos per download/share sheet; one tap per batch.
+  const batches = chunk(selectedPhotos, DOWNLOAD_BATCH)
+  const batchKey = selectedPhotos.map((photo) => photo.id).join('|')
+  const [batchState, setBatchState] = useState<{ key: string; next: number }>({ key: '', next: 0 })
+  const nextBatch = batchState.key === batchKey ? batchState.next : 0
+  const finished = batches.length > 1 && nextBatch >= batches.length
+  const currentBatch = batches[Math.min(nextBatch, batches.length - 1)] ?? []
+  const downloadNextBatch = async () => {
+    if (finished) { setBatchState({ key: batchKey, next: 0 }); return }
+    if (await download(currentBatch)) setBatchState({ key: batchKey, next: nextBatch + 1 })
+  }
+  const batchReady = currentBatch.length > 0 && currentBatch.every((photo) => readyFiles[photo.id])
+  const batchPrefix = batches.length > 1 ? `đợt ${nextBatch + 1}/${batches.length} (${currentBatch.length} ảnh)` : `${currentBatch.length} ảnh`
+  const downloadLabel = finished
+    ? `✓ Đã tải xong ${selectedPhotos.length} ảnh · Tải lại`
+    : !useShareSheet ? `⬇ Tải ${batchPrefix} về máy`
+      : preparing ? 'Đang chuẩn bị ảnh…'
+        : batchReady ? `⬇ Lưu ${batchPrefix} vào máy` : `⬇ Tải ${batchPrefix} về máy`
   const confirm = async () => {
     if (!selectedPhotos.length || loading) return
     setLoading(true)
@@ -90,12 +109,12 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
     </ul>
     <div className="fixed inset-x-0 bottom-0 z-20 border-t border-stone-200 bg-white p-3">
       {loadError ? <p className="mx-auto mb-2 max-w-3xl text-sm font-semibold text-rose-700" role="alert">{loadError}</p> : null}
-      {selectedPhotos.length ? <button className="mx-auto mb-2 flex min-h-11 w-full max-w-3xl items-center justify-center rounded-2xl bg-stone-100 px-3 text-sm font-black disabled:opacity-50" disabled={useShareSheet && preparing} onClick={() => void download(selectedPhotos)} type="button">{!useShareSheet ? `⬇ Tải ${selectedPhotos.length} ảnh đã chọn về máy` : preparing ? 'Đang chuẩn bị ảnh…' : selectedReady ? `⬇ Lưu ${selectedPhotos.length} ảnh vào máy` : `⬇ Tải ${selectedPhotos.length} ảnh đã chọn về máy`}</button> : null}
+      {selectedPhotos.length ? <button className="mx-auto mb-2 flex min-h-11 w-full max-w-3xl items-center justify-center rounded-2xl bg-stone-100 px-3 text-sm font-black disabled:opacity-50" disabled={useShareSheet && preparing} onClick={() => void downloadNextBatch()} type="button">{downloadLabel}</button> : null}
       <div className="mx-auto flex max-w-3xl gap-2">
         <button className="min-h-12 flex-1 rounded-2xl border-2 border-stone-950 bg-white px-3 text-sm font-black" onClick={onSkip} type="button">Dùng ảnh điện thoại</button>
         <button className="min-h-12 flex-[2] rounded-2xl bg-stone-950 px-3 text-sm font-black text-white disabled:opacity-35" disabled={!selectedPhotos.length || loading} onClick={() => void confirm()} type="button">{loading ? 'ĐANG TẢI ẢNH…' : `DÙNG ${selectedPhotos.length} ẢNH ĐÃ CHỌN →`}</button>
       </div>
     </div>
-    {viewerIndex !== null ? <BoothPhotoViewer downloadLabel={(photo) => (!useShareSheet ? '⬇ Tải về' : preparing ? 'Đang chuẩn bị…' : readyFiles[photo.id] ? '⬇ Lưu vào máy' : '⬇ Tải về')} index={viewerIndex} onClose={() => setViewerIndex(null)} onDownload={(photo) => void download([photo])} onIndexChange={setViewerIndex} onToggle={toggle} photos={photos} selectedIds={selectedIds} /> : null}
+    {viewerIndex !== null ? <BoothPhotoViewer downloadLabel={(photo) => (!useShareSheet ? '⬇ Tải về' : preparing ? 'Đang chuẩn bị…' : readyFiles[photo.id] ? '⬇ Lưu vào máy' : '⬇ Tải về')} index={viewerIndex} onClose={() => setViewerIndex(null)} onDownload={(photo) => { void download([photo]) }} onIndexChange={setViewerIndex} onToggle={toggle} photos={photos} selectedIds={selectedIds} /> : null}
   </PageShell>
 }
