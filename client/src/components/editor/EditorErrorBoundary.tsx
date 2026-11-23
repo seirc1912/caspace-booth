@@ -16,6 +16,6 @@ export class EditorErrorBoundary extends Component<Props, State> {
 
   render() {
     if (!this.state.error) return this.props.children
-    return this.props.fallback ?? <section className="m-4 rounded-2xl border border-rose-200 bg-rose-50 p-5 text-rose-800" role="alert"><h2 className="font-bold">This part of the editor could not be displayed.</h2><p className="mt-1 text-sm">Your other photos and edits are still safe.</p><button className="mt-3 min-h-11 rounded-xl bg-white px-4 text-sm font-bold" onClick={() => this.setState({ error: null })} type="button">Try again</button></section>
+    return this.props.fallback ?? <section className="m-4 rounded-[20px] border border-cs-alert-error-border bg-cs-alert-error-bg p-5 text-cs-alert-error-fg" role="alert"><h2 className="font-extrabold">Phần này của trang ghép khung chưa hiển thị được.</h2><p className="mt-1 text-sm">Các ảnh và chỉnh sửa khác của bạn vẫn được giữ.</p><button className="cs-btn-chrome mt-3 min-h-11 rounded-[16px] px-4 text-sm font-bold text-cs-ink" onClick={() => this.setState({ error: null })} type="button">Thử lại</button></section>
   }
 }

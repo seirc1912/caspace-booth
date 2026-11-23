@@ -97,7 +97,7 @@ test('ticking a photo prefetches its original once; continuing reuses it', async
 test('multi-photo frames label empty slots "Hình N" and the sheet says which photo goes where', () => {
   assert.match(readFileSync('client/src/components/editor/TemplateCanvas.tsx', 'utf8'), /slotLabel=\{template\.slots\.length > 1 \? `Hình \$\{index \+ 1\}` : undefined\}/)
   const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
-  assert.match(sheet, /`→ Hình \$\{target\}`/)
+  assert.match(sheet, /`Hình \$\{target\}`/)
   assert.match(sheet, /Ảnh chọn trước vào hình trước/)
 })
 

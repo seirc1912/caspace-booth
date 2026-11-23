@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import type { PointerEvent } from 'react'
+import type { PointerEvent, ReactNode } from 'react'
 import { maximumUserPhotoZoom, minimumUserPhotoZoom } from '../../features/photos/photoFit'
 import { adjustmentFromPointer, stepAdjustment } from '../../features/photos/manualAdjustments'
 import { PressHoldButton } from './PressHoldButton'
+import { Icon } from '../ui/Icon'
 
 interface CropToolbarProps {
   onCancel: () => void
@@ -16,9 +17,9 @@ interface CropToolbarProps {
 }
 
 interface SliderRowProps {
-  ariaLabel?: string
+  ariaLabel: string
   id: string
-  label: string
+  label: ReactNode
   min: number
   max: number
   value: number
@@ -62,39 +63,39 @@ function SliderRow({ ariaLabel, id, label, min, max, value, valueLabel, onChange
   }
   useEffect(() => () => { if (frame.current !== null) { cancelAnimationFrame(frame.current); onChangeRef.current(pendingValue.current) } }, [])
   return <div className="flex min-h-11 min-w-0 flex-1 items-center gap-1">
-    <label className="w-9 shrink-0 text-center text-[0.68rem] font-bold text-white" htmlFor={id}>{label}</label>
-    <PressHoldButton ariaLabel={`Decrease ${ariaLabel ?? label}`} disabled={value <= min} onStep={() => adjust(-step)}>−</PressHoldButton>
+    <label className="grid w-9 shrink-0 place-items-center text-[11px] font-bold text-white" htmlFor={id}>{label}</label>
+    <PressHoldButton ariaLabel={`Giảm ${ariaLabel}`} disabled={value <= min} onStep={() => adjust(-step)}><Icon className="size-[18px]" name="minus" /></PressHoldButton>
     <div className="relative flex h-11 min-w-0 flex-1 touch-none select-none items-center" onPointerCancel={finishPointer} onPointerDown={(event) => { if (event.button !== 0) return; event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); updateFromPointer(event.clientX) }} onPointerMove={(event) => { if (!event.currentTarget.hasPointerCapture(event.pointerId)) return; event.preventDefault(); updateFromPointer(event.clientX) }} onPointerUp={(event) => { updateFromPointer(event.clientX); finishPointer(event) }} ref={track}>
-      <input aria-label={ariaLabel ?? label} className="pointer-events-none h-11 min-w-0 w-full accent-sky-400" id={id} max={max} min={min} onChange={(event) => schedule(Number(event.currentTarget.value))} onInput={(event) => schedule(Number(event.currentTarget.value))} step={step} type="range" value={value} />
+      <input aria-label={ariaLabel} className="pointer-events-none h-11 min-w-0 w-full accent-[#FF2D55]" id={id} max={max} min={min} onChange={(event) => schedule(Number(event.currentTarget.value))} onInput={(event) => schedule(Number(event.currentTarget.value))} step={step} type="range" value={value} />
     </div>
-    <PressHoldButton ariaLabel={`Increase ${ariaLabel ?? label}`} disabled={value >= max} onStep={() => adjust(step)}>+</PressHoldButton>
-    <output className="w-10 shrink-0 text-right text-[0.68rem] font-bold tabular-nums text-white/85">{valueLabel}</output>
+    <PressHoldButton ariaLabel={`Tăng ${ariaLabel}`} disabled={value >= max} onStep={() => adjust(step)}><Icon className="size-[18px]" name="add" /></PressHoldButton>
+    <output className="w-11 shrink-0 text-right font-mono text-[11px] font-bold tabular-nums text-white/90">{valueLabel}</output>
   </div>
 }
 
 const positionLabel = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value * 100)}%`
 type TransformControl = 'zoom' | 'x' | 'y'
 
-const controlClass = (active: boolean) => `min-h-11 min-w-0 rounded-xl px-1.5 text-xs font-bold tabular-nums text-white transition ${active ? 'bg-sky-500 shadow-sm' : 'bg-white/5 hover:bg-white/10'}`
+const controlClass = (active: boolean) => `inline-flex min-h-11 min-w-0 items-center justify-center gap-1 rounded-xl px-1.5 text-xs font-bold tabular-nums text-white transition ${active ? 'bg-white/20 ring-1 ring-[#FF2D55]' : 'bg-white/5 hover:bg-white/10'}`
 
 export function CropToolbar({ onCancel, onDone, positionX, positionY, zoom, onPositionXChange, onPositionYChange, onZoomChange }: CropToolbarProps) {
   const [activeControl, setActiveControl] = useState<TransformControl>('zoom')
   const slider = activeControl === 'zoom'
-    ? <SliderRow id="crop-zoom" label="Zoom" max={maximumUserPhotoZoom} min={minimumUserPhotoZoom} onChange={onZoomChange} step={0.01} value={zoom} valueLabel={`${Math.round(zoom * 100)}%`} />
+    ? <SliderRow ariaLabel="mức phóng" id="crop-zoom" label={<Icon className="size-[18px]" name="zoomIn" />} max={maximumUserPhotoZoom} min={minimumUserPhotoZoom} onChange={onZoomChange} step={0.01} value={zoom} valueLabel={`${Math.round(zoom * 100)}%`} />
     : activeControl === 'x'
-      ? <SliderRow ariaLabel="Move photo left or right" id="crop-position-x" label="↔" max={1} min={-1} onChange={onPositionXChange} step={0.01} value={positionX} valueLabel={positionLabel(positionX)} />
-      : <SliderRow ariaLabel="Move photo up or down" id="crop-position-y" label="↕" max={1} min={-1} onChange={onPositionYChange} step={0.01} value={positionY} valueLabel={positionLabel(positionY)} />
+      ? <SliderRow ariaLabel="vị trí trái phải" id="crop-position-x" label={<Icon className="size-[18px]" name="moveX" />} max={1} min={-1} onChange={onPositionXChange} step={0.01} value={positionX} valueLabel={positionLabel(positionX)} />
+      : <SliderRow ariaLabel="vị trí lên xuống" id="crop-position-y" label={<Icon className="size-[18px]" name="moveY" />} max={1} min={-1} onChange={onPositionYChange} step={0.01} value={positionY} valueLabel={positionLabel(positionY)} />
 
-  return <div className="fixed inset-x-2 z-30 bottom-[calc(var(--mobile-editor-controls-height,7rem)+0.5rem)] md:inset-x-3 md:bottom-20"><div className="mx-auto max-w-xl rounded-2xl border border-white/20 bg-stone-950/65 p-1.5 text-white shadow-2xl backdrop-blur-xl [-webkit-backdrop-filter:blur(18px)]">
+  return <div aria-label="Cắt và căn ảnh" className="cs-lcd rounded-[20px] p-1.5" role="group">
     <div className="grid grid-cols-[1.35fr_1fr_1fr_2.75rem] gap-1">
-      <button aria-pressed={activeControl === 'zoom'} className={controlClass(activeControl === 'zoom')} onClick={() => setActiveControl('zoom')} type="button">Zoom {Math.round(zoom * 100)}%</button>
-      <button aria-label={`Left to right ${positionLabel(positionX)}`} aria-pressed={activeControl === 'x'} className={controlClass(activeControl === 'x')} onClick={() => setActiveControl('x')} type="button">↔ {positionLabel(positionX)}</button>
-      <button aria-label={`Up and down ${positionLabel(positionY)}`} aria-pressed={activeControl === 'y'} className={controlClass(activeControl === 'y')} onClick={() => setActiveControl('y')} type="button">↕ {positionLabel(positionY)}</button>
-      <button aria-label="Done adjusting photo" className="grid size-11 place-items-center rounded-xl bg-[var(--brand-secondary)] text-lg font-black text-white shadow-sm" onClick={onDone} type="button">✓</button>
+      <button aria-label={`Phóng ${Math.round(zoom * 100)}%`} aria-pressed={activeControl === 'zoom'} className={controlClass(activeControl === 'zoom')} onClick={() => setActiveControl('zoom')} type="button"><Icon className="size-4" name="zoomIn" />{Math.round(zoom * 100)}%</button>
+      <button aria-label={`Trái phải ${positionLabel(positionX)}`} aria-pressed={activeControl === 'x'} className={controlClass(activeControl === 'x')} onClick={() => setActiveControl('x')} type="button"><Icon className="size-4" name="moveX" />{positionLabel(positionX)}</button>
+      <button aria-label={`Lên xuống ${positionLabel(positionY)}`} aria-pressed={activeControl === 'y'} className={controlClass(activeControl === 'y')} onClick={() => setActiveControl('y')} type="button"><Icon className="size-4" name="moveY" />{positionLabel(positionY)}</button>
+      <button aria-label="Xong, giữ cách cắt này" className="cs-btn-chrome grid size-11 place-items-center rounded-xl" onClick={onDone} type="button"><Icon name="check" /></button>
     </div>
-    <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden rounded-xl bg-black/15 px-1">
-      <button aria-label="Cancel photo adjustments" className="grid size-11 shrink-0 place-items-center rounded-xl text-lg font-bold text-white/75 hover:bg-white/10" onClick={onCancel} type="button">×</button>
+    <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden rounded-xl bg-black/25 px-1">
+      <button aria-label="Huỷ thay đổi cắt ảnh" className="grid size-11 shrink-0 place-items-center rounded-xl text-white/80 hover:bg-white/10" onClick={onCancel} type="button"><Icon name="close" /></button>
       {slider}
     </div>
-  </div></div>
+  </div>
 }
