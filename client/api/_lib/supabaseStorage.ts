@@ -26,9 +26,21 @@ function required(name: string, fallbackName?: string) {
   return value
 }
 
+/**
+ * Local development (Supabase CLI in Docker) runs over plain http on a loopback
+ * or private-LAN address. Production always uses https, so this never relaxes it.
+ */
+export function isLocalDevelopmentUrl(value: string) {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'http:') return false
+    return /^(?:localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)$/.test(url.hostname)
+  } catch { return false }
+}
+
 export function loadSupabaseStorageEnvironment(): SupabaseStorageEnvironment {
   const url = required('SUPABASE_URL', 'VITE_SUPABASE_URL')
-  if (!url.startsWith('https://')) throw new UploadApiError(503, 'Cấu hình Supabase Storage không hợp lệ.')
+  if (!url.startsWith('https://') && !isLocalDevelopmentUrl(url)) throw new UploadApiError(503, 'Cấu hình Supabase Storage không hợp lệ.')
   return { url: url.replace(/\/$/, ''), serviceRoleKey: required('SUPABASE_SERVICE_ROLE_KEY') }
 }
 
@@ -61,6 +73,7 @@ function encodedObjectPath(path: string) {
 // Authorization JWT and answers 400 "Invalid Compact JWS" — the cause of every
 // STORAGE_TUS_CREATE_400 seen in production (1,085 in 30 days).
 export function resumableEndpoint(projectUrl: string) {
+  if (isLocalDevelopmentUrl(projectUrl)) return `${projectUrl.replace(/\/$/, '')}/storage/v1/upload/resumable/sign`
   const url = new URL(projectUrl)
   const projectId = url.hostname.split('.')[0]
   return `https://${projectId}.storage.supabase.co/storage/v1/upload/resumable/sign`
@@ -76,10 +89,14 @@ export class SupabasePhotoUploadService {
   }
 
   async createSignedUpload(metadata: UploadMetadata) {
-    const objectPath = objectPathForUpload(metadata)
+    return this.createSignedUploadAt(objectPathForUpload(metadata), metadata)
+  }
+
+  /** Signed upload for an explicit object path (booth uploads choose their own path). */
+  async createSignedUploadAt(objectPath: string, metadata: UploadMetadata) {
     const existing = await this.client.storage.from(customerPhotoBucket).exists(objectPath)
     if (existing.data) {
-      await this.verifyUploadedObject(metadata, objectPath)
+      await this.verifyUploadedObjectAt(metadata, objectPath)
       return { alreadyUploaded: true as const, objectPath }
     }
 
@@ -94,7 +111,8 @@ export class SupabasePhotoUploadService {
     const signedUrl = new URL(signed.data.signedUrl)
     const uploadToken = signed.data.token ?? signedUrl.searchParams.get('token')
     const expectedHost = new URL(this.environment.url).host
-    if (signedUrl.protocol !== 'https:' || signedUrl.host !== expectedHost || !signedUrl.pathname.includes(`/storage/v1/object/upload/sign/${customerPhotoBucket}/`)) {
+    const expectedProtocol = isLocalDevelopmentUrl(this.environment.url) ? 'http:' : 'https:'
+    if (signedUrl.protocol !== expectedProtocol || signedUrl.host !== expectedHost || !signedUrl.pathname.includes(`/storage/v1/object/upload/sign/${customerPhotoBucket}/`)) {
       throw new UploadApiError(502, 'Supabase Storage không trả về phiên gửi ảnh an toàn.')
     }
     if (!uploadToken) throw new UploadApiError(502, 'Supabase Storage không trả về token gửi ảnh an toàn.')
@@ -103,6 +121,31 @@ export class SupabasePhotoUploadService {
 
   async verifyUploadedObject(metadata: UploadMetadata, objectPath: string) {
     if (objectPath !== objectPathForUpload(metadata)) throw new UploadApiError(403, 'Đường dẫn ảnh không hợp lệ.')
+    return this.verifyUploadedObjectAt(metadata, objectPath)
+  }
+
+  /** True when an object exists at the path (HEAD). Absent objects come back as data:false + 400/404. */
+  async objectExists(objectPath: string) {
+    const existing = await this.client.storage.from(customerPhotoBucket).exists(objectPath)
+    if (existing.data) return true
+    if (existing.error && (existing.error.status === undefined || ![400, 404].includes(existing.error.status))) {
+      throw new UploadApiError(502, 'Supabase Storage chưa thể kiểm tra ảnh. Vui lòng thử lại.')
+    }
+    return false
+  }
+
+  /** SHA-256 of a stored object, or null when it does not exist. */
+  async objectSha256(objectPath: string) {
+    if (!await this.objectExists(objectPath)) return null
+    const response = await this.fetchImpl(`${this.environment.url}/storage/v1/object/authenticated/${customerPhotoBucket}/${encodedObjectPath(objectPath)}`, {
+      headers: { apikey: this.environment.serviceRoleKey, Authorization: `Bearer ${this.environment.serviceRoleKey}` },
+    })
+    if (response.status === 404 || response.status === 400) return null
+    if (!response.ok) throw new UploadApiError(502, 'Supabase Storage chưa thể kiểm tra ảnh. Vui lòng thử lại.')
+    return createHash('sha256').update(Buffer.from(await response.arrayBuffer())).digest('hex')
+  }
+
+  async verifyUploadedObjectAt(metadata: UploadMetadata, objectPath: string) {
     const objectUrl = `${this.environment.url}/storage/v1/object/authenticated/${customerPhotoBucket}/${encodedObjectPath(objectPath)}`
     const startedAt = performance.now()
     const response = await this.fetchImpl(objectUrl, {
