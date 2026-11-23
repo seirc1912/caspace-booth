@@ -10,7 +10,8 @@ export default defineConfig({
     port: 5173,
 
     proxy: {
-      '/api': 'http://localhost:3000',
+      // Keep the browser's Host so the API's same-origin check sees the real origin.
+      '/api': { target: 'http://localhost:3000', changeOrigin: false },
     },
   },
 })
