@@ -45,7 +45,8 @@ trên https hoặc `localhost`, nên gửi khung từ điện thoại qua `http:
 
 - Trên Mac: `cd booth-agent && node --import tsx src/main.ts <config.json>` với
   `apiBaseUrl: "http://<IP LAN>:3000"` và `watchRoot` là một thư mục giả lập `Pictures`.
-- Trên máy ảo Windows (Parallels, mạng Shared): `.\install.ps1 -ApiBaseUrl http://10.211.55.2:3000`.
+- Trên máy ảo Windows (Parallels, mạng Shared): chạy `CaspaceBoothSetup-*.exe` (build bằng
+  `node booth-agent/installer/build.mjs`), ô **Máy chủ** nhập `http://10.211.55.2:3000`.
   Chép ảnh JPEG vào `C:\Users\ADMIN\Pictures\<sđt>\Output\` để giả lập Capture One.
 
 ## 5. Cron xoá 3 ngày

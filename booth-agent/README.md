@@ -17,26 +17,42 @@ khách nhập số điện thoại là thấy ảnh. Không cần Google Drive h
 
 ## Trang trạng thái
 
-Lối tắt **"Gửi ảnh Caspace"** trên màn hình (http://127.0.0.1:47821): số ảnh đang chờ, đã gửi, lỗi mạng,
+Lối tắt **"Gửi ảnh Caspace"** trên màn hình và trong Start → Caspace (http://127.0.0.1:47821): số ảnh đang chờ, đã gửi, lỗi mạng,
 thư mục sai tên, ô "Gửi lại thư mục".
 
-## Cài đặt (làm 1 lần mỗi máy)
+## Cài đặt (làm 1 lần mỗi máy, không cần terminal)
 
-1. Chủ quán tạo mã cho 4 máy trên máy của mình:
+1. Chủ quán tạo mã cho 4 máy (trên máy có repo):
    `node booth-agent/scripts/make-keys.mjs booth-1 booth-2 booth-3 booth-4`
-   - Dòng `BOOTH_UPLOAD_KEYS` → dán vào Vercel (Settings → Environment Variables, môi trường Production).
-   - Mỗi mã `booth-N` → dùng ở bước 3 cho đúng máy. Không gửi mã qua chat.
-2. Chép thư mục `booth-agent` sang máy phòng chụp (USB hoặc Drive).
-3. Mở PowerShell **Run as Administrator**, vào thư mục đó và chạy:
-   `powershell -ExecutionPolicy Bypass -File .\install.ps1`
-   Nhập mã phòng (`booth-1`) và mã bí mật của máy.
-4. Mở lối tắt "Gửi ảnh Caspace" kiểm tra trạng thái "bình thường".
+   - Dòng `BOOTH_UPLOAD_KEYS` → dán vào Vercel (Settings → Environment Variables, Production).
+   - Mỗi mã `booth-N` dùng ở bước 3 cho đúng máy. Không gửi mã qua chat.
+2. Chép file **`CaspaceBoothSetup-<phiên bản>.exe`** sang máy phòng chụp (USB hoặc Drive) và bấm đúp.
+   - Windows có thể báo "Windows protected your PC" (file chưa ký số): bấm **More info → Run anyway**.
+   - Bấm **Yes** khi Windows hỏi quyền quản trị.
+3. Màn "Thông tin máy phòng chụp": chọn **Mã phòng**, dán **Mã bí mật**, giữ nguyên
+   **Máy chủ** `https://caspace.vn` và **Thư mục ảnh** `C:\Users\ADMIN\Pictures` (đổi nếu Capture One lưu chỗ khác) → **Install**.
+4. Màn cuối tick "Mở trang trạng thái" → **Finish**. Trang phải báo "Mạng / máy chủ: bình thường".
 5. Chụp thử 1 phiên với số điện thoại test → mở caspace.vn, nhập số đó → thấy ảnh.
 
-Thử trên máy ảo (Parallels) với hệ thống local trên Mac:
-`.\install.ps1 -ApiBaseUrl http://10.211.55.2:3000` (xem `scripts/local-dev.md`).
+Setup cài vào `C:\CaspaceBooth` (kèm Node.js riêng, không ảnh hưởng phần mềm khác), tự chạy ngầm khi
+đăng nhập Windows (không hiện cửa sổ), tự bật lại nếu bị tắt. Nhật ký: `C:\CaspaceBooth\logs\agent.log`.
+
+**Cập nhật phiên bản:** chạy Setup mới, để trống các ô → giữ nguyên mã và cấu hình cũ.
+
+Thử trên máy ảo Parallels với hệ thống local trên Mac: ở ô **Máy chủ** nhập `http://10.211.55.2:3000`
+(xem `scripts/local-dev.md`).
+
+## Build Setup.exe (trên Mac)
+
+```bash
+brew install makensis        # một lần
+node booth-agent/installer/build.mjs
+# → booth-agent/build/CaspaceBoothSetup-<version>.exe
+```
+
+Build tự tải Node.js Windows (kiểm SHA-256 với nodejs.org) và bản Windows của `sharp`.
 
 ## Gỡ / tạm dừng
 
-`powershell -ExecutionPolicy Bypass -File .\uninstall.ps1` — dừng tự chạy; ảnh trong `Pictures` giữ nguyên.
+Windows **Settings → Apps → "Gửi ảnh phòng chụp Caspace" → Uninstall** (hoặc Start → Caspace → Gỡ cài đặt): dừng tự chạy, xoá `C:\CaspaceBooth`; ảnh trong `Pictures` giữ nguyên.
 Thu hồi một máy: xoá dòng `booth-N` khỏi `BOOTH_UPLOAD_KEYS` trên Vercel.

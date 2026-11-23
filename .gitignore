@@ -30,3 +30,4 @@ exports/*
 
 # Local cache of read-only Vercel log analysis (scripts/upload-timing-report.mjs)
 .upload-logs/
+booth-agent/build/

@@ -8,7 +8,7 @@ Mốc trước khi sửa: deployment Production hiện tại lúc merge PR đầ
 
 | Muốn tắt | Làm gì | Hệ quả |
 |---|---|---|
-| Máy phòng chụp gửi ảnh | Trên máy đó: `uninstall.ps1` (hoặc tắt tác vụ "Caspace Booth Agent") | Ảnh vẫn nằm trong `Pictures`, quay lại cách Google Drive |
+| Máy phòng chụp gửi ảnh | Trên máy đó: Settings → Apps → "Gửi ảnh phòng chụp Caspace" → Uninstall (hoặc tắt tác vụ "Caspace Booth Agent") | Ảnh vẫn nằm trong `Pictures`, quay lại cách Google Drive |
 | Một máy bị lộ mã | Xoá dòng `booth-N` khỏi `BOOTH_UPLOAD_KEYS` trên Vercel | Máy đó nhận 401, máy khác bình thường |
 | Mọi máy phòng chụp | Xoá biến `BOOTH_UPLOAD_KEYS` | API booth trả 503 |
 | Xoá ảnh sau 3 ngày | Xoá/đổi `PHOTO_UPLOAD_CLEANUP_ENABLED` ≠ `true` | Cron chỉ đếm, không xoá |

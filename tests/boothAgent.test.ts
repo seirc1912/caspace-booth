@@ -137,3 +137,22 @@ test('status page only answers loopback Host headers and embeds the CSRF token',
   const html = renderStatusPage({ boothId: 'b', watchRoot: 'r', apiBaseUrl: 'a', pending: 0, uploaded: 0, lastError: null, unrecognized: [], failures: [] }, '', 'tok123')
   assert.match(html, /name="token" value="tok123"/)
 })
+
+test('Setup.exe pieces: config writer keeps old values on upgrade and rejects bad input', async () => {
+  const { execFileSync, spawnSync } = await import('node:child_process')
+  const { mkdtempSync: mk, readFileSync: read } = await import('node:fs')
+  const dir = mk(path.join(tmpdir(), 'setup-'))
+  const file = path.join(dir, 'config.json')
+  const script = 'booth-agent/installer/write-config.mjs'
+  assert.equal(spawnSync('node', [script, file, 'booth-2', 'short', 'https://caspace.vn', dir]).status, 2)
+  execFileSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn/', dir])
+  execFileSync('node', [script, file, '', '', '', ''])
+  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 1, statusPort: 47821 })
+  const task = read('booth-agent/installer/task.xml', 'utf8')
+  assert.match(task, /<RestartOnFailure><Interval>PT1M<\/Interval><Count>999<\/Count><\/RestartOnFailure>/)
+  assert.match(task, /<LogonTrigger>/)
+  assert.match(task, /<RunLevel>LeastPrivilege<\/RunLevel>/, 'agent never runs elevated')
+  const nsi = read('booth-agent/installer/installer.nsi', 'utf8')
+  assert.match(nsi, /\$\{NSD_CreatePassword\}/, 'key typed into a password box, never baked into the .exe')
+  assert.match(nsi, /icacls "\$INSTDIR" \/inheritance:r/)
+})
