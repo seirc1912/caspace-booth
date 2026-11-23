@@ -74,11 +74,11 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Ảnh từ phòng chụp · {phone}</p>
     <h1 className="mt-1 text-3xl font-black tracking-tight">Chọn ảnh bạn muốn in</h1>
     <p className="mt-2 text-sm text-stone-600">Chạm vào ảnh để chọn, chạm đúp hoặc ⤢ để xem lớn. Ảnh vừa chụp sẽ tự hiện thêm sau vài giây.</p>
-    {list?.status === 'ok' ? <p className="mt-1 text-xs text-stone-500">Xem được đến {new Date(list.viewableUntil).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}.</p> : null}
+    {list?.status === 'ok' ? <p className="mt-1 text-xs text-stone-500">Ảnh được lưu 3 ngày rồi tự xoá.</p> : null}
     <div className="mt-4 flex gap-2"><button className="min-h-11 rounded-xl bg-white px-4 text-sm font-bold shadow-sm" onClick={() => onSelectedIdsChange(photos.map((photo) => photo.id))} type="button">Chọn tất cả</button><button className="min-h-11 rounded-xl bg-white px-4 text-sm font-bold shadow-sm disabled:opacity-40" disabled={!selectedPhotos.length} onClick={() => onSelectedIdsChange([])} type="button">Bỏ chọn</button></div>
     {error ? <p className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm font-semibold text-rose-700" role="alert">{error}</p> : null}
     {list === null && !error ? <p className="mt-8 text-center font-semibold text-stone-500" role="status">Đang tải ảnh…</p> : null}
-    {list?.status === 'unavailable' ? <p className="mt-8 rounded-2xl bg-white p-6 text-center text-stone-600">Ảnh phòng chụp không còn xem được. Vui lòng liên hệ quán để mở lại, hoặc chọn ảnh từ điện thoại.</p> : null}
+    {list?.status === 'unavailable' ? <p className="mt-8 rounded-2xl bg-white p-6 text-center text-stone-600">Chưa có ảnh từ phòng chụp cho số này. Vui lòng chờ vài giây, hoặc chọn ảnh từ điện thoại.</p> : null}
     <ul className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
       {photos.map((photo, index) => {
         const isSelected = selected.has(photo.id)

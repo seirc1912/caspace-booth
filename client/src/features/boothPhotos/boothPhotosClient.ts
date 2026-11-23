@@ -1,7 +1,7 @@
 import { clearUploadSession, ensureUploadSession } from '../photoUpload/uploadClient'
 
 export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; originalUrl: string; uploadedAt: string }
-export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[]; viewableUntil: string } | { status: 'unavailable'; photos: [] }
+export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[] } | { status: 'unavailable'; photos: [] }
 /** A ticked photo in the editor. `file` is null while its original is still downloading. */
 export interface BoothPoolPhoto { id: string; thumbUrl: string | null; file: File | null; ready: Promise<File> }
 
@@ -18,7 +18,7 @@ async function post(phone: string, token: string, fetchImpl: typeof fetch) {
   return fetchImpl('/api/booth-photos/list', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-upload-session': token }, body: JSON.stringify({ phone }) })
 }
 
-/** Booth photos for a phone (6-hour window). "unavailable" = none or expired. */
+/** Booth photos + the customer's own uploads for a phone (kept 3 days). "unavailable" = none. */
 export async function fetchBoothPhotos(phone: string, fetchImpl: typeof fetch = fetch, session = ensureUploadSession): Promise<BoothPhotoList> {
   let response = await post(phone, await session(), fetchImpl)
   if (response.status === 401) { clearUploadSession(); response = await post(phone, await session(true), fetchImpl) }

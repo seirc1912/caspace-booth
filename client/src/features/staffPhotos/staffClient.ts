@@ -42,12 +42,9 @@ export async function downloadStaffZip(phone: string, source: StaffPhotoSource =
   const link = document.createElement('a'); link.href = url; link.download = `caspace-${phone}${source === 'booth' ? '-anh-goc' : ''}.zip`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
-export interface BoothAccessStatus { boothPhotoCount: number; pickerPhotoCount: number; viewableUntil: string | null; viewable: boolean }
+export interface BoothAccessStatus { boothPhotoCount: number; pickerPhotoCount: number }
 
 export async function getBoothAccess(phone: string) {
   return staffFetch(`/api/staff/booth-access?phone=${encodeURIComponent(phone)}`) as Promise<BoothAccessStatus>
 }
 
-export async function reopenBoothAccess(phone: string) {
-  return staffFetch('/api/staff/booth-access', { method: 'POST', body: JSON.stringify({ phone }) }) as Promise<BoothAccessStatus>
-}

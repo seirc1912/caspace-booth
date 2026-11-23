@@ -1,19 +1,12 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { BOOTH_VIEW_WINDOW_MS, boothViewableUntil, listBoothPhotos } from '../client/api/_lib/boothPhotos.ts'
+import { listBoothPhotos } from '../client/api/_lib/boothPhotos.ts'
 import { loadBoothPhotoFiles, type BoothPhoto } from '../client/src/features/boothPhotos/boothPhotosClient.ts'
 
 const now = Date.parse('2026-11-23T12:00:00Z')
 const ago = (ms: number) => new Date(now - ms).toISOString()
 const HOUR = 60 * 60_000
-
-test('booth photos are viewable for 6 hours after the newest upload or a staff reopen', () => {
-  assert.equal(BOOTH_VIEW_WINDOW_MS, 6 * HOUR)
-  assert.equal(boothViewableUntil(ago(HOUR), null), now + 5 * HOUR)
-  assert.equal(boothViewableUntil(ago(10 * HOUR), ago(HOUR)), now + 5 * HOUR, 'reopen gives exactly 6 h from the click')
-  assert.equal(boothViewableUntil(null, null), null)
-})
 
 function fakeClient(entries: Array<{ id: string | null; name: string; created_at: string | null }>, access?: string) {
   const signCalls: unknown[][] = []
@@ -30,6 +23,7 @@ function fakeClient(entries: Array<{ id: string | null; name: string; created_at
 }
 const photo = (name: string, age: number) => ({ id: name, name, created_at: ago(age) })
 
+
 test('listing returns thumbnails + originals inside the window, without Image Transformations', async () => {
   const { client, signCalls } = fakeClient([photo('0947860616-1.jpg', 2 * HOUR), photo('0947860616-2.jpg', HOUR), { id: null, name: '_thumbs', created_at: null }, photo('_access.json', HOUR)])
   const result = await listBoothPhotos(client, '0947860616', now)
@@ -38,14 +32,6 @@ test('listing returns thumbnails + originals inside the window, without Image Tr
   assert.equal(result.photos[0]!.thumbUrl, 'https://signed/0947860616/_booth/_thumbs/0947860616-1-thumb.jpg')
   assert.equal(result.photos[0]!.originalUrl, 'https://signed/0947860616/_booth/0947860616-1.jpg')
   assert.ok(signCalls.every((args) => args.length === 2), 'plain signed URLs, no transform options')
-})
-
-test('no photos and expired photos give the same empty answer', async () => {
-  assert.deepEqual(await listBoothPhotos(fakeClient([]).client, '0947860616', now), { status: 'unavailable', photos: [] })
-  const expired = await listBoothPhotos(fakeClient([photo('a.jpg', 6 * HOUR + 60_000)]).client, '0947860616', now)
-  assert.deepEqual(expired, { status: 'unavailable', photos: [] })
-  const reopened = await listBoothPhotos(fakeClient([photo('a.jpg', 30 * HOUR), photo('_access.json', HOUR)], JSON.stringify({ reopenedAt: ago(HOUR) })).client, '0947860616', now)
-  assert.equal(reopened.status, 'ok')
 })
 
 test('only the ticked photos are downloaded, at most two at a time', async () => {
@@ -151,22 +137,8 @@ test('photos the customer uploaded via /upload-anh are offered too; exported fra
   assert.equal(result.photos[1]!.thumbUrl, 'https://signed/0906314807/_thumbs/IMG_1234--req_12345678-0-thumb.jpg')
   const onlyUploads = await listBoothPhotos({ storage: { from: () => ({ ...bucket, list: async (prefix: string) => ({ data: prefix === '0906314807' ? [photo('a--req_12345678-0.jpg', HOUR)] : [], error: null }) }) } } as never, '0906314807', now)
   assert.equal(onlyUploads.photos.length, 1, 'customer uploads alone open the picker')
-  const old = await listBoothPhotos({ storage: { from: () => ({ ...bucket, list: async (prefix: string) => ({ data: prefix === '0906314807' ? [photo('a--req_12345678-0.jpg', 7 * HOUR)] : [], error: null }) }) } } as never, '0906314807', now)
-  assert.equal(old.status, 'unavailable', 'same 6-hour window')
-})
-
-test('a customer upload never reopens booth photos or older uploads (anyone can upload to any number)', async () => {
-  const byPrefix: Record<string, Array<{ id: string | null; name: string; created_at: string | null }>> = {
-    '0906314807/_booth': [photo('booth-old.jpg', 8 * HOUR)],
-    '0906314807': [photo('old--req_12345678-0.jpg', 8 * HOUR), photo('junk--req_12345678-1.jpg', 60_000)],
-  }
-  const bucket = {
-    list: async (prefix: string) => ({ data: byPrefix[prefix] ?? [], error: null }),
-    download: async () => ({ data: null, error: { message: 'missing' } }),
-    createSignedUrls: async (paths: string[]) => ({ data: paths.map((path) => ({ path, signedUrl: `https://signed/${path}`, error: null })), error: null }),
-  }
-  const result = await listBoothPhotos({ storage: { from: () => bucket } } as never, '0906314807', now)
-  assert.deepEqual(result.photos.map((item) => item.id), ['upload:junk--req_12345678-1.jpg'], 'only the fresh upload itself; expired booth photo and older upload stay hidden')
+  const old = await listBoothPhotos({ storage: { from: () => ({ ...bucket, list: async (prefix: string) => ({ data: prefix === '0906314807' ? [photo('a--req_12345678-0.jpg', 50 * HOUR)] : [], error: null }) }) } } as never, '0906314807')
+  assert.equal(old.status, 'ok', 'no viewing window: visible until the 3-day cleanup')
 })
 
 test('"DÙNG N ẢNH" opens the editor at once; originals finish downloading in the background', async () => {
@@ -215,4 +187,13 @@ test('Android/desktop download originals directly; only iPhone/iPad use the shar
   const clicked: string[] = []
   await downloadBoothPhotos([{ originalUrl: 'https://s/o/a?token=1', name: 'a.jpg' }, { originalUrl: 'https://s/o/b?token=2', name: 'b.jpg' }], 0, (href) => clicked.push(href))
   assert.deepEqual(clicked, ['https://s/o/a?token=1&download=a.jpg', 'https://s/o/b?token=2&download=b.jpg'])
+})
+
+test('no viewing window: photos stay visible until the 3-day cleanup deletes them', async () => {
+  assert.deepEqual(await listBoothPhotos(fakeClient([]).client, '0947860616'), { status: 'unavailable', photos: [] })
+  const twoDaysOld = await listBoothPhotos(fakeClient([photo('a.jpg', 48 * HOUR)]).client, '0947860616')
+  assert.equal(twoDaysOld.status, 'ok')
+  assert.equal(twoDaysOld.photos.length, 1)
+  assert.ok(!('viewableUntil' in twoDaysOld))
+  assert.doesNotMatch(readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8'), /Xem được đến/)
 })
