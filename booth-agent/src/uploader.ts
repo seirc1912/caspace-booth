@@ -20,7 +20,13 @@ async function call<T>(api: BoothApi, route: string, body: unknown): Promise<T> 
     })
   } catch { throw new AgentUploadError('NETWORK', 0, true) }
   const payload = await response.json().catch(() => ({})) as T & { error?: string }
-  if (!response.ok) throw new AgentUploadError(payload.error ?? `HTTP_${response.status}`, response.status, response.status >= 500 || response.status === 408 || response.status === 429)
+  if (!response.ok) {
+    // 404/405 = the address is not a caspace server with the booth API (wrong "Máy chủ",
+    // or the site is not updated yet). Retried slowly: fixing the server makes it work.
+    if (response.status === 404 || response.status === 405) throw new AgentUploadError(`Sai địa chỉ máy chủ hoặc máy chủ chưa có tính năng gửi ảnh phòng chụp (${api.baseUrl}, HTTP ${response.status})`, response.status, true)
+    if (response.status === 401) throw new AgentUploadError(payload.error ?? 'Mã bí mật không đúng', 401, false)
+    throw new AgentUploadError(payload.error ?? `HTTP_${response.status}`, response.status, response.status >= 500 || response.status === 408 || response.status === 429)
+  }
   return payload
 }
 

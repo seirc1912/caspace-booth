@@ -168,3 +168,8 @@ test('Setup.exe pieces: config writer keeps old values on upgrade and rejects ba
   assert.match(nsi, /InstallDir "\$PROGRAMFILES64\\CaspaceBooth"/)
   assert.ok(nsi.indexOf("/setowner") < nsi.indexOf("File /r"), "folder locked before files are copied or run")
 })
+
+test('a wrong server address is explained in Vietnamese and keeps retrying', async () => {
+  const api = { baseUrl: 'https://caspace.vn', key: 'k'.repeat(8), fetchImpl: (async () => new Response('<html>', { status: 405 })) as typeof fetch }
+  await assert.rejects(() => uploadExport({ api, phone: '0912345678', filePath: '/p/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg }), (error: unknown) => error instanceof AgentUploadError && error.retryable && /Sai địa chỉ máy chủ.*https:\/\/caspace\.vn.*405/.test(error.message))
+})
