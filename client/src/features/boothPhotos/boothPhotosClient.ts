@@ -115,3 +115,6 @@ export async function downloadBoothPhotos(photos: Array<Pick<BoothPhoto, 'origin
     click(boothDownloadUrl(photo))
   }
 }
+
+/** Most photos a customer may tick at once (picker, download, editor pool). */
+export const MAX_BOOTH_SELECTION = 20

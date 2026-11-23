@@ -197,3 +197,13 @@ test('no viewing window: photos stay visible until the 3-day cleanup deletes the
   assert.ok(!('viewableUntil' in twoDaysOld))
   assert.doesNotMatch(readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8'), /Xem được đến/)
 })
+
+test('customers can tick at most 20 booth photos', async () => {
+  const { MAX_BOOTH_SELECTION } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  assert.equal(MAX_BOOTH_SELECTION, 20)
+  const picker = readFileSync('client/src/pages/BoothPhotoPickerPage.tsx', 'utf8')
+  assert.match(picker, /photos\.filter\(\(photo\) => selected\.has\(photo\.id\)\)\.slice\(0, MAX_BOOTH_SELECTION\)/, 'stale saved selections are capped too')
+  assert.match(picker, /if \(atLimit\) \{ setLimitNotice\(true\)/, '21st tap is refused with a notice')
+  assert.match(picker, /photos\.slice\(0, MAX_BOOTH_SELECTION\)\.map\(\(photo\) => photo\.id\)/, '"Chọn 20 ảnh đầu"')
+  assert.match(picker, /Chỉ chọn tối đa \{MAX_BOOTH_SELECTION\} ảnh/)
+})

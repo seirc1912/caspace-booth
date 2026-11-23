@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { BoothPhotoViewer } from '../components/booth/BoothPhotoViewer'
 import { deliverImageFiles } from '../features/orders/services/saveComposition'
 import { PageShell } from '../components/layout/PageShell'
-import { downloadBoothPhotos, prefersShareSheet, type BoothPhoto, type BoothPhotoList } from '../features/boothPhotos/boothPhotosClient'
+import { downloadBoothPhotos, MAX_BOOTH_SELECTION, prefersShareSheet, type BoothPhoto, type BoothPhotoList } from '../features/boothPhotos/boothPhotosClient'
 
 interface BoothPhotoPickerPageProps {
   phone: string
@@ -26,8 +26,14 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
   const [loadError, setLoadError] = useState<string | null>(null)
   const photos = list?.status === 'ok' ? list.photos : []
   const selected = new Set(selectedIds)
-  const selectedPhotos = photos.filter((photo) => selected.has(photo.id))
-  const toggle = (id: string) => onSelectedIdsChange(selected.has(id) ? selectedIds.filter((item) => item !== id) : [...selectedIds, id])
+  const selectedPhotos = photos.filter((photo) => selected.has(photo.id)).slice(0, MAX_BOOTH_SELECTION)
+  const [limitNotice, setLimitNotice] = useState(false)
+  const atLimit = selectedPhotos.length >= MAX_BOOTH_SELECTION
+  const toggle = (id: string) => {
+    if (selected.has(id)) { onSelectedIdsChange(selectedIds.filter((item) => item !== id)); return }
+    if (atLimit) { setLimitNotice(true); window.setTimeout(() => setLimitNotice(false), 2500); return }
+    onSelectedIdsChange([...selectedPhotos.map((photo) => photo.id), id])
+  }
   const [viewerIndex, setViewerIndex] = useState<number | null>(null)
   const [readyFiles, setReadyFiles] = useState<Record<string, File>>({})
   const [preparing, setPreparing] = useState(false)
@@ -70,12 +76,12 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
   }
 
   return <PageShell className="pb-32">
-    <div className="flex items-center justify-between pb-6"><button className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onBack} type="button">← Rooms</button><span className="rounded-full bg-white px-4 py-2 text-sm font-bold shadow-sm" aria-live="polite">Đã chọn {selectedPhotos.length} / {photos.length}</span></div>
+    <div className="flex items-center justify-between pb-6"><button className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onBack} type="button">← Rooms</button><span className="rounded-full bg-white px-4 py-2 text-sm font-bold shadow-sm" aria-live="polite">Đã chọn {selectedPhotos.length}{photos.length > MAX_BOOTH_SELECTION ? ` / tối đa ${MAX_BOOTH_SELECTION}` : ` / ${photos.length}`}</span></div>
     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--brand-primary)]">Ảnh từ phòng chụp · {phone}</p>
     <h1 className="mt-1 text-3xl font-black tracking-tight">Chọn ảnh bạn muốn in</h1>
-    <p className="mt-2 text-sm text-stone-600">Chạm vào ảnh để chọn, chạm đúp hoặc ⤢ để xem lớn. Ảnh vừa chụp sẽ tự hiện thêm sau vài giây.</p>
+    <p className="mt-2 text-sm text-stone-600">Chạm vào ảnh để chọn (tối đa {MAX_BOOTH_SELECTION} ảnh), chạm đúp hoặc ⤢ để xem lớn. Ảnh vừa chụp sẽ tự hiện thêm sau vài giây.</p>
     {list?.status === 'ok' ? <p className="mt-1 text-xs text-stone-500">Ảnh được lưu 3 ngày rồi tự xoá.</p> : null}
-    <div className="mt-4 flex gap-2"><button className="min-h-11 rounded-xl bg-white px-4 text-sm font-bold shadow-sm" onClick={() => onSelectedIdsChange(photos.map((photo) => photo.id))} type="button">Chọn tất cả</button><button className="min-h-11 rounded-xl bg-white px-4 text-sm font-bold shadow-sm disabled:opacity-40" disabled={!selectedPhotos.length} onClick={() => onSelectedIdsChange([])} type="button">Bỏ chọn</button></div>
+    <div className="mt-4 flex gap-2"><button className="min-h-11 rounded-xl bg-white px-4 text-sm font-bold shadow-sm" onClick={() => onSelectedIdsChange(photos.slice(0, MAX_BOOTH_SELECTION).map((photo) => photo.id))} type="button">{photos.length > MAX_BOOTH_SELECTION ? `Chọn ${MAX_BOOTH_SELECTION} ảnh đầu` : 'Chọn tất cả'}</button><button className="min-h-11 rounded-xl bg-white px-4 text-sm font-bold shadow-sm disabled:opacity-40" disabled={!selectedPhotos.length} onClick={() => onSelectedIdsChange([])} type="button">Bỏ chọn</button></div>
     {error ? <p className="mt-4 rounded-2xl bg-rose-50 p-4 text-sm font-semibold text-rose-700" role="alert">{error}</p> : null}
     {list === null && !error ? <p className="mt-8 text-center font-semibold text-stone-500" role="status">Đang tải ảnh…</p> : null}
     {list?.status === 'unavailable' ? <p className="mt-8 rounded-2xl bg-white p-6 text-center text-stone-600">Chưa có ảnh từ phòng chụp cho số này. Vui lòng chờ vài giây, hoặc chọn ảnh từ điện thoại.</p> : null}
@@ -89,6 +95,7 @@ export function BoothPhotoPickerPage({ phone, list, error, selectedIds, onSelect
       })}
     </ul>
     <div className="fixed inset-x-0 bottom-0 z-20 border-t border-stone-200 bg-white p-3">
+      {limitNotice ? <p className="mx-auto mb-2 max-w-3xl rounded-xl bg-amber-50 p-2 text-center text-sm font-bold text-amber-800" role="alert">Chỉ chọn tối đa {MAX_BOOTH_SELECTION} ảnh. Bỏ chọn một ảnh để chọn ảnh khác.</p> : null}
       {loadError ? <p className="mx-auto mb-2 max-w-3xl text-sm font-semibold text-rose-700" role="alert">{loadError}</p> : null}
       {selectedPhotos.length ? <button className="mx-auto mb-2 flex min-h-11 w-full max-w-3xl items-center justify-center rounded-2xl bg-stone-100 px-3 text-sm font-black disabled:opacity-50" disabled={useShareSheet && preparing} onClick={() => void download(selectedPhotos)} type="button">{!useShareSheet ? `⬇ Tải ${selectedPhotos.length} ảnh đã chọn về máy` : preparing ? 'Đang chuẩn bị ảnh…' : selectedReady ? `⬇ Lưu ${selectedPhotos.length} ảnh vào máy` : `⬇ Tải ${selectedPhotos.length} ảnh đã chọn về máy`}</button> : null}
       <div className="mx-auto flex max-w-3xl gap-2">
