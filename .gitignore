@@ -9,7 +9,8 @@ coverage/
 .env
 .env.*
 !.env.example
-folder-watcher/config.json
+booth-agent/config.json
+booth-agent/state/
 
 # Logs
 *.log

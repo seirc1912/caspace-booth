@@ -4,10 +4,10 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "outDir": "dist",
-    "rootDir": "src",
-    "types": ["node"],
-    "skipLibCheck": true
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "skipLibCheck": true,
+    "types": ["node"]
   },
   "include": ["src"]
 }
