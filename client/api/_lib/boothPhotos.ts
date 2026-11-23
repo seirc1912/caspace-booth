@@ -60,20 +60,24 @@ async function listCustomerUploads(client: SupabaseClient, phone: string) {
   return entries.filter((entry) => entry.id && uploadImagePattern.test(entry.name) && !entry.name.toLowerCase().startsWith('caspace-'))
 }
 
-interface PickerCandidate { id: string; name: string; path: string; thumbPath: string; uploadedAt: string }
+interface PickerCandidate { id: string; name: string; path: string; thumbPath: string; uploadedAt: string; until: number }
 
 /**
- * What the customer may pick after entering a room: booth originals (shooting order)
- * followed by photos they uploaded themselves. One 6-hour window covers both.
+ * What the customer may pick after entering a room, each with its own viewing deadline:
+ * - booth originals: 6 h after the newest BOOTH upload or a staff reopen (trusted events only);
+ * - photos sent via /upload-anh: 6 h after that photo was uploaded, or a staff reopen.
+ * Anyone can upload to any phone number, so a customer upload must never extend the
+ * window of booth photos or of older uploads.
  */
 export async function listPickerCandidates(client: SupabaseClient, phone: string) {
   const [booth, uploads] = await Promise.all([listBoothObjects(client, phone), listCustomerUploads(client, phone)])
+  const reopenedAt = booth.hasAccessFile ? await readReopenedAt(client, phone) : null
+  const boothUntil = boothViewableUntil(booth.newest, reopenedAt) ?? 0
   const candidates: PickerCandidate[] = [
-    ...booth.photos.map((entry) => { const path = `${phone}/${BOOTH_FOLDER}/${entry.name}`; return { id: entry.name, name: entry.name, path, thumbPath: boothThumbnailPath(path), uploadedAt: entry.created_at ?? '' } }),
-    ...uploads.map((entry) => { const path = `${phone}/${entry.name}`; return { id: `upload:${entry.name}`, name: originalFilename(entry.name), path, thumbPath: thumbnailPathFor(path), uploadedAt: entry.created_at ?? '' } }),
+    ...booth.photos.map((entry) => { const path = `${phone}/${BOOTH_FOLDER}/${entry.name}`; return { id: entry.name, name: entry.name, path, thumbPath: boothThumbnailPath(path), uploadedAt: entry.created_at ?? '', until: boothUntil } }),
+    ...uploads.map((entry) => { const path = `${phone}/${entry.name}`; return { id: `upload:${entry.name}`, name: originalFilename(entry.name), path, thumbPath: thumbnailPathFor(path), uploadedAt: entry.created_at ?? '', until: boothViewableUntil(entry.created_at, reopenedAt) ?? 0 } }),
   ]
-  const newest = candidates.reduce<string | null>((latest, item) => (item.uploadedAt && (!latest || item.uploadedAt > latest) ? item.uploadedAt : latest), null)
-  return { candidates, newest, hasAccessFile: booth.hasAccessFile, boothCount: booth.photos.length }
+  return { candidates, boothCount: booth.photos.length }
 }
 
 /**
@@ -81,32 +85,32 @@ export async function listPickerCandidates(client: SupabaseClient, phone: string
  * number cannot be probed for whether someone visited the shop.
  */
 export async function listBoothPhotos(client: SupabaseClient, phone: string, now = Date.now()): Promise<BoothPhotoList> {
-  const { candidates, newest, hasAccessFile } = await listPickerCandidates(client, phone)
-  if (!candidates.length) return { status: 'unavailable', photos: [] }
-  const until = boothViewableUntil(newest, hasAccessFile ? await readReopenedAt(client, phone) : null)
-  if (until === null || until <= now) return { status: 'unavailable', photos: [] }
+  const { candidates } = await listPickerCandidates(client, phone)
+  const visible = candidates.filter((item) => item.until > now)
+  if (!visible.length) return { status: 'unavailable', photos: [] }
   const bucket = client.storage.from(customerPhotoBucket)
   const [thumbs, originals] = await Promise.all([
-    bucket.createSignedUrls(candidates.map((item) => item.thumbPath), BOOTH_SIGNED_URL_SECONDS),
-    bucket.createSignedUrls(candidates.map((item) => item.path), BOOTH_SIGNED_URL_SECONDS),
+    bucket.createSignedUrls(visible.map((item) => item.thumbPath), BOOTH_SIGNED_URL_SECONDS),
+    bucket.createSignedUrls(visible.map((item) => item.path), BOOTH_SIGNED_URL_SECONDS),
   ])
   if (originals.error) throw new UploadApiError(502, 'Không thể tải ảnh phòng chụp.')
   const items: BoothPhoto[] = []
-  candidates.forEach((item, index) => {
+  visible.forEach((item, index) => {
     const original = originals.data?.[index]
     if (!original?.signedUrl || original.error) return
     const thumb = thumbs.data?.[index]
     items.push({ id: item.id, name: item.name, thumbUrl: thumb && !thumb.error && thumb.signedUrl ? thumb.signedUrl : null, originalUrl: original.signedUrl, uploadedAt: item.uploadedAt })
   })
-  return { status: 'ok', photos: items, viewableUntil: new Date(until).toISOString() }
+  const viewableUntil = Math.max(...visible.map((item) => item.until))
+  return { status: 'ok', photos: items, viewableUntil: new Date(viewableUntil).toISOString() }
 }
 
 export interface BoothAccessStatus { boothPhotoCount: number; pickerPhotoCount: number; viewableUntil: string | null; viewable: boolean }
 
 export async function boothAccessStatus(client: SupabaseClient, phone: string, now = Date.now()): Promise<BoothAccessStatus> {
-  const { candidates, newest, hasAccessFile, boothCount } = await listPickerCandidates(client, phone)
-  const until = candidates.length ? boothViewableUntil(newest, hasAccessFile ? await readReopenedAt(client, phone) : null) : null
-  return { boothPhotoCount: boothCount, pickerPhotoCount: candidates.length, viewableUntil: until === null ? null : new Date(until).toISOString(), viewable: until !== null && until > now }
+  const { candidates, boothCount } = await listPickerCandidates(client, phone)
+  const until = candidates.length ? Math.max(...candidates.map((item) => item.until)) : 0
+  return { boothPhotoCount: boothCount, pickerPhotoCount: candidates.length, viewableUntil: until ? new Date(until).toISOString() : null, viewable: until > now }
 }
 
 /** Staff "Mở lại 6 giờ": stores the click time (the 6-hour rule adds the window). */

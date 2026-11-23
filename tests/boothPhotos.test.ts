@@ -154,3 +154,17 @@ test('photos the customer uploaded via /upload-anh are offered too; exported fra
   const old = await listBoothPhotos({ storage: { from: () => ({ ...bucket, list: async (prefix: string) => ({ data: prefix === '0906314807' ? [photo('a--req_12345678-0.jpg', 7 * HOUR)] : [], error: null }) }) } } as never, '0906314807', now)
   assert.equal(old.status, 'unavailable', 'same 6-hour window')
 })
+
+test('a customer upload never reopens booth photos or older uploads (anyone can upload to any number)', async () => {
+  const byPrefix: Record<string, Array<{ id: string | null; name: string; created_at: string | null }>> = {
+    '0906314807/_booth': [photo('booth-old.jpg', 8 * HOUR)],
+    '0906314807': [photo('old--req_12345678-0.jpg', 8 * HOUR), photo('junk--req_12345678-1.jpg', 60_000)],
+  }
+  const bucket = {
+    list: async (prefix: string) => ({ data: byPrefix[prefix] ?? [], error: null }),
+    download: async () => ({ data: null, error: { message: 'missing' } }),
+    createSignedUrls: async (paths: string[]) => ({ data: paths.map((path) => ({ path, signedUrl: `https://signed/${path}`, error: null })), error: null }),
+  }
+  const result = await listBoothPhotos({ storage: { from: () => bucket } } as never, '0906314807', now)
+  assert.deepEqual(result.photos.map((item) => item.id), ['upload:junk--req_12345678-1.jpg'], 'only the fresh upload itself; expired booth photo and older upload stay hidden')
+})
