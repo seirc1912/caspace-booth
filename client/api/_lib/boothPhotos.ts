@@ -67,3 +67,21 @@ export async function listBoothPhotos(client: SupabaseClient, phone: string, now
   })
   return { status: 'ok', photos: items, viewableUntil: new Date(until).toISOString() }
 }
+
+export interface BoothAccessStatus { boothPhotoCount: number; viewableUntil: string | null; viewable: boolean }
+
+export async function boothAccessStatus(client: SupabaseClient, phone: string, now = Date.now()): Promise<BoothAccessStatus> {
+  const { photos, newest, hasAccessFile } = await listBoothObjects(client, phone)
+  const until = photos.length ? boothViewableUntil(newest, hasAccessFile ? await readReopenedAt(client, phone) : null) : null
+  return { boothPhotoCount: photos.length, viewableUntil: until === null ? null : new Date(until).toISOString(), viewable: until !== null && until > now }
+}
+
+/** Staff "Mở lại 6 giờ": stores the click time (the 6-hour rule adds the window). */
+export async function reopenBoothAccess(client: SupabaseClient, phone: string, now = Date.now()) {
+  const { photos } = await listBoothObjects(client, phone)
+  if (!photos.length) throw new UploadApiError(404, 'Số này không có ảnh phòng chụp trên hệ thống. Hãy dùng "Gửi lại thư mục" ở máy phòng chụp.')
+  const body = JSON.stringify({ reopenedAt: new Date(now).toISOString() })
+  const { error } = await client.storage.from(customerPhotoBucket).upload(`${phone}/${BOOTH_FOLDER}/${BOOTH_ACCESS_FILE}`, new Blob([body], { type: 'application/json' }), { upsert: true, contentType: 'application/json' })
+  if (error) throw new UploadApiError(502, 'Không thể mở lại ảnh phòng chụp. Vui lòng thử lại.')
+  return boothAccessStatus(client, phone, now)
+}
