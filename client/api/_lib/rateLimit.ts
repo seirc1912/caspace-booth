@@ -105,4 +105,22 @@ export function enforceCustomerUploadLimits(request: ApiRequest, bytes: number, 
   }
 }
 
-export function resetRateLimitsForTests() { attempts.clear(); byteAttempts.clear(); byteReservations.clear() }
+const distinctValues = new Map<string, Map<string, number>>()
+
+/**
+ * Limits how many *different* values (e.g. phone numbers) one key may use per
+ * window; repeating a value is free. Stops phone-number probing while a customer
+ * refreshing their own photos every 10 s is never blocked.
+ */
+export function enforceDistinctLimit(key: string, value: string, limit: number, windowMs: number, now = Date.now()) {
+  const seen = distinctValues.get(key) ?? new Map<string, number>()
+  for (const [candidate, time] of seen) if (now - time >= windowMs) seen.delete(candidate)
+  if (!seen.has(value) && seen.size >= limit) throw new UploadApiError(429, 'Bạn đã tra cứu quá nhiều số điện thoại. Vui lòng chờ một lúc rồi thử lại.', Math.ceil(windowMs / 1_000))
+  seen.set(value, now)
+  distinctValues.set(key, seen)
+  if (distinctValues.size > 4_000) for (const [candidate, values] of distinctValues) if ([...values.values()].every((time) => now - time >= windowMs)) distinctValues.delete(candidate)
+}
+
+export function clientIp(request: ApiRequest) { return requestKey(request) }
+
+export function resetRateLimitsForTests() { attempts.clear(); byteAttempts.clear(); byteReservations.clear(); distinctValues.clear() }

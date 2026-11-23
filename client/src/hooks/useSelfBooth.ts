@@ -10,7 +10,7 @@ import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { assignPhotosAcrossRoom, collectAutoFillPhotoResults, invalidateCompletedRoomFrames, resolveRoomTemplateDetails, roomHasAssignedPhotos, totalRoomSlotCount } from '../features/photos/autoFillAllFrames'
 import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
-import type { PhotoLibrarySession } from '../features/photos/useSessionPhotos'
+import type { CustomerSession } from '../features/photos/customerSession'
 import { selectFrameAfterLoad } from '../features/templates/frameSelection'
 import {
   cleanupAbandonedEditorDrafts,
@@ -44,7 +44,7 @@ async function loadPhotos(files: File[], concurrency = 2) {
   return results
 }
 
-export function useSelfBooth(customerSession: PhotoLibrarySession | null) {
+export function useSelfBooth(customerSession: CustomerSession | null) {
   const [rooms, setRooms] = useState<Room[]>([])
   const [templateSummaries, setTemplateSummaries] = useState<CustomerTemplateSummary[]>([])
   const [templateDetails, setTemplateDetails] = useState<Record<string, CustomerTemplate>>({})
