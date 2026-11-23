@@ -2,7 +2,14 @@ import { clearUploadSession, ensureUploadSession } from '../photoUpload/uploadCl
 
 export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; originalUrl: string; uploadedAt: string }
 export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[]; viewableUntil: string } | { status: 'unavailable'; photos: [] }
-export interface BoothPoolPhoto { id: string; thumbUrl: string | null; file: File }
+/** A ticked photo in the editor. `file` is null while its original is still downloading. */
+export interface BoothPoolPhoto { id: string; thumbUrl: string | null; file: File | null; ready: Promise<File> }
+
+/** Originals that downloaded; a failed one is skipped instead of blocking the others. */
+export async function readyPoolFiles(pool: BoothPoolPhoto[]) {
+  const settled = await Promise.allSettled(pool.map((photo) => photo.ready))
+  return settled.flatMap((result) => (result.status === 'fulfilled' ? [result.value] : []))
+}
 
 export const BOOTH_POLL_MS = 10_000
 export const BOOTH_DOWNLOAD_CONCURRENCY = 2

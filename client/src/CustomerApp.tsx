@@ -52,13 +52,25 @@ export function CustomerApp() {
     if (boothLoader && boothPhotos.list?.status === 'ok') boothPhotos.list.photos.filter((photo) => added.has(photo.id)).forEach(boothLoader.prefetch)
   }
   const setBoothPool = (pool: BoothPoolPhoto[]) => setBoothState({ ...boothForPhone, pool })
+  // Opens the editor at once; originals keep downloading (already started when ticked)
+  // and each pool entry gets its File as soon as it arrives.
   const applyBoothPhotoSelection = async (photos: BoothPhoto[]) => {
     const known = new Map(boothPool.map((photo) => [photo.id, photo]))
-    const missing = photos.filter((photo) => !known.has(photo.id))
-    const files = await loadBoothPhotoFiles(missing, undefined, fetch, boothLoader ?? undefined)
-    missing.forEach((photo, index) => known.set(photo.id, { id: photo.id, thumbUrl: photo.thumbUrl, file: files[index]! }))
-    setBoothPool(photos.map((photo) => known.get(photo.id)!))
+    const pool: BoothPoolPhoto[] = photos.map((photo) => known.get(photo.id) ?? {
+      id: photo.id,
+      thumbUrl: photo.thumbUrl,
+      file: null,
+      ready: boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!),
+    })
+    setBoothPool(pool)
     navigate('/editor')
+    for (const entry of pool) {
+      if (entry.file) continue
+      entry.ready.then(
+        (file) => setBoothState((current) => ({ ...current, pool: current.pool.map((item) => (item.id === entry.id ? { ...item, file } : item)) })),
+        () => booth.reportPhotoError('Một ảnh phòng chụp chưa tải được. Vui lòng kiểm tra mạng rồi chọn lại.'),
+      )
+    }
   }
 
   const requiredFrameCount = booth.roomTemplateSummaries.length
@@ -201,7 +213,7 @@ export function CustomerApp() {
 
   if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/booth-photos') return validPhone ? <BoothPhotoPickerPage error={boothPhotos.error} list={boothPhotos.list} onBack={() => navigate('/rooms')} onContinue={applyBoothPhotoSelection} onSelectedIdsChange={setBoothSelection} onSkip={() => navigate('/editor')} phone={validPhone} selectedIds={boothSelection} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/booth-photos') return validPhone ? <BoothPhotoPickerPage error={boothPhotos.error} list={boothPhotos.list} onBack={() => navigate('/rooms')} onContinue={applyBoothPhotoSelection} onSelectedIdsChange={setBoothSelection} onSkip={() => navigate('/editor')} loadOriginal={(photo) => (boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!))} phone={validPhone} selectedIds={boothSelection} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
   if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
   if (pathname === '/editor' && !booth.draftReady) return null
   if (pathname === '/editor' && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />

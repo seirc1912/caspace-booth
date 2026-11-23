@@ -44,6 +44,25 @@ export async function deliverImageFile(blob: Blob, filename: string, options: Fi
   }
 }
 
+/**
+ * Several images in one go: one share sheet ("Lưu N hình ảnh" on iOS/Android) when
+ * the browser can share files, otherwise one download per file. Must be called
+ * straight from a tap — share sheets need a fresh user gesture.
+ */
+export async function deliverImageFiles(files: File[], options: FileDeliveryOptions = {}): Promise<FileDelivery> {
+  const navigatorApi = options.navigator ?? navigator
+  const download = options.download ?? downloadBlob
+  const shareData: ShareData = { files }
+  let supported = typeof navigatorApi.share === 'function'
+  try { if (supported && typeof navigatorApi.canShare === 'function') supported = navigatorApi.canShare(shareData) } catch { supported = false }
+  if (supported && navigatorApi.share) {
+    try { await navigatorApi.share(shareData); return 'shared' }
+    catch (reason) { if (isShareCancellation(reason)) return 'cancelled' }
+  }
+  files.forEach((file) => download(file, file.name))
+  return 'downloaded'
+}
+
 export async function saveComposition(input: DownloadCompositionInput) {
   const renderStartedAt = performance.now()
   const prepared = await prepareCompositionDownload(input)
