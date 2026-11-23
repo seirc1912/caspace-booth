@@ -2,11 +2,19 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "outputDirectory": "dist",
-  "regions": ["icn1"],
+  "regions": [
+    "icn1"
+  ],
   "rewrites": [
     {
       "source": "/(.*)",
       "destination": "/"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/cleanup-photo-uploads",
+      "schedule": "0 20 * * *"
     }
   ]
 }
