@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { listBoothPhotos } from '../_lib/boothPhotos.js'
 import { enforceSameOrigin, readJsonBody, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse, UploadApiError } from '../_lib/http.js'
-import { enforceRateLimit } from '../_lib/rateLimit.js'
+import { clientIp, enforceDistinctLimit, enforceRateLimit } from '../_lib/rateLimit.js'
 import { requireCustomerPhone } from '../_lib/staffPhotos.js'
 import { loadSupabaseStorageEnvironment } from '../_lib/supabaseStorage.js'
 import { verifyUploadSessionToken } from '../_lib/uploadSession.js'
@@ -22,6 +22,10 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     if (!sessionId) throw new UploadApiError(401, 'Phiên đã hết hạn. Vui lòng tải lại trang.')
     enforceRateLimit({ headers: { 'x-forwarded-for': sessionId } }, { limit: 120, windowMs: 10 * 60_000, scope: 'booth-photos-session' })
     const phone = requireCustomerPhone((readJsonBody(request) as Record<string, unknown> | undefined)?.phone)
+    // Owner chose "phone number only + 6-hour window" (no PIN/OTP). Probing is limited by
+    // how many different numbers a browser session (3) and a shared shop IP (40) may try.
+    enforceDistinctLimit(`booth-session:${sessionId}`, phone, 3, 10 * 60_000)
+    enforceDistinctLimit(`booth-ip:${clientIp(request)}`, phone, 40, 10 * 60_000)
     const client = createClient(environment.url, environment.serviceRoleKey, { auth: { persistSession: false, autoRefreshToken: false } })
     const result = await listBoothPhotos(client, phone)
     console.info('[booth-photos:timing]', { durationMs: Math.round(performance.now() - startedAt), status: result.status, count: result.photos.length })

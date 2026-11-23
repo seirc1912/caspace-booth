@@ -84,3 +84,15 @@ test('entering a room opens the booth picker when photos exist; the old Supabase
   assert.match(picker, /loading="lazy" src=\{photo\.thumbUrl\}/, 'grid only loads thumbnails')
   assert.doesNotMatch(picker, /originalUrl/)
 })
+
+test('one browser session may look up at most 3 different phone numbers per 10 minutes', async () => {
+  const { enforceDistinctLimit, resetRateLimitsForTests } = await import('../client/api/_lib/rateLimit.ts')
+  resetRateLimitsForTests()
+  const t = Date.parse('2026-11-23T00:00:00Z')
+  for (const phone of ['0901', '0902', '0903']) enforceDistinctLimit('s', phone, 3, 600_000, t)
+  for (let poll = 0; poll < 50; poll += 1) enforceDistinctLimit('s', '0901', 3, 600_000, t + poll * 10_000)
+  assert.throws(() => enforceDistinctLimit('s', '0904', 3, 600_000, t + 1_000), /quá nhiều số điện thoại/)
+  enforceDistinctLimit('s', '0904', 3, 600_000, t + 600_001 + 500_000)
+  const source = readFileSync('client/api/booth-photos/list.ts', 'utf8')
+  assert.match(source, /enforceDistinctLimit\(`booth-session:\$\{sessionId\}`, phone, 3/)
+})
