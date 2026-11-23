@@ -87,7 +87,17 @@ export function ComposerPage({ template, backgroundUrl, slots, currentSlot, onBa
   }
   const openPhotoPicker = (slotIndex: number, fromPhone = false) => {
     const target = { templateId: template.id, slotIndex, slotCount: template.slots.length }
-    if (boothPool.length && !fromPhone) { setPoolRequest({ kind: 'slot', target }); return }
+    if (boothPool.length && !fromPhone) {
+      // Empty slot in a multi-photo frame: pick several booth photos in one go — the first
+      // goes into the tapped slot, the rest fill the other empty slots in order.
+      const frameTarget = createFramePhotoTarget(template.id, slots)
+      if (!slots[slotIndex] && frameTarget.emptySlotIndices.length > 1) {
+        setPoolRequest({ kind: 'frame', target: { ...frameTarget, emptySlotIndices: [slotIndex, ...frameTarget.emptySlotIndices.filter((index) => index !== slotIndex)] } })
+        return
+      }
+      setPoolRequest({ kind: 'slot', target })
+      return
+    }
     const input = photoInput.current
     if (!input) return
     pendingPhotoTarget.current = target

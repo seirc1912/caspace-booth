@@ -115,3 +115,14 @@ test('multi-photo frames label empty slots "Hình N" and the sheet says which ph
   assert.match(sheet, /`→ Hình \$\{target\}`/)
   assert.match(sheet, /Ảnh chọn trước vào hình trước/)
 })
+
+test('tapping an empty slot lets the customer pick several booth photos: tapped slot first, then the other empty slots', async () => {
+  const { assignPhotosToFrameTarget, createFramePhotoTarget } = await import('../client/src/features/photos/framePhotoTarget.ts')
+  const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
+  assert.match(composer, /emptySlotIndices: \[slotIndex, \.\.\.frameTarget\.emptySlotIndices\.filter\(\(index\) => index !== slotIndex\)\]/)
+  const target = createFramePhotoTarget('t', [null, null, null])
+  const reordered = { ...target, emptySlotIndices: [1, 0, 2] }
+  const photo = (id: string) => ({ id, src: `blob:${id}`, alt: id, source: 'selfbooth' as const })
+  const next = assignPhotosToFrameTarget({}, reordered, [photo('a'), photo('b')])
+  assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'first pick → tapped Hình 2, second → Hình 1')
+})
