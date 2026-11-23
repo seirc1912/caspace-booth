@@ -34,8 +34,8 @@ thư mục sai tên, ô "Gửi lại thư mục".
 4. Màn cuối tick "Mở trang trạng thái" → **Finish**. Trang phải báo "Mạng / máy chủ: bình thường".
 5. Chụp thử 1 phiên với số điện thoại test → mở caspace.vn, nhập số đó → thấy ảnh.
 
-Setup cài vào `C:\CaspaceBooth` (kèm Node.js riêng, không ảnh hưởng phần mềm khác), tự chạy ngầm khi
-đăng nhập Windows (không hiện cửa sổ), tự bật lại nếu bị tắt. Nhật ký: `C:\CaspaceBooth\logs\agent.log`.
+Setup cài vào `C:\Program Files\CaspaceBooth` (kèm Node.js riêng, không ảnh hưởng phần mềm khác), tự chạy ngầm khi
+đăng nhập Windows (không hiện cửa sổ), tự bật lại nếu bị tắt. Nhật ký: `C:\Program Files\CaspaceBooth\logs\agent.log`.
 
 **Cập nhật phiên bản:** chạy Setup mới, để trống các ô → giữ nguyên mã và cấu hình cũ.
 
@@ -54,5 +54,5 @@ Build tự tải Node.js Windows (kiểm SHA-256 với nodejs.org) và bản Win
 
 ## Gỡ / tạm dừng
 
-Windows **Settings → Apps → "Gửi ảnh phòng chụp Caspace" → Uninstall** (hoặc Start → Caspace → Gỡ cài đặt): dừng tự chạy, xoá `C:\CaspaceBooth`; ảnh trong `Pictures` giữ nguyên.
+Windows **Settings → Apps → "Gửi ảnh phòng chụp Caspace" → Uninstall** (hoặc Start → Caspace → Gỡ cài đặt): dừng tự chạy, xoá `C:\Program Files\CaspaceBooth`; ảnh trong `Pictures` giữ nguyên.
 Thu hồi một máy: xoá dòng `booth-N` khỏi `BOOTH_UPLOAD_KEYS` trên Vercel.

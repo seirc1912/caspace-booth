@@ -13,7 +13,9 @@ Unicode true
 
 Name "Gửi ảnh phòng chụp Caspace"
 OutFile "${OUTFILE}"
-InstallDir "C:\CaspaceBooth"
+; Program Files: only Administrators can create or change it, so no standard user can
+; pre-plant files that this elevated installer (or the logon task) would run.
+InstallDir "$PROGRAMFILES64\CaspaceBooth"
 RequestExecutionLevel admin
 SetCompressor /SOLID lzma
 ShowInstDetails show
@@ -135,6 +137,19 @@ FunctionEnd
 
 Section "Install"
   Call StopAgent
+  ; Lock the folder BEFORE copying or running anything from it: owner Administrators,
+  ; no inherited/explicit ACEs except Administrators/SYSTEM (full) and Users (read+run).
+  CreateDirectory "$INSTDIR"
+  nsExec::Exec 'icacls "$INSTDIR" /setowner "*S-1-5-32-544" /T /C'
+  Pop $0
+  nsExec::Exec 'icacls "$INSTDIR" /reset /T /C'
+  Pop $0
+  nsExec::Exec 'icacls "$INSTDIR" /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"'
+  Pop $0
+  ${If} $0 != "0"
+    MessageBox MB_ICONSTOP "Không khoá được quyền thư mục cài đặt. Dừng cài để an toàn."
+    Abort
+  ${EndIf}
   SetOutPath "$INSTDIR"
   File /r "${PAYLOAD}\*.*"
 
@@ -148,9 +163,7 @@ Section "Install"
   ${EndIf}
 
   DetailPrint "Phân quyền thư mục…"
-  ; Code runs automatically at logon: only Administrators/SYSTEM may change it.
-  nsExec::Exec 'icacls "$INSTDIR" /inheritance:r /grant:r "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX"'
-  Pop $0
+  ; Only state/ and logs/ are writable by the agent (runs as the logged-in user).
   CreateDirectory "$INSTDIR\state"
   CreateDirectory "$INSTDIR\logs"
   nsExec::Exec 'icacls "$INSTDIR\state" /grant:r "*S-1-5-32-545:(OI)(CI)M"'

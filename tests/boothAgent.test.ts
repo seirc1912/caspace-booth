@@ -154,5 +154,6 @@ test('Setup.exe pieces: config writer keeps old values on upgrade and rejects ba
   assert.match(task, /<RunLevel>LeastPrivilege<\/RunLevel>/, 'agent never runs elevated')
   const nsi = read('booth-agent/installer/installer.nsi', 'utf8')
   assert.match(nsi, /\$\{NSD_CreatePassword\}/, 'key typed into a password box, never baked into the .exe')
-  assert.match(nsi, /icacls "\$INSTDIR" \/inheritance:r/)
+  assert.match(nsi, /InstallDir "\$PROGRAMFILES64\\CaspaceBooth"/)
+  assert.ok(nsi.indexOf("/setowner") < nsi.indexOf("File /r"), "folder locked before files are copied or run")
 })
