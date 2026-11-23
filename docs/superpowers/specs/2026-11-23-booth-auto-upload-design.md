@@ -138,12 +138,18 @@ Viết mới dựa trên ý tưởng của `folder-watcher/` (chokidar, chờ fi
 - Hệ quả owner đã biết: khung đã xoá không khôi phục được (kể cả rollback); quán cần in trong 3 ngày. Ảnh gốc phòng chụp vẫn còn trên máy Capture One → gửi lại được.
 - PR #80 cũ (7 ngày) đóng, thay bằng PR này.
 
-## 5.8 Kiểm thử trên Preview
+## 5.8 Kiểm thử: làm và thử trên máy local trước khi deploy (owner yêu cầu)
 
-- Preview và Production dùng chung Supabase (kế hoạch tối ưu §4.5). Như các PR trước: Preview chỉ ghi vào **SĐT test**, owner tự xoá thư mục test; không chạy xoá thật trên Preview (cron chỉ chạy thử/đếm).
-- Preview có Deployment Protection → app phòng chụp khi test dùng link chia sẻ Preview (cookie bypass) như cách đã test các PR trước; Production không bị ảnh hưởng.
+- Toàn bộ phát triển và thử nghiệm chạy **trên máy Mac local**, không đụng Supabase/Vercel Production cho tới khi owner duyệt deploy:
+  - **Supabase local** bằng Supabase CLI + Docker Desktop (`npx supabase start`): tạo bucket `customer-photo-uploads` private giống Production trong môi trường local. Khoá local chỉ nằm trong `.env.local` (gitignore), không dùng khoá Production.
+  - **Web + API local** bằng `vercel dev` (chạy cả trang và `client/api`) trỏ vào Supabase local.
+  - **App phòng chụp** chạy trên Mac với một thư mục giả lập cấu trúc Capture One (`<sđt>/Output/<sđt>-<số>.jpg`, gồm cả tên thư mục lạ như `tim`, `0947860616-1`). Sau đó thử trên **1 máy Windows thật** trong cùng mạng LAN, trỏ vào địa chỉ IP của Mac (Capture One xuất ảnh thật, không chạm Production).
+  - Cron xoá 3 ngày thử trên Supabase local (cả chạy thử lẫn xoá thật), dùng ảnh giả có ngày cũ.
+- Thử bằng điện thoại thật: điện thoại cùng wifi mở `http://<IP Mac>:3000`.
+- Xong local → owner duyệt → mới đẩy Preview (chỉ SĐT test, owner xoá thư mục test) → owner duyệt → merge sau 23h như các PR trước.
+- Docker Desktop đang tạm dừng (paused) trên Mac — cần bật lại khi bắt đầu.
 
-## 6. Thứ tự làm (mỗi bước một PR, Preview → owner duyệt → merge)
+## 6. Thứ tự làm (mỗi bước một PR; thử local → owner duyệt → Preview → owner duyệt → merge)
 
 1. API booth (`/api/booth/init|complete`) + xác thực mã máy + test.
 2. App phòng chụp `booth-agent/` (chạy thử trên 1 máy, trỏ vào Preview) — cài đặt, khay, gửi lại thư mục.
