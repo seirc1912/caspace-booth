@@ -60,14 +60,14 @@ Dùng **bucket hiện có** `customer-photo-uploads` (private) — không tạo 
 customer-photo-uploads/
   0947860616/                       ← khung khách gửi (như hiện nay, trang staff đọc)
   0947860616/_thumbs/               ← ảnh nhỏ khung (như hiện nay)
-  0947860616/_booth/<thư mục phiên>--<tên file gốc>.jpg   ← ẢNH GỐC PHÒNG CHỤP (mới)
-  0947860616/_booth/_thumbs/<thư mục phiên>--<tên>-thumb.jpg ← ảnh nhỏ 400px do app tạo (mới)
+  0947860616/_booth/<tên file gốc>.jpg        ← ẢNH GỐC PHÒNG CHỤP (mới) — mọi phiên của cùng SĐT dồn chung 1 thư mục
+  0947860616/_booth/_thumbs/<tên>-thumb.jpg   ← ảnh nhỏ 400px do app tạo (mới)
   0947860616/_booth/_access.json              ← hạn xem do nhân viên "mở lại" (mới, tuỳ chọn)
 ```
 
 - Trang staff hiện chỉ liệt kê file ở cấp `{sđt}/` nên ảnh `_booth/` **không lẫn** vào danh sách khung cần in (đúng như `_thumbs/` hôm nay).
-- Đường dẫn ảnh gốc **xác định theo thư mục phiên + tên file** (`{sđt}/_booth/{thư mục phiên đã làm sạch}--{tên file}`), vì hai phiên của cùng khách (`0947860616` và `0947860616-1`) có thể trùng tên file. Gửi lại cùng nội dung là idempotent (đã có → chỉ xác minh).
-- **Cùng đường dẫn nhưng khác nội dung** (nhân viên chỉnh rồi xuất lại cùng tên): bản mới **thay** bản cũ (API booth ghi đè có kiểm soát: xoá/upsert rồi xác minh SHA mới); app không được thử lại vô hạn khi gặp 409. *(Quyết định của Claude.)*
+- **Mọi phiên của cùng SĐT dồn chung một thư mục** (owner chọn): `0947860616`, `0947860616-1`, `0947860616 tim` → `0947860616/_booth/`. Đường dẫn = `{sđt}/_booth/{tên file}`; gửi lại cùng nội dung là idempotent (đã có → chỉ xác minh).
+- **Trùng tên nhưng khác nội dung** (hai phiên cùng bộ đếm, hoặc nhân viên xuất lại): **giữ cả hai**, bản sau thêm đuôi 8 ký tự đầu SHA-256 (`<tên>~<sha8>.jpg`) — không bao giờ mất ảnh; app không thử lại vô hạn khi gặp 409. *(Quyết định của Claude.)*
 - Không dùng Image Transformations ở bất kỳ đâu; mọi ảnh xem trước là ảnh nhỏ tạo sẵn, đọc qua signed URL thường.
 
 ### 5.2 App phòng chụp (Windows) — `booth-agent/`
@@ -100,6 +100,24 @@ Viết mới dựa trên ý tưởng của `folder-watcher/` (chokidar, chờ fi
 - Chống dò số: rate limit scope `booth-photos` theo phiên + IP (IP rộng vì wifi quán dùng chung). Không tiết lộ khác biệt giữa "không có thư mục" và "hết hạn" ngoài thông điệp cần thiết — (lựa chọn của builder: có thể gộp thành một thông điệp).
 - Trang ghép khung: thay luồng cũ `startPhotoLibrarySession`/`useSessionPhotos` (RPC + bucket public + realtime) bằng gọi API trên; **tự kiểm tra lại mỗi ~10 giây** khi đang mở để ảnh mới xuất hiện dần (thay cho realtime). Ảnh hiển thị là ảnh nhỏ; ảnh gốc chỉ tải khi khách đặt ảnh vào khung (để render bản in đúng độ phân giải). Nguồn ảnh `'selfbooth'` đã có sẵn trong kiểu `PhotoAsset`.
 - Nút chọn ảnh từ điện thoại giữ nguyên.
+
+**Bước chọn ảnh sau khi vào phòng (owner yêu cầu).** Khi khách bấm "Enter Room" ở `/rooms` mà SĐT có ảnh phòng chụp còn hạn, hiện màn chọn ảnh **trước** trang ghép khung:
+
+```
+ẢNH CỦA BẠN TỪ PHÒNG CHỤP · 0947860616            Đã chọn 12 / 48
+[Chọn tất cả]  [Bỏ chọn]
+┌────┐ ┌────┐ ┌────┐ ┌────┐
+│ ✓  │ │    │ │ ✓  │ │    │   ← lưới ảnh nhỏ, chạm để tick / bỏ tick
+└────┘ └────┘ └────┘ └────┘
+...                     (ảnh mới xuất vẫn tự hiện thêm)
+[ + Thêm ảnh từ điện thoại ]        [ DÙNG 12 ẢNH ĐÃ CHỌN → ]
+```
+
+- Ảnh đã tick trở thành kho ảnh của trang ghép khung: "Auto Fill N Photos", "Add Photo", "Add Image" trong từng ô dùng các ảnh này (cùng ảnh khách thêm từ điện thoại).
+- Mặc định **chưa tick ảnh nào**, có nút "Chọn tất cả" *(quyết định của Claude: khách thường chụp nhiều hơn số ô; tick sẵn tất cả sẽ làm Auto Fill dùng cả ảnh khách không thích)*.
+- Trong trang ghép khung có nút quay lại màn này để chọn thêm/bớt; lựa chọn được lưu cùng bản nháp (IndexedDB) để mở lại không mất.
+- Không có ảnh phòng chụp (hoặc hết hạn) → bỏ qua màn này, vào thẳng trang ghép khung như hiện nay (kèm thông báo hết hạn nếu có).
+- Đổi phòng khác vẫn dùng lại lựa chọn ảnh đó.
 
 ### 5.5 Gửi nhiều khung từ trang ghép khung
 
