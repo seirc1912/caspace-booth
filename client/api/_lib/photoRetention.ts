@@ -2,10 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { BOOTH_FOLDER, BOOTH_PREVIEWS, BOOTH_THUMBS } from './boothPaths.js'
 import { customerPhotoBucket, THUMBNAIL_FOLDER } from './supabaseStorage.js'
 
-// Owner decisions: frames customers send (/upload-anh) are kept 3 days (23/11/2026); booth
-// photos and their thumbnails/previews only 6 hours (24/11/2026), to keep Storage small.
-// Only Supabase copies are deleted: the booth PCs keep their folders (staff resend if needed).
-export const PHOTO_RETENTION_DAYS = 3
+// Owner decisions: booth photos and their thumbnails/previews are kept 6 hours (24/11/2026);
+// photos customers send (/upload-anh) also 6 hours (25/11/2026), to keep Storage small.
+// Only Supabase copies are deleted: the booth PCs keep their folders (staff resend if needed),
+// and customers still have their own photos on their phone.
+export const UPLOAD_RETENTION_HOURS = 6
 export const BOOTH_RETENTION_HOURS = 6
 const PAGE = 1_000
 const LIST_CONCURRENCY = 8

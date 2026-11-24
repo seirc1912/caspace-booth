@@ -20,7 +20,7 @@ async function post(phone: string, token: string, fetchImpl: typeof fetch) {
   return fetchImpl('/api/booth-photos/list', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-upload-session': token }, body: JSON.stringify({ phone }) })
 }
 
-/** Booth photos + the customer's own uploads for a phone (kept 3 days). "unavailable" = none. */
+/** Booth photos + the customer's own uploads for a phone (kept 6 hours). "unavailable" = none. */
 export async function fetchBoothPhotos(phone: string, fetchImpl: typeof fetch = fetch, session = ensureUploadSession): Promise<BoothPhotoList> {
   let response = await post(phone, await session(), fetchImpl)
   if (response.status === 401) { clearUploadSession(); response = await post(phone, await session(true), fetchImpl) }

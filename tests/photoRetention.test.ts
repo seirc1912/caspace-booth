@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import handler, { isAuthorizedCron } from '../client/api/cron/cleanup-photo-uploads.ts'
-import { BOOTH_RETENTION_HOURS, listExpiredPhotoObjects, PHOTO_RETENTION_DAYS, removePhotoObjects, retentionPrefixes } from '../client/api/_lib/photoRetention.ts'
+import { BOOTH_RETENTION_HOURS, listExpiredPhotoObjects, removePhotoObjects, retentionPrefixes, UPLOAD_RETENTION_HOURS } from '../client/api/_lib/photoRetention.ts'
 
 const now = Date.parse('2026-11-21T00:00:00Z')
 const old = '2026-11-01T00:00:00Z'
-const fresh = '2026-11-20T00:00:00Z' // 1 day old
+const fresh = '2026-11-20T23:00:00Z' // 1 hour old
 
 function fakeStorage(folders: number) {
   const removed: string[][] = []
@@ -26,29 +26,30 @@ function fakeStorage(folders: number) {
 
 test('retention paginates past 1,000 customer folders and includes _thumbs', async () => {
   const { client } = fakeStorage(1_600)
-  const result = await listExpiredPhotoObjects(client, now - PHOTO_RETENTION_DAYS * 86_400_000)
+  const result = await listExpiredPhotoObjects(client, now - UPLOAD_RETENTION_HOURS * 3_600_000)
   assert.equal(result.folders, 1_600)
   assert.deepEqual(result.expired.sort(), ['0900000000/_booth/_thumbs/old-booth-thumb.jpg', '0900000000/_booth/old-booth.jpg', '0900000000/_thumbs/old-thumb.jpg', '0900000000/old.png', '0900001500/late-folder.png'])
 })
 
-test('booth photos expire after 6 hours; frames customers send keep 3 days', async () => {
+test('booth photos and photos customers send both expire after 6 hours', async () => {
   assert.equal(BOOTH_RETENTION_HOURS, 6)
+  assert.equal(UPLOAD_RETENTION_HOURS, 6)
   const at = Date.parse('2026-11-24T12:00:00Z')
   const hoursAgo = (hours: number) => new Date(at - hours * 3_600_000).toISOString()
   const tree: Record<string, Array<{ id: string | null; name: string; created_at: string | null }>> = {
     '': [{ id: null, name: '0947860616', created_at: null }],
-    '0947860616': [{ id: 'a', name: 'frame-7h.png', created_at: hoursAgo(7) }],
+    '0947860616': [{ id: 'a', name: 'frame-7h.png', created_at: hoursAgo(7) }, { id: 'f', name: 'frame-5h.png', created_at: hoursAgo(5) }],
+    '0947860616/_thumbs': [{ id: 'g', name: 'frame-7h-thumb.jpg', created_at: hoursAgo(7) }],
     '0947860616/_booth': [{ id: 'b', name: 'booth-7h.jpg', created_at: hoursAgo(7) }, { id: 'c', name: 'booth-5h.jpg', created_at: hoursAgo(5) }],
     '0947860616/_booth/_thumbs': [{ id: 'd', name: 'booth-7h-thumb.jpg', created_at: hoursAgo(7) }],
     '0947860616/_booth/_previews': [{ id: 'e', name: 'booth-7h-preview.jpg', created_at: hoursAgo(7) }],
   }
   const client = { storage: { from: () => ({ list: async (prefix: string) => ({ error: null, data: tree[prefix] ?? [] }) }) } } as never
-  const { expired } = await listExpiredPhotoObjects(client, at - PHOTO_RETENTION_DAYS * 86_400_000, at - BOOTH_RETENTION_HOURS * 3_600_000)
-  assert.deepEqual(expired.sort(), ['0947860616/_booth/_previews/booth-7h-preview.jpg', '0947860616/_booth/_thumbs/booth-7h-thumb.jpg', '0947860616/_booth/booth-7h.jpg'])
+  const { expired } = await listExpiredPhotoObjects(client, at - UPLOAD_RETENTION_HOURS * 3_600_000, at - BOOTH_RETENTION_HOURS * 3_600_000)
+  assert.deepEqual(expired.sort(), ['0947860616/_booth/_previews/booth-7h-preview.jpg', '0947860616/_booth/_thumbs/booth-7h-thumb.jpg', '0947860616/_booth/booth-7h.jpg', '0947860616/_thumbs/frame-7h-thumb.jpg', '0947860616/frame-7h.png'])
 })
 
-test('retention is 3 days and covers frames, thumbnails, booth photos and booth thumbnails', () => {
-  assert.equal(PHOTO_RETENTION_DAYS, 3)
+test('retention covers frames, thumbnails, booth photos and booth thumbnails', () => {
   assert.deepEqual(retentionPrefixes('0947860616'), ['0947860616', '0947860616/_thumbs', '0947860616/_booth', '0947860616/_booth/_thumbs', '0947860616/_booth/_previews'])
 })
 
