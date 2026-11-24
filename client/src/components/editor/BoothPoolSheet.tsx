@@ -37,12 +37,21 @@ export function BoothPoolSheet({ photos, mode, capacity = MAX_BOOTH_SELECTION, s
   const [notice, setNotice] = useState<string | null>(null)
   const useShareSheet = prefersShareSheet()
   const chosen = selected.map((id) => photos.find((photo) => photo.id === id)).filter((photo): photo is BoothPhoto => Boolean(photo))
+  // iPhone: the share sheet only opens straight from a tap, so fetch originals as soon as a photo is
+  // chosen; by the time the customer taps "Lưu" the files are ready and one tap is enough.
+  const prefetch = (id: string) => {
+    if (!useShareSheet || mode !== 'browse' || readyFiles[id]) return
+    const photo = photos.find((item) => item.id === id)
+    if (photo) void loadOriginal(photo).then((file) => setReadyFiles((current) => current[id] ? current : { ...current, [id]: file })).catch(() => undefined)
+  }
+  const openViewer = (index: number) => { setViewerIndex(index); const photo = photos[index]; if (photo) prefetch(photo.id) }
   const toggle = (id: string) => {
     if (selected.includes(id)) { setSelected(selected.filter((item) => item !== id)); return }
     if (limit === 1) { setSelected([id]); return }
     if (selected.length >= limit) { setNotice(mode === 'browse' ? `Mỗi lần tải tối đa ${MAX_BOOTH_SELECTION} ảnh.` : `Khung này còn ${limit} ô trống.`); return }
     setNotice(null)
     setSelected([...selected, id])
+    prefetch(id)
   }
   /** Android/desktop: direct downloads. iPhone: share sheet, which needs the files first and a fresh tap. */
   const save = async (items: BoothPhoto[]) => {
@@ -56,7 +65,7 @@ export function BoothPoolSheet({ photos, mode, capacity = MAX_BOOTH_SELECTION, s
     } catch { setNotice('Không tải được ảnh. Vui lòng kiểm tra mạng rồi thử lại.') }
     finally { setPreparing(false) }
   }
-  const saveLabel = (items: BoothPhoto[]) => (!useShareSheet ? `Tải ${items.length} ảnh về máy` : preparing ? 'Đang chuẩn bị ảnh…' : items.length && items.every((photo) => readyFiles[photo.id]) ? `Lưu ${items.length} ảnh vào máy` : `Tải ${items.length} ảnh về máy`)
+  const saveLabel = (items: BoothPhoto[]) => (!useShareSheet ? `Tải ${items.length} ảnh về máy` : items.length && items.every((photo) => readyFiles[photo.id]) ? `Lưu ${items.length} ảnh vào máy` : 'Đang chuẩn bị ảnh…')
   const subtitle = mode === 'browse'
     ? `${photos.length} ảnh. Chạm để chọn (tối đa ${MAX_BOOTH_SELECTION}) rồi tải về máy, chạm nút phóng ở góc ảnh để xem lớn. Ảnh được lưu 3 ngày.`
     : limit === 1
@@ -80,10 +89,10 @@ export function BoothPoolSheet({ photos, mode, capacity = MAX_BOOTH_SELECTION, s
           <span aria-hidden="true" className={`absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'cs-led text-white' : 'border-2 border-white bg-black/20'}`}>{isSelected ? order + 1 : null}</span>
           {target ? <span className="cs-mono absolute inset-x-1.5 bottom-1.5 rounded-lg bg-cs-ink/85 px-1 py-1 text-center text-[10px] text-white">{`Hình ${target}`}</span> : null}
         </button>
-        <button aria-label={`Xem lớn ảnh ${index + 1}`} className="absolute bottom-0 right-0 grid size-11 place-items-center" onClick={() => setViewerIndex(index)} type="button"><span className={`grid size-7 place-items-center rounded-full bg-cs-ink/70 text-white ${target ? 'mb-7' : ''}`}><Icon className="size-4" name="expand" /></span></button>
+        <button aria-label={`Xem lớn ảnh ${index + 1}`} className="absolute bottom-0 right-0 grid size-11 place-items-center" onClick={() => openViewer(index)} type="button"><span className={`grid size-7 place-items-center rounded-full bg-cs-ink/70 text-white ${target ? 'mb-7' : ''}`}><Icon className="size-4" name="expand" /></span></button>
       </li>
     })}</ul>
     {notice ? <p className="mt-3 rounded-[14px] border border-cs-alert-error-border bg-cs-alert-error-bg p-2.5 text-center text-sm font-bold text-cs-alert-error-fg" role="alert">{notice}</p> : null}
-    {viewerIndex !== null ? <BoothPhotoViewer downloadLabel={(photo) => saveLabel([photo]).replace('1 ảnh ', '')} index={viewerIndex} onClose={() => setViewerIndex(null)} onDownload={(photo) => void save([photo])} onIndexChange={setViewerIndex} onToggle={toggle} photos={photos} selectedIds={selected} slotNumbers={mode === 'pick' ? slotNumbers : []} /> : null}
+    {viewerIndex !== null ? <BoothPhotoViewer downloadLabel={(photo) => saveLabel([photo]).replace('1 ảnh ', '')} index={viewerIndex} onClose={() => setViewerIndex(null)} onDownload={(photo) => void save([photo])} onIndexChange={openViewer} onToggle={toggle} photos={photos} selectedIds={selected} slotNumbers={mode === 'pick' ? slotNumbers : []} /> : null}
   </BottomSheet>
 }
