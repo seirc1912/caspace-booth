@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { classifyExport, phoneFromFolderName } from '../booth-agent/src/phoneFolder.ts'
 import { UploadQueue } from '../booth-agent/src/queue.ts'
-import { AUTOMATIC_RESCAN_MS, scanExports } from '../booth-agent/src/scanner.ts'
+import { AUTOMATIC_RESCAN_MS, isOnOrAfterUploadFrom, scanExports, UPLOAD_FROM_MS } from '../booth-agent/src/scanner.ts'
 import { waitUntilStable } from '../booth-agent/src/stableFile.ts'
 import { StateStore } from '../booth-agent/src/stateStore.ts'
 import { renderStatusPage } from '../booth-agent/src/statusServer.ts'
@@ -132,10 +132,10 @@ test('startup scan only covers the last 24 hours; manual resend covers any age',
   put('0947860616/Capture/raw.CR3', 0)
   put('tim/Output/x.jpg', 0)
   put('.tmp.drivedownload/Output/y.jpg', 0)
-  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS, notBeforeMs: 0 })
   assert.deepEqual(recent.jobs.map((item) => path.basename(item.filePath)), ['new.jpg'])
   assert.deepEqual(recent.unrecognized, ['tim'])
-  const manual = await scanExports(root, { onlyFolder: '0947860616' })
+  const manual = await scanExports(root, { onlyFolder: '0947860616', notBeforeMs: 0 })
   assert.deepEqual(manual.jobs.map((item) => path.basename(item.filePath)).sort(), ['new.jpg', 'old.jpg'])
 })
 
@@ -226,6 +226,26 @@ test('30-second rescans skip uploaded exports before the queue and ignore old se
     utimesSync(path.join(root, folder, 'Output', 'x.jpg'), time, time)
     utimesSync(path.join(root, folder, 'Output'), time, time)
   }
-  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS, notBeforeMs: 0 })
   assert.deepEqual(recent.jobs.map((job) => job.phone), ['0912345678'], 'old sessions skipped by Output folder mtime')
+})
+
+test('photos exported before 25/11/2026 (Vietnam time) are never sent, even by manual resend', async () => {
+  assert.equal(new Date(UPLOAD_FROM_MS).toISOString(), '2026-11-24T17:00:00.000Z')
+  const root = mkdtempSync(path.join(tmpdir(), 'pictures-'))
+  const put = (relative: string, atMs: number) => {
+    const file = path.join(root, relative)
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, jpeg)
+    utimesSync(file, atMs / 1000, atMs / 1000)
+    return file
+  }
+  const before = put('0947860616/Output/before.jpg', UPLOAD_FROM_MS - 60_000)
+  const after = put('0947860616/Output/after.jpg', UPLOAD_FROM_MS + 60_000)
+  const manual = await scanExports(root, { onlyFolder: '0947860616' })
+  assert.deepEqual(manual.jobs.map((item) => path.basename(item.filePath)), ['after.jpg'])
+  const startup = await scanExports(root, { sinceMs: 0 })
+  assert.deepEqual(startup.jobs.map((item) => path.basename(item.filePath)), ['after.jpg'])
+  assert.equal(await isOnOrAfterUploadFrom(before), false)
+  assert.equal(await isOnOrAfterUploadFrom(after), true)
 })

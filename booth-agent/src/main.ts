@@ -5,7 +5,7 @@ import { loadConfig } from './config.ts'
 import { notifyOnce } from './notify.ts'
 import { classifyExport } from './phoneFolder.ts'
 import { UploadQueue } from './queue.ts'
-import { AUTOMATIC_RESCAN_MS, PERIODIC_RESCAN_MS, pendingJobs, scanExports } from './scanner.ts'
+import { AUTOMATIC_RESCAN_MS, isOnOrAfterUploadFrom, PERIODIC_RESCAN_MS, pendingJobs, scanExports } from './scanner.ts'
 import { StateStore } from './stateStore.ts'
 import { startStatusServer } from './statusServer.ts'
 import { makePreview, makeThumbnail } from './thumbnail.ts'
@@ -42,9 +42,10 @@ function reportUnrecognized(folder: string) {
   notifyOnce(`folder:${folder}`, 'Thư mục sai tên', `"${folder}" không có số điện thoại 10 số nên ảnh chưa được gửi. Hãy đổi tên thư mục.`)
 }
 
-function handle(filePath: string) {
+async function handle(filePath: string) {
   const classified = classifyExport(filePath, config.watchRoot)
   if (!classified) return
+  if (!(await isOnOrAfterUploadFrom(filePath))) return
   if (classified.kind === 'unrecognized') { reportUnrecognized(classified.sessionFolder); return }
   unrecognized.delete(classified.sessionFolder)
   queue.enqueue({ filePath, phone: classified.phone, sessionFolder: classified.sessionFolder })
@@ -53,7 +54,7 @@ function handle(filePath: string) {
 async function resend(folder: string) {
   if (!folder || folder.includes('/') || folder.includes('\\') || folder.startsWith('.')) return 'Tên thư mục không hợp lệ.'
   const result = await scanExports(config.watchRoot, { onlyFolder: folder })
-  if (!result.jobs.length) return result.unrecognized.length ? `Thư mục "${folder}" không có số điện thoại hợp lệ.` : `Không tìm thấy ảnh trong ${folder}\\Output.`
+  if (!result.jobs.length) return result.unrecognized.length ? `Thư mục "${folder}" không có số điện thoại hợp lệ.` : `Không tìm thấy ảnh từ 25/11/2026 trở đi trong ${folder}\\Output.`
   state.forgetFolder(path.join(config.watchRoot, folder) + path.sep)
   result.jobs.forEach((job) => queue.enqueue(job))
   return `Đang gửi lại ${result.jobs.length} ảnh của ${folder}.`
@@ -74,8 +75,8 @@ setInterval(() => {
 }, PERIODIC_RESCAN_MS)
 
 chokidar.watch(config.watchRoot, { ignoreInitial: true, depth: 2, ignored: (file) => path.basename(file).startsWith('.') })
-  .on('add', handle)
-  .on('change', handle)
+  .on('add', (file) => { void handle(file) })
+  .on('change', (file) => { void handle(file) })
   .on('addDir', (dir) => {
     // A renamed folder ("tim" → "0947860616 tim") shows up as a new directory: rescan it.
     const relative = path.relative(config.watchRoot, dir).split(/[\\/]/)
