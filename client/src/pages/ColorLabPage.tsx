@@ -5,6 +5,7 @@ import { BarHint, BottomBar } from '../components/chrome/BottomBar'
 import { Button } from '../components/chrome/Button'
 import { PageShell } from '../components/layout/PageShell'
 import { Icon } from '../components/ui/Icon'
+import { CloudPhotoSheet, type CloudPhotos } from '../components/colorLab/CloudPhotoSheet'
 import { canvasToBlob, deliverColorLabImage, renderColorLabImage } from '../features/colorLab/export'
 import { colorLabPresets, type ColorLabPresetId } from '../features/colorLab/presets'
 import { requireSafeDimensions } from '../features/colorLab/dimensions'
@@ -86,6 +87,8 @@ export function ColorLabPage() {
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [thumbnails, setThumbnails] = useState<Partial<Record<ColorLabPresetId, string>>>({})
+  const [cloudOpen, setCloudOpen] = useState(false)
+  const [cloud, setCloud] = useState<CloudPhotos | null>(null)
 
   const choosePhoto = async (file?: File) => {
     if (!file) return
@@ -171,14 +174,16 @@ export function ColorLabPage() {
 
   const currentPreset = colorLabPresets.find((preset) => preset.id === presetId) ?? colorLabPresets[0]!
   const openPicker = () => inputRef.current?.click()
+  // Booth photos and photos sent to the shop (Supabase, 6 hours), or a photo from this phone.
+  const cloudSheet = cloudOpen ? <CloudPhotoSheet initial={cloud} onClose={() => setCloudOpen(false)} onListed={setCloud} onPicked={(file) => { setCloudOpen(false); void choosePhoto(file) }} onUsePhone={() => { setCloudOpen(false); openPicker() }} /> : null
   const fileInput = <input accept="image/*" aria-label="Chọn ảnh để chỉnh màu" className="sr-only" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; void choosePhoto(file) }} ref={inputRef} type="file" />
   const errorAlert = error ? <div className="mt-4"><Alert kind="error"><span className="flex items-start justify-between gap-2"><span>{error}</span><button className="-my-2 min-h-11 shrink-0 px-1 font-bold underline" onClick={() => setError(null)} type="button">Đóng</button></span></Alert></div> : null
 
-  if (!photo) return <PageShell bottomBar={<BottomBar><Button className="w-full" icon={<Icon name="image" />} loading={processing} onClick={openPicker}>{processing ? 'Đang mở ảnh…' : 'Chọn ảnh để chỉnh'}</Button><BarHint><span className="inline-flex items-center gap-1.5"><Icon className="size-4" name="lock" />Ảnh ở lại trên máy bạn, không tải lên</span></BarHint></BottomBar>}>
+  if (!photo) return <PageShell bottomBar={<BottomBar><div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)] gap-2.5"><Button disabled={processing} icon={<Icon className="size-[18px]" name="mobile" />} onClick={openPicker} variant="chrome">Từ điện thoại</Button><Button icon={<Icon name="camera" />} loading={processing} onClick={() => setCloudOpen(true)}>{processing ? 'Đang mở ảnh…' : 'Ảnh phòng chụp'}</Button></div><BarHint><span className="inline-flex items-center gap-1.5"><Icon className="size-4" name="lock" />Ảnh được chỉnh ngay trên máy bạn</span></BarHint></BottomBar>}>
     <AppHeader variant="sub" />
     <p className="cs-mono mt-6 text-[11px] text-cs-red-text">Cá Space giới thiệu</p>
     <h1 className="mt-1.5 text-[30px] font-black leading-tight tracking-[-0.035em]">Cá Color Lab</h1>
-    <p className="mt-2 text-[15px] leading-normal text-cs-ink-2">Chỉnh màu kiểu film cho ảnh của bạn. Ảnh xử lý ngay trên máy, không tải lên.</p>
+    <p className="mt-2 text-[15px] leading-normal text-cs-ink-2">Chỉnh màu kiểu film cho ảnh phòng chụp hoặc ảnh trong điện thoại của bạn. Ảnh được chỉnh ngay trên máy.</p>
     {errorAlert}
     <section aria-label="Ví dụ trước và sau" className="cs-lcd mt-5 rounded-[28px] p-3.5">
       <SampleCompare />
@@ -186,9 +191,10 @@ export function ColorLabPage() {
       <ul className="mt-2 flex flex-wrap gap-2">{colorLabPresets.filter((preset) => preset.id !== 'original').map((preset) => <li className="rounded-full border border-white/25 px-3 py-1.5 text-[13px] font-semibold" key={preset.id}>{preset.name}</li>)}</ul>
     </section>
     {fileInput}
+    {cloudSheet}
   </PageShell>
 
-  return <PageShell bottomBar={<BottomBar><div className="grid grid-cols-[minmax(0,0.75fr)_minmax(0,1.6fr)] gap-2.5"><Button disabled={exporting} loading={processing} onClick={openPicker} variant="chrome">Ảnh khác</Button><Button icon={<Icon name="download" />} loading={exporting} onClick={downloadHd}>{exporting ? 'Đang xử lý ảnh HD…' : 'Lưu ảnh về máy'}</Button></div></BottomBar>}>
+  return <PageShell bottomBar={<BottomBar><div className="grid grid-cols-[minmax(0,0.75fr)_minmax(0,1.6fr)] gap-2.5"><Button disabled={exporting} loading={processing} onClick={() => setCloudOpen(true)} variant="chrome">Ảnh khác</Button><Button icon={<Icon name="download" />} loading={exporting} onClick={downloadHd}>{exporting ? 'Đang xử lý ảnh HD…' : 'Lưu ảnh về máy'}</Button></div></BottomBar>}>
     <AppHeader variant="sub" />
     <div className="mt-5 flex items-end justify-between gap-3"><h1 className="text-[22px] font-black tracking-[-0.03em]">Cá Color Lab</h1><span className="cs-mono min-w-0 truncate pb-1 text-[11px] text-cs-ink-2">{photo.fileName}</span></div>
     {errorAlert}
@@ -211,5 +217,6 @@ export function ColorLabPage() {
       </div>
     </section>
     {fileInput}
+    {cloudSheet}
   </PageShell>
 }
