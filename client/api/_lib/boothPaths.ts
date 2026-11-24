@@ -106,12 +106,13 @@ export function verifyBoothCompletionToken(secret: string, boothId: string, comp
   return expected.length === supplied.length && timingSafeEqual(expected, supplied)
 }
 
-type BoothStorage = Pick<SupabasePhotoUploadService, 'createSignedUploadAt' | 'objectExists' | 'objectSha256'>
+type BoothStorage = Pick<SupabasePhotoUploadService, 'createSignedUploadAt' | 'objectExists' | 'objectHead'>
 
 /**
- * Chooses where a booth file goes. Originals: same content at the plain path →
- * already uploaded; different content → `~sha8` sibling (never overwrite, never lose
- * a photo). Thumbnails/previews: any existing copy is good enough.
+ * Chooses where a booth file goes. Originals: same name and same size at the plain path →
+ * already uploaded; a different size → `__sha8` sibling (never overwrite, never lose a photo).
+ * Compared by size (HEAD) rather than by downloading the file, to keep Supabase Egress low.
+ * Thumbnails/previews: any existing copy is good enough.
  */
 export async function prepareBoothUpload(storage: BoothStorage, metadata: BoothUploadMetadata) {
   if (metadata.variant !== 'original') {
@@ -121,9 +122,9 @@ export async function prepareBoothUpload(storage: BoothStorage, metadata: BoothU
   }
   const plain = boothOriginalPath(metadata.phone, metadata.filename)
   for (const objectPath of [plain, withContentSuffix(plain, metadata.sha256)]) {
-    const existing = await storage.objectSha256(objectPath)
+    const existing = await storage.objectHead(objectPath)
     if (existing === null) return storage.createSignedUploadAt(objectPath, metadata)
-    if (existing === metadata.sha256) return { alreadyUploaded: true as const, objectPath }
+    if (existing.size === metadata.size) return { alreadyUploaded: true as const, objectPath }
   }
   throw new UploadApiError(409, 'Ảnh trùng tên đã tồn tại với nội dung khác.')
 }

@@ -4,7 +4,9 @@ import { classifyExport } from './phoneFolder.ts'
 import { StateStore } from './stateStore.ts'
 import type { QueueJob } from './queue.ts'
 
-export const AUTOMATIC_RESCAN_MS = 24 * 60 * 60_000
+// Matches the 12-hour Supabase retention: older photos are already deleted online, so a
+// reinstall must not send them again (staff use "Gửi lại thư mục" when a customer needs one).
+export const AUTOMATIC_RESCAN_MS = 12 * 60 * 60_000
 /** Safety net for missed file events (network/shared folders, sleep): look again every 30 s. */
 export const PERIODIC_RESCAN_MS = 30_000
 
@@ -22,7 +24,7 @@ async function outputFiles(root: string, sessionFolder: string, sinceMs?: number
 }
 
 /**
- * Startup scan: Output JPEGs modified since `sinceMs` (24 h by default, so reinstalling
+ * Startup scan: Output JPEGs modified since `sinceMs` (12 h by default, so reinstalling
  * the agent never reopens old customers' viewing window). `onlyFolder` = manual resend.
  */
 export async function scanExports(root: string, options: { sinceMs?: number; onlyFolder?: string } = {}): Promise<ScanResult> {

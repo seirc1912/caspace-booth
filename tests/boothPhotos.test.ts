@@ -162,33 +162,27 @@ test('saving several photos uses one share sheet, or one download per file when 
   assert.equal(await deliverImageFiles(files, { shareSheet: true, navigator: { canShare: () => true, share: async () => { throw Object.assign(new Error('x'), { name: 'AbortError' }) } }, download: () => assert.fail() }), 'cancelled')
 })
 
-test('"Ảnh phòng chụp" sheet: ⤢ opens the full-screen viewer; browse mode saves up to 20 photos', async () => {
+test('"Ảnh phòng chụp" sheet: browse mode is view-only (no saving to the phone); pick mode keeps ⤢ and selection', async () => {
   const { MAX_BOOTH_SELECTION } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
   assert.equal(MAX_BOOTH_SELECTION, 20)
   const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
   assert.match(sheet, /aria-label=\{`Xem lớn ảnh \$\{index \+ 1\}`\}/)
-  assert.match(sheet, /const limit = mode === 'browse' \? MAX_BOOTH_SELECTION : capacity/)
-  assert.match(sheet, /Mỗi lần tải tối đa \$\{MAX_BOOTH_SELECTION\} ảnh\./)
-  assert.match(sheet, /if \(!useShareSheet\) \{ await downloadBoothPhotos\(items\); return \}/)
+  assert.match(sheet, /onClick=\{\(\) => browse \? setViewerIndex\(index\) : toggle\(photo\.id\)\}/)
+  assert.match(sheet, /onToggle=\{browse \? undefined : toggle\}/)
+  assert.match(sheet, /Ảnh phòng chụp được lưu 12 giờ; sau đó vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive\./)
+  assert.doesNotMatch(sheet, /downloadBoothPhotos|deliverImageFiles|loadOriginal|Tải .* ảnh về máy/)
+  const client = readFileSync('client/src/features/boothPhotos/boothPhotosClient.ts', 'utf8')
+  assert.doesNotMatch(client, /downloadBoothPhotos|boothDownloadUrl/)
   const viewer = readFileSync('client/src/components/booth/BoothPhotoViewer.tsx', 'utf8')
+  assert.doesNotMatch(viewer, /onDownload|name="download"/)
+  assert.match(viewer, /\{onToggle \? </)
   assert.match(viewer, /aria-label="Ảnh trước"/)
   assert.match(viewer, /aria-label="Ảnh sau"/)
   assert.match(viewer, /Math\.abs\(dx\) > 60 && Math\.abs\(dx\) > 2 \* Math\.abs\(dy\)/, 'swipe left/right: clearly horizontal flicks only')
   assert.match(viewer, /event\.touches\.length > 1\) touchStart\.current = null/, 'a pinch-zoom never changes photo')
 })
-test('Android/desktop download originals directly; only iPhone/iPad use the share sheet', async () => {
-  const { boothDownloadUrl, downloadBoothPhotos, prefersShareSheet } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
-  assert.equal(prefersShareSheet('Mozilla/5.0 (Linux; Android 14; 23078PND5G) Chrome/131 Mobile', 5), false)
-  assert.equal(prefersShareSheet('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X)', 5), true)
-  assert.equal(prefersShareSheet('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari', 5), true, 'iPadOS reports Macintosh')
-  assert.equal(prefersShareSheet('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome', 0), false)
-  assert.equal(boothDownloadUrl({ originalUrl: 'https://x.supabase.co/storage/v1/object/sign/b/p/a.jpg?token=t', name: 'IMG 1.jpg' }), 'https://x.supabase.co/storage/v1/object/sign/b/p/a.jpg?token=t&download=IMG+1.jpg')
-  const clicked: string[] = []
-  await downloadBoothPhotos([{ originalUrl: 'https://s/o/a?token=1', name: 'a.jpg' }, { originalUrl: 'https://s/o/b?token=2', name: 'b.jpg' }], 0, (href) => clicked.push(href))
-  assert.deepEqual(clicked, ['https://s/o/a?token=1&download=a.jpg', 'https://s/o/b?token=2&download=b.jpg'])
-})
 
-test('no viewing window: photos stay visible until the 3-day cleanup deletes them', async () => {
+test('no viewing window: photos stay visible until the cleanup deletes them', async () => {
   assert.deepEqual(await listBoothPhotos(fakeClient([]).client, '0947860616'), { status: 'unavailable', photos: [] })
   const twoDaysOld = await listBoothPhotos(fakeClient([photo('a.jpg', 48 * HOUR)]).client, '0947860616')
   assert.equal(twoDaysOld.status, 'ok')
@@ -206,4 +200,12 @@ test('booth photos without a preview fall back to null; the viewer shows the pre
   assert.equal(result.photos[0]!.originalUrl, 'https://signed/0947860616/_booth/a.jpg')
   const viewer = readFileSync(new URL('../client/src/components/booth/BoothPhotoViewer.tsx', import.meta.url), 'utf8')
   assert.match(viewer, /photo\.previewUrl \|\| photo\.originalUrl/)
+})
+
+test('Android/desktop download directly; only iPhone/iPad use the share sheet', async () => {
+  const { prefersShareSheet } = await import('../client/src/features/orders/services/shareSheet.ts')
+  assert.equal(prefersShareSheet('Mozilla/5.0 (Linux; Android 14; 23078PND5G) Chrome/131 Mobile', 5), false)
+  assert.equal(prefersShareSheet('Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X)', 5), true)
+  assert.equal(prefersShareSheet('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari', 5), true, 'iPadOS reports Macintosh')
+  assert.equal(prefersShareSheet('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome', 0), false)
 })

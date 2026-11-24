@@ -61,12 +61,16 @@ function storage(objects: Record<string, Buffer>) {
       }),
     },
   }
-  const fetchImpl = (async (url: string) => {
+  const methods: string[] = []
+  const fetchImpl = (async (url: string, init?: RequestInit) => {
+    methods.push(init?.method ?? 'GET')
     const path = decodeURIComponent(String(url).split('/customer-photo-uploads/')[1] ?? '')
     const body = objects[path]
-    return body ? new Response(body, { status: 200, headers: { 'Content-Type': 'image/jpeg' } }) : new Response('missing', { status: 404 })
+    if (!body) return new Response(null, { status: 404 })
+    const headers = { 'Content-Type': 'image/jpeg', 'Content-Length': String(body.length) }
+    return init?.method === 'HEAD' ? new Response(null, { status: 200, headers }) : new Response(body, { status: 200, headers })
   }) as typeof fetch
-  return { signed, service: new SupabasePhotoUploadService(environment, client as never, fetchImpl) }
+  return { signed, methods, service: new SupabasePhotoUploadService(environment, client as never, fetchImpl) }
 }
 
 test('a new booth photo gets a signed upload at its plain path', async () => {
@@ -81,6 +85,7 @@ test('re-sending the same photo is idempotent; a different photo with the same n
   const same = storage({ '0947860616/_booth/0947860616-103333.jpg': jpeg })
   assert.deepEqual(await prepareBoothUpload(same.service, original()), { alreadyUploaded: true, objectPath: '0947860616/_booth/0947860616-103333.jpg' })
   assert.equal(same.signed.length, 0)
+  assert.deepEqual(same.methods, ['HEAD'], 'compared by size: the stored photo is never downloaded (no Egress)')
   const other = Buffer.concat([jpeg, Buffer.from([9])])
   const clash = storage({ '0947860616/_booth/0947860616-103333.jpg': jpeg })
   const result = await prepareBoothUpload(clash.service, original({ size: other.length, sha256: sha(other) }))
@@ -130,4 +135,13 @@ test('booth previews: 2 MB limit, stored under _previews, tied to their original
   assert.throws(() => parseBoothUploadMetadata({ ...original(), variant: 'preview', size: 300_000, originalPath: '0999999999/_booth/0947860616-103333.jpg' }))
   const { service } = storage({ '0947860616/_booth/_previews/0947860616-103333-preview.jpg': jpeg })
   assert.deepEqual(await prepareBoothUpload(service, preview), { alreadyUploaded: true, objectPath: '0947860616/_booth/_previews/0947860616-103333-preview.jpg' })
+})
+
+test('booth completion checks size and type with HEAD only (no download, no Egress)', async () => {
+  const ok = storage({ '0947860616/_booth/0947860616-103333.jpg': jpeg })
+  assert.deepEqual(await ok.service.verifyBoothObjectAt({ size: jpeg.length, mimeType: 'image/jpeg' }, '0947860616/_booth/0947860616-103333.jpg'), { objectPath: '0947860616/_booth/0947860616-103333.jpg', size: jpeg.length })
+  assert.deepEqual(ok.methods, ['HEAD'])
+  await assert.rejects(() => ok.service.verifyBoothObjectAt({ size: jpeg.length + 1, mimeType: 'image/jpeg' }, '0947860616/_booth/0947860616-103333.jpg'), /Dung lượng ảnh đã nhận không khớp/)
+  await assert.rejects(() => ok.service.verifyBoothObjectAt({ size: jpeg.length, mimeType: 'image/jpeg' }, '0947860616/_booth/missing.jpg'), UploadApiError)
+  assert.match(readFileSync('client/api/booth/complete.ts', 'utf8'), /\.verifyBoothObjectAt\(completion, completion\.objectPath\)/)
 })

@@ -68,7 +68,7 @@ async function rescanRecent() {
 }
 
 const initialPending = await rescanRecent()
-log(`[start] ${config.boothId} → ${config.apiBaseUrl}; theo dõi ${config.watchRoot}; ${initialPending} ảnh trong 24 giờ chưa gửi`)
+log(`[start] ${config.boothId} → ${config.apiBaseUrl}; theo dõi ${config.watchRoot}; ${initialPending} ảnh trong 12 giờ chưa gửi`)
 setInterval(() => {
   void rescanRecent().then((count) => { if (count) log(`[rescan] tìm thấy ${count} ảnh chưa gửi`) }).catch((error) => log(`[rescan-error] ${error instanceof Error ? error.message : String(error)}`))
 }, PERIODIC_RESCAN_MS)

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import handler, { isAuthorizedCron } from '../client/api/cron/cleanup-photo-uploads.ts'
-import { listExpiredPhotoObjects, PHOTO_RETENTION_DAYS, removePhotoObjects, retentionPrefixes } from '../client/api/_lib/photoRetention.ts'
+import { BOOTH_RETENTION_HOURS, listExpiredPhotoObjects, PHOTO_RETENTION_DAYS, removePhotoObjects, retentionPrefixes } from '../client/api/_lib/photoRetention.ts'
 
 const now = Date.parse('2026-11-21T00:00:00Z')
 const old = '2026-11-01T00:00:00Z'
@@ -29,6 +29,22 @@ test('retention paginates past 1,000 customer folders and includes _thumbs', asy
   const result = await listExpiredPhotoObjects(client, now - PHOTO_RETENTION_DAYS * 86_400_000)
   assert.equal(result.folders, 1_600)
   assert.deepEqual(result.expired.sort(), ['0900000000/_booth/_thumbs/old-booth-thumb.jpg', '0900000000/_booth/old-booth.jpg', '0900000000/_thumbs/old-thumb.jpg', '0900000000/old.png', '0900001500/late-folder.png'])
+})
+
+test('booth photos expire after 12 hours; frames customers send keep 3 days', async () => {
+  assert.equal(BOOTH_RETENTION_HOURS, 12)
+  const at = Date.parse('2026-11-24T12:00:00Z')
+  const hoursAgo = (hours: number) => new Date(at - hours * 3_600_000).toISOString()
+  const tree: Record<string, Array<{ id: string | null; name: string; created_at: string | null }>> = {
+    '': [{ id: null, name: '0947860616', created_at: null }],
+    '0947860616': [{ id: 'a', name: 'frame-13h.png', created_at: hoursAgo(13) }],
+    '0947860616/_booth': [{ id: 'b', name: 'booth-13h.jpg', created_at: hoursAgo(13) }, { id: 'c', name: 'booth-11h.jpg', created_at: hoursAgo(11) }],
+    '0947860616/_booth/_thumbs': [{ id: 'd', name: 'booth-13h-thumb.jpg', created_at: hoursAgo(13) }],
+    '0947860616/_booth/_previews': [{ id: 'e', name: 'booth-13h-preview.jpg', created_at: hoursAgo(13) }],
+  }
+  const client = { storage: { from: () => ({ list: async (prefix: string) => ({ error: null, data: tree[prefix] ?? [] }) }) } } as never
+  const { expired } = await listExpiredPhotoObjects(client, at - PHOTO_RETENTION_DAYS * 86_400_000, at - BOOTH_RETENTION_HOURS * 3_600_000)
+  assert.deepEqual(expired.sort(), ['0947860616/_booth/_previews/booth-13h-preview.jpg', '0947860616/_booth/_thumbs/booth-13h-thumb.jpg', '0947860616/_booth/booth-13h.jpg'])
 })
 
 test('retention is 3 days and covers frames, thumbnails, booth photos and booth thumbnails', () => {
@@ -64,5 +80,5 @@ test('cron is a dry run unless PHOTO_UPLOAD_CLEANUP_ENABLED=true and never logs 
   const source = readFileSync('client/api/cron/cleanup-photo-uploads.ts', 'utf8')
   assert.match(source, /process\.env\.PHOTO_UPLOAD_CLEANUP_ENABLED === 'true'/)
   assert.doesNotMatch(source, /console\.\w+\([^)]*expired\)/)
-  assert.match(readFileSync('client/vercel.json', 'utf8'), /"schedule": "0 20 \* \* \*"/)
+  assert.match(readFileSync('client/vercel.json', 'utf8'), /"schedule": "0 \* \* \* \*"/, 'hourly, so booth photos go within 12–13 hours')
 })

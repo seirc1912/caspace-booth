@@ -2,8 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { BOOTH_FOLDER, BOOTH_PREVIEWS, BOOTH_THUMBS } from './boothPaths.js'
 import { customerPhotoBucket, THUMBNAIL_FOLDER } from './supabaseStorage.js'
 
-// Owner decision (23/11/2026): booth originals AND frames customers send are kept 3 days.
+// Owner decisions: frames customers send (/upload-anh) are kept 3 days (23/11/2026); booth
+// photos and their thumbnails/previews only 12 hours (24/11/2026), to keep Storage small.
+// Only Supabase copies are deleted: the booth PCs keep their folders (staff resend if needed).
 export const PHOTO_RETENTION_DAYS = 3
+export const BOOTH_RETENTION_HOURS = 12
 const PAGE = 1_000
 const LIST_CONCURRENCY = 8
 
@@ -24,12 +27,14 @@ export function retentionPrefixes(folder: string) {
   return [folder, `${folder}/${THUMBNAIL_FOLDER}`, `${folder}/${BOOTH_FOLDER}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_THUMBS}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_PREVIEWS}`]
 }
 
+const isBoothPrefix = (prefix: string) => prefix.split('/')[1] === BOOTH_FOLDER
+
 /**
- * Objects older than the cutoff in every customer folder: frames, their `_thumbs/`,
- * booth photos `_booth/`, booth thumbnails and `_access.json`. Age = last write
- * (`updated_at`), so a staff reopen (upsert) is not deleted the next night.
+ * Expired objects in every customer folder: frames and their `_thumbs/` older than `cutoff`;
+ * booth photos `_booth/`, booth thumbnails and previews older than `boothCutoff`.
+ * Age = last write (`updated_at`), so a re-sent photo starts its window again.
  */
-export async function listExpiredPhotoObjects(client: SupabaseClient, cutoff: number) {
+export async function listExpiredPhotoObjects(client: SupabaseClient, cutoff: number, boothCutoff = cutoff) {
   const expired: string[] = []
   const folders = (await listAll(client, '', 'name')).filter((entry) => entry.id === null).map((entry) => entry.name)
   for (let index = 0; index < folders.length; index += LIST_CONCURRENCY) {
@@ -38,7 +43,8 @@ export async function listExpiredPhotoObjects(client: SupabaseClient, cutoff: nu
     listings.forEach((objects, position) => {
       for (const object of objects) {
         const writtenAt = Date.parse(object.updated_at ?? object.created_at ?? '')
-        if (object.id && Number.isFinite(writtenAt) && writtenAt < cutoff) expired.push(`${prefixes[position]}/${object.name}`)
+        const limit = isBoothPrefix(prefixes[position]!) ? boothCutoff : cutoff
+        if (object.id && Number.isFinite(writtenAt) && writtenAt < limit) expired.push(`${prefixes[position]}/${object.name}`)
       }
     })
   }

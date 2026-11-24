@@ -228,7 +228,7 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
       {onDownload ? <button aria-busy={downloading || undefined} className="cs-btn-chrome cs-press flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1.5 py-1.5 text-[12px] font-bold leading-tight disabled:opacity-40" disabled={!canSave || downloading} onClick={onDownload} type="button">{downloading ? <Spinner /> : <Icon className="size-[18px] shrink-0" name="download" />}<span>{downloading ? 'Đang lưu…' : 'Lưu về máy'}</span></button> : null}
     </div>
 
-    {poolRequest ? <BoothPoolSheet loadOriginal={loadBoothOriginal ?? (() => Promise.reject(new Error('unavailable')))} mode="pick" capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(ids) => {
+    {poolRequest ? <BoothPoolSheet mode="pick" capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(ids) => {
       const request = poolRequest
       setPoolRequest(null)
       const chosen = ids.map((id) => boothPhotos.find((photo) => photo.id === id)).filter((photo): photo is BoothPhoto => Boolean(photo))
@@ -242,7 +242,7 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
       if (request.kind === 'slot') openPhotoPicker(request.target.slotIndex, true)
       else openFramePhotoPicker(true)
     }} photos={boothPhotos} /> : null}
-    {browseBooth ? <BoothPoolSheet loadOriginal={loadBoothOriginal ?? (() => Promise.reject(new Error('unavailable')))} mode="browse" onClose={() => setBrowseBooth(false)} photos={boothPhotos} /> : null}
+    {browseBooth ? <BoothPoolSheet mode="browse" onClose={() => setBrowseBooth(false)} photos={boothPhotos} /> : null}
     {framesOpen && onSelectFrame ? <FrameSwitcherSheet currentIndex={frameIndex} frames={frames} onClose={() => setFramesOpen(false)} onSelect={(index) => { setFramesOpen(false); setCrop(null); if (index !== frameIndex) onSelectFrame(index) }} /> : null}
     {poolProgress ? <div className="cs-lcd pointer-events-none fixed inset-x-4 top-[max(16px,env(safe-area-inset-top))] z-[60] mx-auto flex max-w-xs items-center justify-center gap-2 rounded-full px-4 py-2.5 text-[13px] font-bold" role="status"><Spinner className="size-4" />{`Đang tải ảnh phòng chụp ${poolProgress.done}/${poolProgress.total}…`}</div> : null}
     {saveConfirmation ? <div className="fixed inset-x-4 top-[max(16px,env(safe-area-inset-top))] z-[70] mx-auto max-w-sm rounded-[16px] border border-cs-alert-success-border bg-cs-alert-success-bg px-4 py-3 text-center text-sm font-bold text-cs-alert-success-fg shadow-2xl" role="status">{saveConfirmation}</div> : null}
