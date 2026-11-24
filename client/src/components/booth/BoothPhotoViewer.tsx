@@ -32,6 +32,16 @@ export function BoothPhotoViewer({ photos, index, selectedIds, slotNumbers = [],
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
   })
+  // Once the current photo is sharp, warm the browser cache with the previews of the photos
+  // just before and after it, so "tới / lui" is instant. Previews only (~400 KB): a photo without
+  // one is not preloaded, to spare the customer 6 MB of mobile data per photo.
+  const currentLarge = photo ? photo.previewUrl || photo.originalUrl : null
+  const currentReady = loadedUrl !== null && loadedUrl === currentLarge
+  useEffect(() => {
+    if (!currentReady) return
+    // Not cancelled on navigation: the photo the customer moves to is usually the one being fetched.
+    for (const item of [photos[index + 1], photos[index - 1]]) if (item?.previewUrl) { const image = new Image(); image.decoding = 'async'; image.src = item.previewUrl }
+  }, [currentReady, index, photos])
   if (!photo) return null
   const order = selectedIds.indexOf(photo.id)
   const selected = order >= 0
