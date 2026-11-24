@@ -47,6 +47,8 @@ const roomPayload = (room: Room) => ({
   enabled: room.isActive, published: room.published, display_order: room.sortOrder,
 })
 
+/** Some old frames saved a temporary `blob:` link as their thumbnail; it never loads on another device. */
+export const usableImageUrl = (url: string | null | undefined) => typeof url === 'string' && /^(https?:\/\/|\/(?!@fs\/))/i.test(url) ? url : null
 const isViteFilesystemAsset = (url: string | null | undefined) => typeof url === 'string' && url.startsWith('/@fs/')
 
 const toAdminTemplate = (row: TemplateRow): AdminTemplateRecord => {
@@ -140,6 +142,7 @@ async function dataUrlToBlob(value: string) {
 const assetExtension = (mime: string) => mime === 'image/svg+xml' ? 'svg' : mime.split('/')[1]?.replace('jpeg', 'jpg') ?? 'bin'
 
 async function uploadDataUrl(templateId: string, field: string, value: string) {
+  if (value.startsWith('blob:')) throw new Error(`The ${field} image is a temporary link that was never uploaded. Upload the ${field} image again, then save.`)
   if (!dataUrlPattern.test(value)) return value
   const blob = await dataUrlToBlob(value)
   const path = `${templateId}/${field}-${crypto.randomUUID()}.${assetExtension(blob.type)}`
@@ -188,7 +191,7 @@ export function loadPublishedTemplateSummaries(): Promise<CustomerTemplateSummar
   publishedTemplateSummariesRequest ??= (async () => {
     const { data, error } = await supabase.rpc('published_templates_summary')
     return unwrap(data as PublishedTemplateSummaryRow[] | null, error).map((row) => ({
-      id: row.id, roomId: row.room_id, name: row.name, thumbnailUrl: row.thumbnail,
+      id: row.id, roomId: row.room_id, name: row.name, thumbnailUrl: usableImageUrl(row.thumbnail),
       printSize: row.print_size ?? '', slotCount: row.slot_count ?? 0, displayOrder: row.display_order,
     }))
   })().catch((reason: unknown) => {
