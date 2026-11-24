@@ -25,7 +25,7 @@ ${message ? `<p class="card">${escape(message)}</p>` : ''}
 <div class="card ${status.lastError ? 'warn' : ''}">Mạng / máy chủ: ${status.lastError ? `lỗi gần nhất — ${escape(status.lastError)} (đang tự thử lại)` : 'bình thường'}</div>
 <div class="card"><b>Thư mục sai tên (không gửi)</b> — đổi tên để bắt đầu bằng số điện thoại 10 số, app tự gửi lại:${list(status.unrecognized)}</div>
 <div class="card"><b>Ảnh gửi thất bại</b>${list(status.failures.map((item) => `${item.file}: ${item.reason}`))}</div>
-<form class="card" method="post" action="/resend"><b>Gửi lại thư mục</b> (dùng khi khách cần ảnh cũ hơn 12 giờ hoặc ảnh đã bị xoá trên hệ thống)<br><br>
+<form class="card" method="post" action="/resend"><b>Gửi lại thư mục</b> (dùng khi khách cần ảnh cũ hơn 6 giờ hoặc ảnh đã bị xoá trên hệ thống)<br><br>
 <input type="hidden" name="token" value="${escape(csrfToken)}"><input name="folder" placeholder="Tên thư mục, ví dụ 0947860616" required> <button>Gửi lại</button></form>
 <p class="muted">Thư mục theo dõi: ${escape(status.watchRoot)} · Máy chủ: ${escape(status.apiBaseUrl)}</p></body></html>`
 }

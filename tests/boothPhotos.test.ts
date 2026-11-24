@@ -169,7 +169,7 @@ test('"Ảnh phòng chụp" sheet: browse mode is view-only (no saving to the ph
   assert.match(sheet, /aria-label=\{`Xem lớn ảnh \$\{index \+ 1\}`\}/)
   assert.match(sheet, /onClick=\{\(\) => browse \? setViewerIndex\(index\) : toggle\(photo\.id\)\}/)
   assert.match(sheet, /onToggle=\{browse \? undefined : toggle\}/)
-  assert.match(sheet, /Ảnh phòng chụp được lưu 12 giờ; sau đó vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive\./)
+  assert.match(sheet, /Ảnh phòng chụp được lưu 6 giờ; sau đó vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive\./)
   assert.doesNotMatch(sheet, /downloadBoothPhotos|deliverImageFiles|loadOriginal|Tải .* ảnh về máy/)
   const client = readFileSync('client/src/features/boothPhotos/boothPhotosClient.ts', 'utf8')
   assert.doesNotMatch(client, /downloadBoothPhotos|boothDownloadUrl/)

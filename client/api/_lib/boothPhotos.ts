@@ -49,7 +49,7 @@ interface PickerCandidate { id: string; name: string; path: string; thumbPath: s
 /**
  * What the customer may pick after entering a room: booth originals (shooting order)
  * followed by photos they sent via /upload-anh. No viewing window: photos stay visible
- * until the hourly cron deletes them (booth photos after 12 hours, uploads after 3 days).
+ * until the hourly cron deletes them (booth photos after 6 hours, uploads after 3 days).
  */
 export async function listPickerCandidates(client: SupabaseClient, phone: string) {
   const [booth, uploads] = await Promise.all([listBoothObjects(client, phone), listCustomerUploads(client, phone)])

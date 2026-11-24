@@ -10,7 +10,7 @@ interface BoothPoolSheetProps {
   /**
    * pick: "Add Image / Add Photos" — choose photos for the frame (capacity, slotNumbers).
    * browse: header "Ảnh phòng chụp" — view only. Owner decision (24/11/2026): customers do not
-   * save booth photos to their phone; after 12 hours staff send a Google Drive link instead.
+   * save booth photos to their phone; after 6 hours staff send a Google Drive link instead.
    */
   mode: 'pick' | 'browse'
   capacity?: number
@@ -40,7 +40,7 @@ export function BoothPoolSheet({ photos, mode, capacity = 1, slotNumbers = [], o
     setSelected([...selected, id])
   }
   const subtitle = browse
-    ? `${photos.length} ảnh. Chạm vào ảnh để xem lớn. Ảnh phòng chụp được lưu 12 giờ; sau đó vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive.`
+    ? `${photos.length} ảnh. Chạm vào ảnh để xem lớn. Ảnh phòng chụp được lưu 6 giờ; sau đó vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive.`
     : limit === 1
       ? (slotNumbers.length ? `Chọn 1 ảnh cho hình ${slotNumbers[0]}.` : 'Chọn 1 ảnh cho khung này.')
       : `Chọn tối đa ${limit} ảnh. Ảnh chọn trước vào hình trước: ${slotNumbers.map((number) => `hình ${number}`).join(', ')}.`

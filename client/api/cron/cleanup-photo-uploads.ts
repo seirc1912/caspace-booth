@@ -6,7 +6,7 @@ import { loadSupabaseStorageEnvironment } from '../_lib/supabaseStorage.js'
 
 export const config = { maxDuration: 300 }
 
-// Hourly Vercel Cron (vercel.json). Deletes booth photos older than 12 hours and
+// Hourly Vercel Cron (vercel.json). Deletes booth photos older than 6 hours and
 // customer frames older than 3 days ONLY when PHOTO_UPLOAD_CLEANUP_ENABLED=true; otherwise it is a dry run that
 // logs counts. Logs never contain phone numbers or object paths.
 export function isAuthorizedCron(authorization: string | undefined, secret: string | undefined) {
