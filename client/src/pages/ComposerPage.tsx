@@ -11,6 +11,7 @@ import { TemplateCanvas } from '../components/editor/TemplateCanvas'
 import { PageShell } from '../components/layout/PageShell'
 import { CropToolbar } from '../components/editor/CropToolbar'
 import { BoothPoolSheet } from '../components/editor/BoothPoolSheet'
+import { frameCode } from '../components/editor/frameCode'
 import { FrameSwitcherSheet, type EditorFrame } from '../components/editor/FrameSwitcherSheet'
 import { roundBackClass } from '../components/chrome/AppHeader'
 import { BottomBar } from '../components/chrome/BottomBar'
@@ -188,7 +189,7 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
   }
   const aspect = `${template.canvas.width} / ${template.canvas.height}`
   const stageLabel = [printSize && /^\s*\d+([.,]\d+)?\s*[x×]\s*\d+([.,]\d+)?\s*(cm|in)?\s*$/i.test(printSize) ? printSize.replace(/\s*[x×]\s*/i, '×') : null, `${template.slots.length} ô`].filter(Boolean).join(' · ')
-  const frameName = frames[frameIndex]?.name ?? template.name
+  const frameName = frames.length ? frameCode(frameIndex) : template.name
   const canSend = Boolean(onOpenSendFrames) && sendableFrameCount > 0
   const canSave = slots.length > 0 && remainingSlotCount === 0
 

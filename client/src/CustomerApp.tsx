@@ -15,6 +15,7 @@ import { prefetchAdjacentTemplateDetails } from './features/templates/templateDe
 import { commitTransitionAfterLoad } from './features/templates/frameSelection'
 import { ComposerPage } from './pages/ComposerPage'
 import { HomePage } from './pages/HomePage'
+import { usableImageUrl } from './services/catalog/SupabaseCatalogService'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { RoomSelectionPage } from './pages/RoomSelectionPage'
 import { SendFramesPage, type SendFrameRow } from './pages/SendFramesPage'
@@ -44,9 +45,14 @@ export function CustomerApp() {
   const boothLoader = useMemo(() => (validPhone ? createBoothPhotoLoader() : null), [validPhone])
   const loadBoothOriginal = (photo: BoothPhoto) => (boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!))
 
+  // Frames whose saved thumbnail is unusable fall back to the frame artwork itself.
+  const missingThumbIds = booth.roomTemplateSummaries.filter((summary) => !summary.thumbnailUrl).map((summary) => summary.id).join(',')
+  const { ensureTemplateDetail } = booth
+  useEffect(() => { if (missingThumbIds) for (const id of missingThumbIds.split(',')) void ensureTemplateDetail(id).catch(() => undefined) }, [missingThumbIds, ensureTemplateDetail])
+  const frameThumb = (summary: { id: string; thumbnailUrl: string | null }) => summary.thumbnailUrl ?? usableImageUrl(booth.roomTemplates.find((item) => item.id === summary.id)?.backgroundUrl)
   const editorFrames: EditorFrame[] = booth.roomTemplateSummaries.map((summary) => {
     const slots = booth.frameSlots[summary.id]
-    return { id: summary.id, name: summary.name, slotCount: slots?.length ?? summary.slotCount, filledCount: slots?.filter(Boolean).length ?? 0, thumbnailUrl: summary.thumbnailUrl }
+    return { id: summary.id, name: summary.name, slotCount: slots?.length ?? summary.slotCount, filledCount: slots?.filter(Boolean).length ?? 0, thumbnailUrl: frameThumb(summary) }
   })
 
   // "Gửi khung cho quán": several finished frames in one tap (signatures stop re-sending unchanged frames).
@@ -60,7 +66,7 @@ export function CustomerApp() {
   const sendRows: SendFrameRow[] = booth.roomTemplateSummaries.map((summary, index) => {
     const slots = booth.frameSlots[summary.id]
     const filled = isFrameFilled(slots)
-    return { templateId: summary.id, frameNumber: index + 1, name: summary.name, thumbnailUrl: summary.thumbnailUrl, slotCount: editorFrames[index]!.slotCount, filledCount: editorFrames[index]!.filledCount, filled, sent: filled && sentForSession[summary.id] === frameSignature(slots!), ...sendStates[summary.id] }
+    return { templateId: summary.id, frameNumber: index + 1, name: summary.name, thumbnailUrl: frameThumb(summary), slotCount: editorFrames[index]!.slotCount, filledCount: editorFrames[index]!.filledCount, filled, sent: filled && sentForSession[summary.id] === frameSignature(slots!), ...sendStates[summary.id] }
   })
   const sendSelectedFrames = async (templateIds: string[]) => {
     if (sending || !validPhone) return
