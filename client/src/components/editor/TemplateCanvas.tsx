@@ -18,13 +18,15 @@ interface TemplateCanvasProps {
   onRemove: (index: number) => void
   onReset?: (index: number) => void
   onBeginCrop?: (index: number) => void
+  /** Lock / unlock a slot from the button on the photo. */
+  onToggleLock?: (index: number) => void
   onDropPhoto?: (index: number, photoId: string) => void
   onImageError?: (message: string) => void
   onTransform: (index: number, transform: Partial<ImageTransform>) => void
   readonly?: boolean
 }
 
-export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cropSlot = null, lockedSlots = [], onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
+export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cropSlot = null, lockedSlots = [], onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onBeginCrop = () => undefined, onToggleLock, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
   return (
     <TemplateSurface
       className="rounded-[6px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.8)]"
@@ -49,6 +51,7 @@ export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cro
                 onDropPhoto={(photoId) => onDropPhoto(index, photoId)}
                 onImageError={onImageError}
                 onReset={() => onReset(index)}
+                onToggleLock={onToggleLock ? () => onToggleLock(index) : undefined}
                 onTransform={(transform) => onTransform(index, transform)}
                 rules={templateSlot.editableRules}
                 slot={slot}

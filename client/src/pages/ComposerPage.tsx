@@ -164,6 +164,13 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
   }
   /** The lock button in the crop bar: keep this framing and stop accidental drags. */
   const finishCrop = () => { if (crop) setLocked(crop.index, true); setCrop(null) }
+  // The 🔒 button on the photo: locking also leaves crop mode; unlocking selects the slot to adjust it.
+  const toggleLock = (index: number) => {
+    const locked = isLocked(index)
+    setLocked(index, !locked)
+    if (!locked && crop?.index === index) setCrop(null)
+    onCurrentSlotChange(index)
+  }
   /** "Mở khoá" in the toolbar: unlock and go straight back to cropping. */
   const unlockAndCrop = (index: number) => {
     const slot = slots[index]
@@ -230,9 +237,9 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
       <p className="cs-mono absolute left-10 top-3.5 text-[11px] text-white/80">{stageLabel}</p>
       {allBwEnabled ? <p className="cs-mono absolute right-10 top-3.5 text-[11px] text-white/80">Đen trắng</p> : null}
       <div className="mx-auto" style={{ width: `min(100%, calc(min(54dvh, 420px) * ${template.canvas.width} / ${template.canvas.height}))`, aspectRatio: aspect }}>
-        <TemplateCanvas activeSlot={currentSlot} backgroundUrl={backgroundUrl} cropSlot={crop?.index ?? null} lockedSlots={lockedSlots} onActiveSlotChange={selectSlot} onAdd={openPhotoPicker} onBeginCrop={beginCrop} onImageError={onPhotoError} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, createInitialPhotoTransform()); onFitChange(index, 'contain') }} onTransform={onTransform} slots={slots} template={template} />
+        <TemplateCanvas activeSlot={currentSlot} backgroundUrl={backgroundUrl} cropSlot={crop?.index ?? null} lockedSlots={lockedSlots} onActiveSlotChange={selectSlot} onAdd={openPhotoPicker} onBeginCrop={beginCrop} onToggleLock={toggleLock} onImageError={onPhotoError} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, createInitialPhotoTransform()); onFitChange(index, 'contain') }} onTransform={onTransform} slots={slots} template={template} />
       </div>
-      <p className="mt-3 text-center text-[13px] leading-snug text-white/85">{crop ? 'Kéo để căn · chụm hai ngón để phóng · bấm ổ khoá để giữ ảnh' : currentSlot !== null && isLocked(currentSlot) ? 'Ảnh đã khoá · bấm "Mở khoá" để chỉnh lại' : 'Chạm một ô để chỉnh · kéo để căn ảnh'}</p>
+      <p className="mt-3 text-center text-[13px] leading-snug text-white/85">{crop ? 'Kéo để căn · chụm hai ngón để phóng · bấm ổ khoá để giữ ảnh' : currentSlot !== null && isLocked(currentSlot) ? 'Ảnh đã khoá · bấm ổ khoá trên ảnh để chỉnh lại' : currentSlot !== null && slots[currentSlot] ? 'Kéo để căn ảnh · bấm ổ khoá trên ảnh để giữ ảnh' : 'Chạm một ô để chỉnh · kéo để căn ảnh'}</p>
     </section>
 
     <div className="mt-3">
