@@ -17,7 +17,7 @@ export default async function handler(request: ApiRequest, response: ApiResponse
     const completion = parseBoothCompletion(readJsonBody(request))
     const environment = loadSupabaseStorageEnvironment()
     if (!verifyBoothCompletionToken(environment.serviceRoleKey, boothId, completion)) throw new UploadApiError(403, 'Phiên xác minh ảnh không hợp lệ.')
-    await new SupabasePhotoUploadService(environment).verifyUploadedObjectAt(completion, completion.objectPath)
+    await new SupabasePhotoUploadService(environment).verifyBoothObjectAt(completion, completion.objectPath)
     console.info('[booth-upload:timing]', { stage: 'verification', boothId, variant: completion.variant, durationMs: Math.round(performance.now() - startedAt), outcome: 'ok' })
     response.status(200).json({ ok: true, objectPath: completion.objectPath })
   } catch (reason) {

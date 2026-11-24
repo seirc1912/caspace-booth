@@ -5,7 +5,7 @@ import path from 'node:path'
 import test from 'node:test'
 import { classifyExport, phoneFromFolderName } from '../booth-agent/src/phoneFolder.ts'
 import { UploadQueue } from '../booth-agent/src/queue.ts'
-import { AUTOMATIC_RESCAN_MS, scanExports } from '../booth-agent/src/scanner.ts'
+import { AUTOMATIC_RESCAN_MS, isOnOrAfterUploadFrom, scanExports, UPLOAD_FROM_MS } from '../booth-agent/src/scanner.ts'
 import { waitUntilStable } from '../booth-agent/src/stableFile.ts'
 import { StateStore } from '../booth-agent/src/stateStore.ts'
 import { renderStatusPage } from '../booth-agent/src/statusServer.ts'
@@ -45,7 +45,7 @@ function fakeApi(options: { alreadyUploaded?: boolean; failFirst?: number; statu
     calls.push({ url: String(url), body })
     if (failures > 0) { failures -= 1; if (options.status) return new Response(JSON.stringify({ error: 'nope' }), { status: options.status }); throw new TypeError('fetch failed') }
     if (String(url).endsWith('/api/booth/init')) {
-      const objectPath = body!.variant === 'thumbnail' ? '0947860616/_booth/_thumbs/a-thumb.jpg' : '0947860616/_booth/a.jpg'
+      const objectPath = body!.variant === 'thumbnail' ? '0947860616/_booth/_thumbs/a-thumb.jpg' : body!.variant === 'preview' ? '0947860616/_booth/_previews/a-preview.jpg' : '0947860616/_booth/a.jpg'
       return Response.json({ alreadyUploaded: options.alreadyUploaded ?? false, objectPath, uploadUrl: options.alreadyUploaded ? undefined : 'http://storage/upload', completionToken: 't' })
     }
     return Response.json({ ok: true })
@@ -64,6 +64,30 @@ test('an export is sent as original then thumbnail, with init → PUT → comple
   const again = fakeApi({ alreadyUploaded: true })
   await uploadExport({ api: again.api, phone: '0947860616', filePath: '/p/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg })
   assert.ok(!again.calls.some((call) => call.url === 'http://storage/upload'), 'already uploaded → no PUT')
+  assert.ok(!again.calls.some((call) => call.url.endsWith('/complete')), 'already stored → nothing to verify (a re-made thumbnail may differ by a few bytes)')
+})
+
+test('with a preview maker, the 1600px preview follows the thumbnail', async () => {
+  const { calls, api } = fakeApi()
+  await uploadExport({ api, phone: '0947860616', filePath: '/p/0947860616/Output/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg, makePreview: async () => jpeg })
+  const inits = calls.filter((call) => call.url === 'http://api/api/booth/init').map((call) => [call.body!.variant, call.body!.filename, call.body!.originalPath ?? null])
+  assert.deepEqual(inits, [['original', 'a.jpg', null], ['thumbnail', 'a-thumb.jpg', '0947860616/_booth/a.jpg'], ['preview', 'a-preview.jpg', '0947860616/_booth/a.jpg']])
+})
+
+test('a server without preview support (400) does not fail the export', async () => {
+  const { api } = fakeApi()
+  const fetchImpl = api.fetchImpl
+  const strict = { ...api, fetchImpl: (async (url: string, init?: RequestInit) => {
+    const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : undefined
+    if (body?.variant === 'preview') return new Response(JSON.stringify({ error: 'Thông tin ảnh phòng chụp không hợp lệ.' }), { status: 400 })
+    return fetchImpl(url, init)
+  }) as typeof fetch }
+  const result = await uploadExport({ api: strict, phone: '0947860616', filePath: '/p/0947860616/Output/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg, makePreview: async () => jpeg })
+  assert.equal(result.objectPath, '0947860616/_booth/a.jpg')
+})
+
+test('state keys from before previews existed are not treated as done (backfill after update)', () => {
+  assert.notEqual(StateStore.key('/p/a.jpg', 10, 1), '/p/a.jpg|10|1')
 })
 
 function tempState() { return new StateStore(path.join(mkdtempSync(path.join(tmpdir(), 'booth-state-')), 'uploaded.json')) }
@@ -108,10 +132,10 @@ test('startup scan only covers the last 24 hours; manual resend covers any age',
   put('0947860616/Capture/raw.CR3', 0)
   put('tim/Output/x.jpg', 0)
   put('.tmp.drivedownload/Output/y.jpg', 0)
-  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS, notBeforeMs: 0 })
   assert.deepEqual(recent.jobs.map((item) => path.basename(item.filePath)), ['new.jpg'])
   assert.deepEqual(recent.unrecognized, ['tim'])
-  const manual = await scanExports(root, { onlyFolder: '0947860616' })
+  const manual = await scanExports(root, { onlyFolder: '0947860616', notBeforeMs: 0 })
   assert.deepEqual(manual.jobs.map((item) => path.basename(item.filePath)).sort(), ['new.jpg', 'old.jpg'])
 })
 
@@ -202,6 +226,26 @@ test('30-second rescans skip uploaded exports before the queue and ignore old se
     utimesSync(path.join(root, folder, 'Output', 'x.jpg'), time, time)
     utimesSync(path.join(root, folder, 'Output'), time, time)
   }
-  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS })
+  const recent = await scanExports(root, { sinceMs: Date.now() - AUTOMATIC_RESCAN_MS, notBeforeMs: 0 })
   assert.deepEqual(recent.jobs.map((job) => job.phone), ['0912345678'], 'old sessions skipped by Output folder mtime')
+})
+
+test('photos exported before 25/11/2026 (Vietnam time) are never sent, even by manual resend', async () => {
+  assert.equal(new Date(UPLOAD_FROM_MS).toISOString(), '2026-11-24T17:00:00.000Z')
+  const root = mkdtempSync(path.join(tmpdir(), 'pictures-'))
+  const put = (relative: string, atMs: number) => {
+    const file = path.join(root, relative)
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, jpeg)
+    utimesSync(file, atMs / 1000, atMs / 1000)
+    return file
+  }
+  const before = put('0947860616/Output/before.jpg', UPLOAD_FROM_MS - 60_000)
+  const after = put('0947860616/Output/after.jpg', UPLOAD_FROM_MS + 60_000)
+  const manual = await scanExports(root, { onlyFolder: '0947860616' })
+  assert.deepEqual(manual.jobs.map((item) => path.basename(item.filePath)), ['after.jpg'])
+  const startup = await scanExports(root, { sinceMs: 0 })
+  assert.deepEqual(startup.jobs.map((item) => path.basename(item.filePath)), ['after.jpg'])
+  assert.equal(await isOnOrAfterUploadFrom(before), false)
+  assert.equal(await isOnOrAfterUploadFrom(after), true)
 })

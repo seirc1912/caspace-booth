@@ -3,6 +3,7 @@ import { UploadApiError } from './http.js'
 export const MAX_UPLOAD_FILE_BYTES = 25 * 1024 * 1024
 // Staff preview thumbnails (no Supabase Image Transformations): small JPEG beside the original.
 export const MAX_THUMBNAIL_BYTES = 512 * 1024
+export const MAX_PREVIEW_BYTES = 2 * 1024 * 1024
 export const THUMBNAIL_REQUEST_SUFFIX = '-thumb'
 const phonePattern = /^0(?:3|5|7|8|9)\d{8}$/
 const sha256Pattern = /^[a-f0-9]{64}$/
@@ -16,7 +17,8 @@ export interface UploadMetadata {
   requestId: string
   sha256: string
   size: number
-  variant: 'original' | 'thumbnail'
+  /** `preview` (1600px, for the large viewer) is sent only by booth PCs. */
+  variant: 'original' | 'thumbnail' | 'preview'
 }
 
 export function normalizeVietnamesePhone(value: string) {

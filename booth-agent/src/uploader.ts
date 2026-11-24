@@ -48,19 +48,27 @@ async function put(api: BoothApi, uploadUrl: string, bytes: Buffer, filename: st
 async function send(api: BoothApi, bytes: Buffer, fields: Record<string, unknown>, filename: string) {
   const metadata = { ...fields, filename, mimeType: 'image/jpeg', size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), prefix: bytes.subarray(0, 16).toString('base64') }
   const init = await call<InitResult>(api, '/api/booth/init', metadata)
-  if (!init.alreadyUploaded) {
-    if (!init.uploadUrl) throw new AgentUploadError('NO_UPLOAD_URL', 502, true)
-    await put(api, init.uploadUrl, bytes, filename)
-  }
+  // Already stored: the server compared the original's SHA-256 itself; an existing thumbnail or
+  // preview is kept even if a re-made copy differs by a few bytes, so there is nothing to verify.
+  if (init.alreadyUploaded) return init
+  if (!init.uploadUrl) throw new AgentUploadError('NO_UPLOAD_URL', 502, true)
+  await put(api, init.uploadUrl, bytes, filename)
   await call(api, '/api/booth/complete', { ...metadata, objectPath: init.objectPath, completionToken: init.completionToken })
   return init
 }
 
-/** Original first, then its 400px thumbnail. Idempotent: re-sending the same file is cheap. */
-export async function uploadExport(input: { api: BoothApi; phone: string; filePath: string; bytes: Buffer; makeThumbnail: (bytes: Buffer) => Promise<Buffer> }) {
+/** Original first, then its 400px thumbnail and 1600px preview. Idempotent: re-sending the same file is cheap. */
+export async function uploadExport(input: { api: BoothApi; phone: string; filePath: string; bytes: Buffer; makeThumbnail: (bytes: Buffer) => Promise<Buffer>; makePreview?: (bytes: Buffer) => Promise<Buffer> }) {
   const filename = basename(input.filePath)
   const original = await send(input.api, input.bytes, { phone: input.phone, variant: 'original' }, filename)
   const thumbnail = await input.makeThumbnail(input.bytes)
   await send(input.api, thumbnail, { phone: input.phone, variant: 'thumbnail', originalPath: original.objectPath }, `${basename(filename, extname(filename))}-thumb.jpg`)
+  if (input.makePreview) {
+    const preview = await input.makePreview(input.bytes)
+    // Optional extra: a server without preview support (not updated yet) answers 4xx; the photo
+    // still counts as sent and the viewer falls back to the original. Network/5xx errors retry.
+    try { await send(input.api, preview, { phone: input.phone, variant: 'preview', originalPath: original.objectPath }, `${basename(filename, extname(filename))}-preview.jpg`) }
+    catch (error) { if (!(error instanceof AgentUploadError) || error.retryable) throw error }
+  }
   return { objectPath: original.objectPath, alreadyUploaded: original.alreadyUploaded }
 }

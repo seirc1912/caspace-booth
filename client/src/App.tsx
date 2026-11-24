@@ -20,11 +20,11 @@ function App() {
   }
 
   if (pathname === customerRoutes.colorLab) {
-    return <Suspense fallback={<main className="grid min-h-dvh place-items-center">Opening Color Lab…</main>}><ColorLabPage /></Suspense>
+    return <Suspense fallback={<main className="cs-metal grid min-h-dvh place-items-center font-semibold">Đang mở Cá Color Lab…</main>}><ColorLabPage /></Suspense>
   }
 
   if (pathname === customerRoutes.photoUpload) {
-    return <Suspense fallback={<main className="grid min-h-dvh place-items-center">Đang mở trang tải ảnh…</main>}><PhotoUploadPage /></Suspense>
+    return <Suspense fallback={<main className="cs-metal grid min-h-dvh place-items-center font-semibold">Đang mở trang tải ảnh…</main>}><PhotoUploadPage /></Suspense>
   }
 
   return <CustomerApp />

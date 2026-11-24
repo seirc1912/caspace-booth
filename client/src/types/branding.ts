@@ -4,25 +4,16 @@ export interface BrandingConfig {
   websiteLabel: string
   websiteUrl: string
   primaryColor: string
-  secondaryColor: string
   faviconUrl: string | null
   copyrightYear: number
   headerDisplayMode: 'logo' | 'text' | 'logoText'
-  backgroundColor: string
-  backgroundImageUrl: string | null
-  backgroundSize: 'cover' | 'contain'
-  backgroundPosition: string
-  backgroundOverlay: number
   buttonColor: string
   textColor: string
   cardBackground: string
-  badgeText: string
-  homeStepLabel: string
   homeHeadline: string
   homeDescription: string
   phoneLabel: string
   phonePlaceholder: string
-  phoneHelper: string
   continueButtonText: string
   footerBrandText: string
   address: string

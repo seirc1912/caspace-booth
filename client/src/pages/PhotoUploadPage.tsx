@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import { BrandMark } from '../components/branding/BrandMark'
+import { Alert } from '../components/chrome/Alert'
+import { AppHeader } from '../components/chrome/AppHeader'
+import { BarHint, BottomBar } from '../components/chrome/BottomBar'
+import { Button } from '../components/chrome/Button'
+import { buttonClass } from '../components/chrome/buttonClass'
+import { PhoneInput } from '../components/chrome/PhoneInput'
+import { formatPhoneDisplay } from '../features/orders/phoneDisplay'
 import { PageShell } from '../components/layout/PageShell'
+import { Icon } from '../components/ui/Icon'
 import { newRunId, reportClientTiming, uploadBatchEvent, uploadFileEvent } from '../features/metrics/clientTiming'
 import { calculateOverallUploadProgress, runUploadQueue, uploadPhotoToStorage } from '../features/photoUpload/uploadClient'
 import { forgetPhoto, photoSource, photoThumbnail, preloadPhoto, releasePreload } from '../features/photoUpload/preload'
@@ -17,7 +24,8 @@ interface SelectedPhoto {
   state: 'ready' | 'uploading' | 'uploaded' | 'failed'
 }
 
-const successMessage = 'Ảnh của bạn đã được gửi thành công đến Cá Space! Vui lòng cung cấp số điện thoại cho nhân viên để nhận ảnh in nhé.'
+const formatSize = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1).replace('.', ',')} MB`
+const formatType = (file: File) => /png$/i.test(file.type) || /\.png$/i.test(file.name) ? 'PNG' : 'JPG'
 
 function makePhoto(file: File): SelectedPhoto {
   return { file, id: crypto.randomUUID(), previewUrl: null, prepared: false, progress: 0, uploadedBytes: 0, state: 'ready' }
@@ -35,6 +43,7 @@ export function PhotoUploadPage() {
   const [photos, setPhotos] = useState<SelectedPhoto[]>([])
   const [uploading, setUploading] = useState(false)
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [phoneTouched, setPhoneTouched] = useState(false)
   const validPhone = isValidVietnamesePhone(phone)
 
   useEffect(() => { photosRef.current = photos }, [photos])
@@ -91,6 +100,7 @@ export function PhotoUploadPage() {
     if (submittingRef.current) return
     const fileError = validateSelectedFiles(photos.map(({ file }) => file))
     if (!validPhone || fileError) {
+      setPhoneTouched(true)
       setMessage({ kind: 'error', text: !validPhone ? 'Vui lòng nhập đúng số điện thoại Việt Nam.' : fileError! })
       return
     }
@@ -136,10 +146,10 @@ export function PhotoUploadPage() {
         const first = failures[0]!.reason
         const detail = first instanceof Error ? ` ${first.message}` : ''
         throw new Error(okCount > 0
-          ? `Đã gửi ${okCount}/${pending.length} ảnh. ${failures.length} ảnh chưa gửi được — bấm "GỬI LẠI ẢNH LỖI".${detail}`
-          : `Chưa gửi được ${failures.length} ảnh — bấm "GỬI LẠI ẢNH LỖI".${detail}`)
+          ? `Đã gửi ${okCount}/${pending.length} ảnh. ${failures.length} ảnh chưa gửi được, bấm “Gửi lại ảnh lỗi”.${detail}`
+          : `Chưa gửi được ${failures.length} ảnh, bấm “Gửi lại ảnh lỗi”.${detail}`)
       }
-      setMessage({ kind: 'success', text: successMessage })
+      setMessage({ kind: 'success', text: pending.length === 1 ? pending[0]!.photo.file.name : `${photos.length} ảnh` })
       submissionIdRef.current = crypto.randomUUID()
     attemptRef.current = 0
     } catch (reason) {
@@ -156,26 +166,57 @@ export function PhotoUploadPage() {
     }
   }
 
+  const startOver = () => {
+    for (const photo of photosRef.current) { if (photo.previewUrl) URL.revokeObjectURL(photo.previewUrl); forgetPhoto(photo.file) }
+    setPhotos([])
+    setMessage(null)
+    submissionIdRef.current = crypto.randomUUID()
+    attemptRef.current = 0
+  }
+
   const failedPhotoCount = photos.filter((photo) => photo.state === 'failed').length
   const preparing = photos.some((photo) => photo.state === 'uploading' && !photo.prepared)
   const overallProgress = calculateOverallUploadProgress(photos.map((photo) => ({ size: photo.file.size, uploadedBytes: photo.uploadedBytes })))
+  const allSent = photos.length > 0 && photos.every((photo) => photo.state === 'uploaded')
+  const phoneState = validPhone ? 'valid' : phone.length && (phoneTouched || phone.replace(/\D/g, '').length >= 10) ? 'error' : phone.length ? 'typing' : 'empty'
+  const canSend = !uploading && validPhone && photos.length > 0 && !allSent
+  const sendLabel = uploading ? (preparing ? 'Đang chuẩn bị ảnh…' : `Đang gửi… ${overallProgress}%`) : failedPhotoCount > 0 ? (failedPhotoCount === photos.length ? 'Thử gửi lại' : `Gửi lại ${failedPhotoCount} ảnh lỗi`) : photos.length > 1 ? `Gửi ${photos.length} ảnh` : 'Gửi ảnh'
+  const hint = uploading ? 'Giữ trang này mở cho tới khi gửi xong.' : failedPhotoCount > 0 ? 'Ảnh và số điện thoại vẫn được giữ, chỉ cần gửi lại.' : !photos.length || !validPhone ? 'Chọn ảnh và nhập số điện thoại để gửi.' : 'Ảnh gửi nguyên bản, không bị nén.'
+  const fileInput = <input accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="Chọn ảnh để gửi" className="sr-only" disabled={uploading} multiple onChange={(event) => { addFiles(event.currentTarget.files); event.currentTarget.value = '' }} ref={inputRef} type="file" />
+  const stepBadge = (number: number) => <span aria-hidden="true" className="grid size-6 shrink-0 place-items-center rounded-full bg-cs-ink font-mono text-xs font-bold text-white">{number}</span>
 
-  return <PageShell className="bg-[#f3eee7]">
-    <header className="flex items-center justify-between gap-4"><a className="min-h-11 rounded-full bg-white px-4 py-3 text-sm font-bold shadow-sm" href="/">← Trang chủ</a><BrandMark compact /><span className="w-[5.5rem]" /></header>
-    <section className="mx-auto mt-7 w-full max-w-2xl">
-      <div className="text-center"><p className="text-xs font-black uppercase tracking-[0.24em] text-rose-700">Cá Space</p><h1 className="mt-2 text-4xl font-black tracking-[-0.05em]">UPLOAD ẢNH</h1><p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-stone-600">Gửi ảnh đã ghép frame đến Cá Space để in với chất lượng gốc.</p></div>
-      <div className="mt-7 rounded-[2rem] bg-white p-5 shadow-sm sm:p-8">
-        <p className="text-sm font-black">1. Chọn ảnh cần in</p>
-        <button className="mt-2 min-h-14 w-full rounded-2xl border-2 border-dashed border-stone-300 bg-stone-50 px-5 font-black text-stone-700 transition hover:border-stone-950 disabled:opacity-50" disabled={uploading || photos.length >= PHOTO_UPLOAD_MAX_FILES} onClick={() => inputRef.current?.click()} type="button">+ CHỌN ẢNH PNG / JPG</button>
-        <input accept=".png,.jpg,.jpeg,image/png,image/jpeg" aria-label="Chọn ảnh để gửi" className="sr-only" disabled={uploading} multiple onChange={(event) => { addFiles(event.currentTarget.files); event.currentTarget.value = '' }} ref={inputRef} type="file" />
-        {photos.length ? <div className="mt-5 grid gap-3 sm:grid-cols-2">{photos.map((photo) => <article className="flex min-w-0 items-center gap-3 rounded-2xl border border-stone-200 p-3" key={photo.id}>{photo.previewUrl ? <img alt="" className="size-16 shrink-0 rounded-xl object-cover" src={photo.previewUrl} /> : <div aria-hidden className="size-16 shrink-0 animate-pulse rounded-xl bg-stone-100" />}<div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{photo.file.name}</p><p className="mt-1 text-xs text-stone-500">{(photo.file.size / 1024 / 1024).toFixed(1)} MB · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? (photo.prepared ? `${photo.progress}%` : 'Đang chuẩn bị…') : photo.prepared ? 'Sẵn sàng' : 'Đang chuẩn bị…'}</p>{photo.state === 'uploading' ? <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-stone-950 transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}</div><button aria-label={`Xóa ${photo.file.name}`} className="grid size-11 shrink-0 place-items-center rounded-full bg-stone-100 text-lg font-bold disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button">×</button></article>)}</div> : <p className="mt-4 text-center text-sm text-stone-400">Chưa chọn ảnh.</p>}
-        <label className="mt-6 block text-sm font-black" htmlFor="upload-phone">2. Số điện thoại nhận ảnh</label>
-        <input aria-invalid={phone.length > 0 && !validPhone} autoComplete="tel" className="mt-2 min-h-14 w-full rounded-2xl border border-stone-200 bg-stone-50 px-4 text-lg font-bold outline-none transition focus:border-stone-950 focus:ring-4 focus:ring-stone-100" disabled={uploading} id="upload-phone" ref={phoneRef} inputMode="tel" onChange={(event) => { setPhone(event.target.value); setMessage(null) }} placeholder="Nhập số điện thoại của bạn" type="tel" value={phone} />
-        {phone.length > 0 && !validPhone ? <p className="mt-2 text-sm font-semibold text-rose-700">Vui lòng nhập đúng số điện thoại Việt Nam.</p> : null}
-        {uploading ? <div className="mt-5" aria-live="polite"><div className="flex justify-between text-sm font-bold"><span>{preparing || overallProgress === 0 ? 'Đang chuẩn bị ảnh…' : 'Đang gửi ảnh…'}</span><span>{overallProgress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-stone-100"><div className="h-full rounded-full bg-rose-700 transition-[width]" style={{ width: `${overallProgress}%` }} /></div></div> : null}
-        {message ? <div className={`mt-5 rounded-2xl px-4 py-3 text-sm font-bold leading-6 ${message.kind === 'success' ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`} role={message.kind === 'error' ? 'alert' : 'status'}>{message.text}</div> : null}
-        <button className="mt-5 min-h-16 w-full rounded-2xl bg-stone-950 px-6 text-lg font-black text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-40" disabled={uploading || !validPhone || photos.length === 0 || photos.every((photo) => photo.state === 'uploaded')} onClick={submit} type="button">{uploading ? (preparing ? 'ĐANG CHUẨN BỊ ẢNH…' : `ĐANG GỬI ${overallProgress}%`) : failedPhotoCount > 0 ? `GỬI LẠI ${failedPhotoCount} ẢNH LỖI` : 'GỬI ẢNH'}</button>
-      </div>
+  if (message?.kind === 'success' && allSent && !uploading) return <PageShell>
+    <AppHeader variant="sub" />
+    <section aria-live="polite" className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+      <span className="cs-panel grid size-28 place-items-center rounded-full"><span className="cs-lcd grid size-16 place-items-center rounded-full text-cs-led-green"><Icon className="size-7" name="check" /></span></span>
+      <h1 className="mt-6 text-[28px] font-black tracking-[-0.035em]">Đã gửi ảnh</h1>
+      <p className="mt-2 max-w-[21rem] break-words text-[15px] leading-normal text-cs-ink-2" role="status">Cá Space đã nhận {message.text}. Báo số <strong className="whitespace-nowrap">{formatPhoneDisplay(normalizeVietnamesePhone(phone))}</strong> tại quầy để nhận ảnh in.</p>
+      <div className="mt-8 grid w-full gap-2.5"><Button onClick={startOver} variant="chrome">Gửi thêm ảnh khác</Button><a className={buttonClass('primary')} href="/">Về trang chủ</a></div>
+    </section>
+  </PageShell>
+
+  return <PageShell bottomBar={<BottomBar><Button className="w-full" disabled={!canSend} loading={uploading} onClick={submit}>{sendLabel}</Button><BarHint>{hint}</BarHint></BottomBar>}>
+    <AppHeader variant="sub" />
+    <p className="cs-mono mt-6 text-[11px] text-cs-red-text">In ảnh chất lượng gốc</p>
+    <h1 className="mt-1.5 text-[30px] font-black leading-tight tracking-[-0.035em]">Upload ảnh</h1>
+    <p className="mt-2 text-[15px] leading-normal text-cs-ink-2">Gửi ảnh đã ghép khung để Cá Space in với chất lượng gốc.</p>
+    {message?.kind === 'error' ? <Alert className="mt-4" icon={/mạng/i.test(message.text) ? 'wifiOff' : 'alert'} kind="error" title="Chưa gửi được ảnh">{message.text}</Alert> : null}
+    <section className="cs-panel mt-4 rounded-[28px] px-4 pb-5 pt-5">
+      <h2 className="flex items-center gap-2.5 text-[15px] font-extrabold">{stepBadge(1)}Chọn ảnh cần in</h2>
+      {photos.length ? <ul className="mt-3 grid gap-2.5">{photos.map((photo) => <li className={`rounded-[20px] border bg-white/90 p-2.5 ${photo.state === 'failed' ? 'border-cs-led ring-1 ring-cs-led' : 'border-cs-chrome-400/70'}`} key={photo.id}>
+        <div className="flex min-w-0 items-center gap-3">
+          {photo.previewUrl ? <img alt="" className="h-16 w-12 shrink-0 rounded-[10px] bg-cs-chrome-200 object-cover" src={photo.previewUrl} /> : <div aria-hidden className="h-16 w-12 shrink-0 animate-pulse rounded-[10px] bg-cs-chrome-200" />}
+          <div className="min-w-0 flex-1"><p className="truncate text-[15px] font-bold">{photo.file.name}</p><p className="mt-0.5 font-mono text-[11px] font-medium text-cs-ink-3">{formatSize(photo.file.size)} · {photo.state === 'uploaded' ? 'Đã gửi' : photo.state === 'failed' ? 'Chưa gửi được' : photo.state === 'uploading' ? (photo.prepared ? `đang gửi ${photo.progress}%` : 'Đang chuẩn bị…') : photo.prepared ? `${formatType(photo.file)} · Sẵn sàng` : 'Đang chuẩn bị…'}</p></div>
+          {photo.state === 'uploaded' ? <span className="grid size-11 shrink-0 place-items-center text-cs-green-text"><Icon name="check" /></span> : <button aria-label={`Bỏ ảnh ${photo.file.name}`} className="cs-btn-chrome cs-press grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-40" disabled={uploading} onClick={() => removePhoto(photo.id)} type="button"><Icon className="size-[18px]" name="trash" /></button>}
+        </div>
+        {photo.state === 'uploading' ? <div aria-label={`Đang gửi ${photo.file.name}`} aria-valuemax={100} aria-valuemin={0} aria-valuenow={photo.progress} className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-cs-chrome-200" role="progressbar"><div className="h-full rounded-full bg-[linear-gradient(90deg,#0D0E10,#FF2D55)] transition-[width]" style={{ width: `${photo.progress}%` }} /></div> : null}
+      </li>)}</ul> : null}
+      {photos.length < PHOTO_UPLOAD_MAX_FILES ? <button className={photos.length ? buttonClass('chrome', { disabled: uploading, className: 'mt-2.5 min-h-12 w-full' }) : 'mt-3 grid min-h-36 w-full place-items-center rounded-[20px] border-2 border-dashed border-cs-chrome-600 bg-white/50 px-4 py-5 text-center disabled:opacity-50'} disabled={uploading} onClick={() => inputRef.current?.click()} type="button">{photos.length ? <><Icon className="size-[18px]" name="add" />Thêm ảnh</> : <span className="grid justify-items-center gap-2"><span className="cs-btn-primary grid size-11 place-items-center rounded-full"><Icon name="add" /></span><span className="text-base font-extrabold">Chọn ảnh từ máy</span><span className="text-[13px] text-cs-ink-3">PNG hoặc JPG · giữ nguyên chất lượng gốc · tối đa {PHOTO_UPLOAD_MAX_FILES} ảnh</span></span>}</button> : null}
+      {fileInput}
+      <label className="mt-6 flex items-center gap-2.5 text-[15px] font-extrabold" htmlFor="upload-phone">{stepBadge(2)}Số điện thoại nhận ảnh</label>
+      <div className="mt-3"><PhoneInput describedBy={phoneState === 'error' ? 'upload-phone-error' : undefined} disabled={uploading} id="upload-phone" inputRef={phoneRef} onChange={(value) => { setPhone(value); setPhoneTouched(false); if (message?.kind === 'error') setMessage(null) }} onEnter={() => { if (canSend) void submit() }} placeholder="Nhập số điện thoại của bạn" size="md" state={phoneState} value={phone} /></div>
+      {phoneState === 'error' ? <p className="mt-2 flex gap-1.5 text-[13px] font-semibold text-cs-red-text" id="upload-phone-error"><Icon className="mt-px size-4 shrink-0" name="alert" />Vui lòng nhập đúng số điện thoại Việt Nam.</p> : null}
+      {uploading ? <div className="mt-5" aria-live="polite"><div className="flex justify-between text-sm font-bold"><span>{preparing || overallProgress === 0 ? 'Đang chuẩn bị ảnh…' : 'Đang gửi ảnh…'}</span><span className="font-mono">{overallProgress}%</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-cs-chrome-200"><div className="h-full rounded-full bg-[linear-gradient(90deg,#0D0E10,#FF2D55)] transition-[width]" style={{ width: `${overallProgress}%` }} /></div></div> : null}
     </section>
   </PageShell>
 }

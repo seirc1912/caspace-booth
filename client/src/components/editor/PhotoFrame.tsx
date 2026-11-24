@@ -2,7 +2,6 @@ import { memo, useEffect, useRef, useState } from 'react'
 import type { DragEvent, PointerEvent, WheelEvent } from 'react'
 import type { FilledSlot, ImageTransform, PhotoSlotEditableRules } from '../../types/selfBooth'
 import { Icon } from '../ui/Icon'
-import { FrameToolbar } from './FrameToolbar'
 import { CustomerPhotoLayer } from './CustomerPhotoLayer'
 import { clampUserPhotoZoom } from '../../features/photos/photoFit'
 
@@ -10,15 +9,16 @@ interface PhotoFrameProps {
   index: number
   slot: FilledSlot | null
   active: boolean
+  /** Drag/pinch adjust the photo (the selected slot, or the slot being cropped). */
   cropMode: boolean
+  /** Locked by the customer: the photo cannot move until unlocked (shows a lock badge). */
+  locked?: boolean
   onActivate: () => void
   onAdd: () => void
   onBeginCrop: () => void
   onDropPhoto: (photoId: string) => void
   onImageError: (message: string) => void
-  onRemove: () => void
   onReset: () => void
-  onReplace: () => void
   onTransform: (transform: Partial<ImageTransform>) => void
   rules?: PhotoSlotEditableRules
   /** "Hình 1", "Hình 2"… on empty slots of multi-photo frames, matching the booth photo sheet. */
@@ -29,7 +29,7 @@ interface GestureOrigin { centroidX: number; centroidY: number; distance: number
 const center = (points: Array<{ x: number; y: number }>) => ({ x: points.reduce((sum, point) => sum + point.x, 0) / points.length, y: points.reduce((sum, point) => sum + point.y, 0) / points.length })
 const distance = (points: Array<{ x: number; y: number }>) => points[0] && points[1] ? Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y) : 0
 const angle = (points: Array<{ x: number; y: number }>) => points[0] && points[1] ? Math.atan2(points[1].y - points[0].y, points[1].x - points[0].x) * 180 / Math.PI : 0
-export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMode, onActivate, onAdd, onBeginCrop, onDropPhoto, onImageError, onRemove, onReset, onReplace, onTransform, rules, slotLabel }: PhotoFrameProps) {
+export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMode, locked = false, onActivate, onAdd, onBeginCrop, onDropPhoto, onImageError, onReset, onTransform, rules, slotLabel }: PhotoFrameProps) {
   const permissions = rules ?? { canReplace: true, canMove: true, canZoom: true, canRotate: true }
   const displaySrc = slot?.photo.previewSrc ?? slot?.photo.src ?? ''
   const pointers = useRef(new Map<number, { x: number; y: number }>())
@@ -101,12 +101,10 @@ export const PhotoFrame = memo(function PhotoFrame({ index, slot, active, cropMo
     if (!photoId) return
     event.preventDefault(); onDropPhoto(photoId)
   }
-  const activateFilledFrame = () => {
-    onActivate()
-    if (!cropMode && imageReady && window.matchMedia('(max-width: 767px)').matches) onBeginCrop()
-  }
 
-  return <><div ref={frameElement} className={`group relative h-full min-h-12 overflow-hidden ring-offset-2 transition-shadow duration-200 ${slot ? 'bg-transparent' : 'bg-stone-100'} ${cropMode ? 'touch-none ring-4 ring-sky-500' : 'touch-manipulation'} ${active && !cropMode ? 'ring-2 ring-[var(--brand-primary)]' : ''}`} onDoubleClick={() => slot && imageReady && onBeginCrop()} onDragOver={(event) => event.preventDefault()} onDrop={drop} onPointerCancel={pointerUp} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={wheel}>
-    {slot ? <>{!imageFailed && displaySrc ? <CustomerPhotoLayer className="select-none" loading="lazy" onLoad={() => setImageReady(true)} onError={() => { setImageFailed(true); onImageError(`${slot.photo.alt || 'This image'} could not be displayed.`) }} slot={slot} /> : <div className="absolute inset-0 grid place-items-center bg-rose-50 p-2 text-center text-xs font-bold text-rose-600">Image unavailable</div>}<button aria-label={`Select frame ${index + 1}`} className={`absolute inset-0 ${cropMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`} onClick={activateFilledFrame} type="button" /></> : <button className="grid h-full min-h-12 w-full place-items-center p-2 text-sky-600 transition-colors hover:bg-sky-50" onClick={onAdd} type="button"><span className="grid place-items-center gap-1.5"><span className="grid size-10 place-items-center rounded-xl bg-sky-100"><Icon name="camera" /></span>{slotLabel ? <span className="rounded-full bg-sky-600 px-2 py-0.5 text-[0.65rem] font-black text-white">{slotLabel}</span> : null}<span className="text-xs font-bold">Add Image</span></span></button>}
-  </div>{active && slot && !cropMode ? <FrameToolbar anchor={frameElement.current} canCrop={imageReady && !imageFailed} onCrop={onBeginCrop} onDelete={onRemove} onReplace={onReplace} /> : null}</>
+  return <div ref={frameElement} className={`group relative h-full min-h-12 overflow-hidden transition-shadow duration-200 ${slot ? 'bg-transparent' : 'bg-[#2A2D32]'} ${cropMode ? 'touch-none' : 'touch-manipulation'}`} onDoubleClick={() => slot && imageReady && !locked && onBeginCrop()} onDragOver={(event) => event.preventDefault()} onDrop={drop} onPointerCancel={pointerUp} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={wheel}>
+    {slot ? <>{!imageFailed && displaySrc ? <CustomerPhotoLayer className="select-none" loading="lazy" onLoad={() => setImageReady(true)} onError={() => { setImageFailed(true); onImageError(`Không hiển thị được ảnh ở hình ${index + 1}.`) }} slot={slot} /> : <div className="absolute inset-0 grid place-items-center bg-cs-alert-error-bg p-2 text-center text-xs font-bold text-cs-alert-error-fg">Không hiển thị được ảnh</div>}<button aria-label={`Chọn hình ${index + 1}`} aria-pressed={active} className={`absolute inset-0 ${cropMode ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}`} onClick={onActivate} type="button" /></> : <button aria-label={`Thêm ảnh vào hình ${index + 1}`} className="grid h-full min-h-12 w-full place-items-center border-2 border-dashed border-white/35 p-1 text-white transition-colors hover:bg-white/5" onClick={onAdd} type="button"><span className="grid place-items-center gap-1"><Icon className="size-5" name="add" />{slotLabel ? <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-white/75">{slotLabel}</span> : null}<span className="text-xs font-bold">Thêm ảnh</span></span></button>}
+    {slot && locked ? <span aria-label="Ảnh đã khoá" className="pointer-events-none absolute left-1.5 top-1.5 z-20 grid size-7 place-items-center rounded-full bg-cs-ink/75 text-white" role="img"><Icon className="size-4" name="lock" /></span> : null}
+    {active ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 z-10 border-[3px] border-cs-led shadow-[inset_0_0_12px_rgba(255,45,85,.45)]">{['-left-px -top-px', '-right-px -top-px', '-bottom-px -left-px', '-bottom-px -right-px'].map((corner) => <span className={`absolute ${corner} size-2.5 border border-cs-led bg-white`} key={corner} />)}</span> : null}
+  </div>
 })

@@ -88,11 +88,11 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     let active = true
     void loadPublishedRooms()
       .then((next) => { if (active) setRooms(next) })
-      .catch((reason) => { if (active) setRoomsError(reason instanceof Error ? reason.message : 'Unable to load available rooms.') })
+      .catch((reason) => { if (active) setRoomsError(reason instanceof Error ? reason.message : 'Không tải được danh sách phòng.') })
       .finally(() => { if (active) setRoomsLoading(false) })
     void loadPublishedTemplateSummaries()
       .then((next) => { if (active) setTemplateSummaries(next) })
-      .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load published frames.') })
+      .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Không tải được các khung in.') })
     return () => { active = false }
   }, [])
   useEffect(() => {
@@ -149,14 +149,14 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     let active = true
     void ensureTemplateDetail(selectedTemplateId)
       .then(() => undefined)
-      .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Unable to load this frame.') })
+      .catch((reason) => { if (active) setPhotoError(reason instanceof Error ? reason.message : 'Không tải được khung này.') })
     return () => { active = false }
   }, [ensureTemplateDetail, selectedTemplateId, templateDetails, templateSummaries])
   const selectRoom = async (id: string) => {
     const summaries = templateSummaries.length ? templateSummaries : await loadPublishedTemplateSummaries()
     if (!templateSummaries.length) setTemplateSummaries(summaries)
     const firstTemplate = summaries.find((item) => item.roomId === id)
-    if (!firstTemplate) throw new Error('No published frames are available in this Room.')
+    if (!firstTemplate) throw new Error('Phòng này chưa có khung in nào.')
     const templateId = firstTemplate.id
     await ensureTemplateDetail(templateId)
     setSelectedRoomIdState(id); setSelectedTemplateIdState(templateId); setCurrentSlot(null)
@@ -171,7 +171,7 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
         setSelectedTemplateIdState(id); setCurrentSlot(null)
         persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: id })
       },
-      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap the Frame button to retry.`),
+      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Không tải được khung này.'} Bấm “Khung khác” để thử lại.`),
     })
   }
 
@@ -193,7 +193,7 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
         setCurrentSlot(null)
         persistJourney({ phoneNumber, selectedRoomId, selectedTemplateId: next.id })
       },
-      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Unable to load this frame.'} Tap Frame ${index + 1} to retry.`),
+      onError: (reason) => setPhotoError(`${reason instanceof Error ? reason.message : 'Không tải được khung này.'} Mở lại khung ${String(index + 1).padStart(2, '0')} trong “Khung khác” để thử lại.`),
     })
   }, [ensureTemplateDetail, roomTemplateSummaries, phoneNumber, selectedRoomId])
 
@@ -288,14 +288,14 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
     if (!mountedRef.current) { photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) }); return }
     if (photos.length) setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
-    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'Có ảnh chưa tải được. Vui lòng thử lại.')
   }, [uploadedPhotos.length])
   const addPhotoToTarget = useCallback(async (target: DirectPhotoTarget, file: File) => {
     if (!supportedPhoto(file)) return
     setPhotoError(null)
     let photo: PhotoAsset
     try { photo = await loadPhotoFile(file) }
-    catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'The image could not be loaded.'); return }
+    catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'Không tải được ảnh. Vui lòng thử lại.'); return }
     if (!mountedRef.current) { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc); return }
     setUploadedPhotos((current) => [...current, photo].slice(0, maximumPhotos))
     setFrameSlots((current) => {
@@ -324,13 +324,13 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
       })
       setCompletedFrameIds((current) => current.filter((id) => id !== target.templateId))
     }
-    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'Có ảnh chưa tải được. Vui lòng thử lại.')
   }, [allBwEnabled])
   const autoFillAllFrames = useCallback(async (files: File[]) => {
     const templates = roomTemplateSummaries.map((summary) => templateDetailsRef.current[summary.id]).filter((detail): detail is CustomerTemplate => Boolean(detail))
     const required = totalRoomSlotCount(templates)
     if (!required || templates.length !== roomTemplateSummaries.length) {
-      setPhotoError('Auto Fill is still preparing. Please try again.')
+      setPhotoError('Tự xếp đang chuẩn bị. Vui lòng thử lại sau giây lát.')
       return
     }
     setPhotoError(null)
@@ -342,19 +342,19 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
       return
     }
     if (!photos.length) {
-      setPhotoError(failure?.reason instanceof Error ? failure.reason.message : 'No supported photos could be loaded.')
+      setPhotoError(failure?.reason instanceof Error ? failure.reason.message : 'Không đọc được ảnh nào. Hãy chọn ảnh JPG hoặc PNG.')
       return
     }
     const nextFrameSlots = assignPhotosAcrossRoom(frameSlots, templates, photos, allBwEnabled)
     if (nextFrameSlots === frameSlots) {
       photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
-      setPhotoError('Auto Fill could not prepare these photos. Please try again.')
+      setPhotoError('Tự xếp chưa chuẩn bị được các ảnh này. Vui lòng thử lại.')
       return
     }
     setUploadedPhotos((current) => [...current, ...photos].slice(0, maximumPhotos))
     setFrameSlots(nextFrameSlots)
     setCompletedFrameIds((current) => invalidateCompletedRoomFrames(current, templates.map((item) => item.id)))
-    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'One or more images could not be loaded.')
+    if (failure) setPhotoError(failure.reason instanceof Error ? failure.reason.message : 'Có ảnh chưa tải được. Vui lòng thử lại.')
   }, [allBwEnabled, frameSlots, roomTemplateSummaries])
   const addUploadedAssets = useCallback((photos: PhotoAsset[]) => {
     setUploadedPhotos((current) => {
@@ -387,7 +387,7 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     if (!supportedPhoto(file)) return
     setPhotoError(null)
     let replacement: PhotoAsset
-    try { replacement = await loadPhotoFile(file) } catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'The image could not be loaded.'); return }
+    try { replacement = await loadPhotoFile(file) } catch (reason) { if (mountedRef.current) setPhotoError(reason instanceof Error ? reason.message : 'Không tải được ảnh. Vui lòng thử lại.'); return }
     if (!mountedRef.current) { URL.revokeObjectURL(replacement.src); if (replacement.previewSrc) URL.revokeObjectURL(replacement.previewSrc); return }
     setUploadedPhotos((current) => current.map((photo) => {
       if (photo.id !== photoId) return photo

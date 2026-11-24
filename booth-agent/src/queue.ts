@@ -8,6 +8,7 @@ export interface QueueDeps {
   api: BoothApi
   state: StateStore
   makeThumbnail: (bytes: Buffer) => Promise<Buffer>
+  makePreview?: (bytes: Buffer) => Promise<Buffer>
   concurrency?: number
   waitStable?: (path: string) => Promise<number>
   statImpl?: (path: string) => Promise<{ size: number; mtimeMs: number }>
@@ -61,7 +62,7 @@ export class UploadQueue {
   }
 
   private async run(job: QueueJob) {
-    const { state, api, makeThumbnail } = this.deps
+    const { state, api, makeThumbnail, makePreview } = this.deps
     const waitStable = this.deps.waitStable ?? ((path: string) => waitUntilStable(path))
     const statImpl = this.deps.statImpl ?? stat
     const readImpl = this.deps.readImpl ?? readFile
@@ -75,7 +76,7 @@ export class UploadQueue {
         const key = StateStore.key(job.filePath, info.size, info.mtimeMs)
         if (state.has(key)) return
         const bytes = await readImpl(job.filePath)
-        const result = await upload({ api, phone: job.phone, filePath: job.filePath, bytes, makeThumbnail })
+        const result = await upload({ api, phone: job.phone, filePath: job.filePath, bytes, makeThumbnail, makePreview })
         state.mark(key, result.objectPath)
         this.uploadedCount += 1
         this.deps.onEvent?.({ type: 'uploaded', job, alreadyUploaded: result.alreadyUploaded })

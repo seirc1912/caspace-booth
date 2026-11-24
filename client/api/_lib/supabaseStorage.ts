@@ -134,6 +134,32 @@ export class SupabasePhotoUploadService {
     return false
   }
 
+  /**
+   * Size and type of a stored object from a HEAD request: no body is transferred, so it does not
+   * count as Supabase Egress (booth PCs send ~12,000 photos a day). Null when it does not exist.
+   */
+  async objectHead(objectPath: string) {
+    const response = await this.fetchImpl(`${this.environment.url}/storage/v1/object/authenticated/${customerPhotoBucket}/${encodedObjectPath(objectPath)}`, {
+      method: 'HEAD',
+      headers: { apikey: this.environment.serviceRoleKey, Authorization: `Bearer ${this.environment.serviceRoleKey}` },
+    })
+    if (response.status === 404 || response.status === 400) return null
+    if (!response.ok) throw new UploadApiError(502, 'Supabase Storage chưa thể kiểm tra ảnh. Vui lòng thử lại.')
+    const size = Number(response.headers.get('content-length'))
+    return { size: Number.isFinite(size) ? size : -1, contentType: response.headers.get('content-type')?.split(';')[0]?.trim() ?? '' }
+  }
+
+  /**
+   * Booth completion: the authenticated booth PC hashed the file itself, so the server only checks
+   * the stored object's size and type (HEAD, no Egress) instead of downloading it again.
+   */
+  async verifyBoothObjectAt(metadata: { size: number; mimeType: string }, objectPath: string) {
+    const head = await this.objectHead(objectPath)
+    if (!head) throw new UploadApiError(409, 'Supabase Storage chưa xác nhận đầy đủ ảnh. Vui lòng thử lại.')
+    if (head.size !== metadata.size || head.contentType !== metadata.mimeType) throw new UploadApiError(409, 'Dung lượng ảnh đã nhận không khớp.')
+    return { objectPath, size: head.size }
+  }
+
   /** SHA-256 of a stored object, or null when it does not exist. */
   async objectSha256(objectPath: string) {
     if (!await this.objectExists(objectPath)) return null

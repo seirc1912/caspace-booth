@@ -11,7 +11,6 @@ interface BrandingProviderProps {
 
 type BrandStyles = CSSProperties & {
   '--brand-primary': string
-  '--brand-secondary': string
 }
 
 export function BrandingProvider({ branding, children }: BrandingProviderProps) {
@@ -20,9 +19,6 @@ export function BrandingProvider({ branding, children }: BrandingProviderProps) 
   useEffect(() => { const update = (event: Event) => setCurrent((event as CustomEvent<BrandingConfig>).detail); window.addEventListener('site-branding-updated', update); return () => window.removeEventListener('site-branding-updated', update) }, [])
   useEffect(() => {
     document.title = current.brandName
-
-    const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-    themeColor?.setAttribute('content', current.secondaryColor)
 
     const existingFavicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
     if (current.faviconUrl) {
@@ -36,7 +32,6 @@ export function BrandingProvider({ branding, children }: BrandingProviderProps) 
 
   const style: BrandStyles = {
     '--brand-primary': current.primaryColor,
-    '--brand-secondary': current.secondaryColor,
   }
 
   return (

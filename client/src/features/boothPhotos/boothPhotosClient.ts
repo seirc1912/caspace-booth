@@ -1,6 +1,7 @@
 import { clearUploadSession, ensureUploadSession } from '../photoUpload/uploadClient'
 
-export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; originalUrl: string; uploadedAt: string }
+/** previewUrl: 1600px copy for viewing large; originalUrl: full file for saving and printing. */
+export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; previewUrl?: string | null; originalUrl: string; uploadedAt: string }
 export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[] } | { status: 'unavailable'; photos: [] }
 /**
  * Originals for the photos actually used (Auto Fill, Add Image), with progress; a
@@ -72,38 +73,5 @@ export async function loadBoothPhotoFiles(photos: BoothPhoto[], onProgress?: (do
 }
 
 
-/**
- * iPhone/iPad can only put images into Photos through the share sheet; Android and
- * desktop browsers save straight to Downloads (which the gallery shows).
- */
-export function prefersShareSheet(userAgent = navigator.userAgent, maxTouchPoints = navigator.maxTouchPoints) {
-  return /iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)
-}
-
-/** Signed URL that makes Storage answer with Content-Disposition: attachment. */
-export function boothDownloadUrl(photo: Pick<BoothPhoto, 'originalUrl' | 'name'>) {
-  const url = new URL(photo.originalUrl)
-  url.searchParams.set('download', photo.name)
-  return url.toString()
-}
-
-/**
- * Direct downloads (no in-page fetch, no "preparing" wait): the browser's download
- * manager fetches each original. Spaced out so Chrome treats them as separate files.
- */
-export async function downloadBoothPhotos(photos: Array<Pick<BoothPhoto, 'originalUrl' | 'name'>>, gapMs = 400, click = (href: string) => {
-  const link = document.createElement('a')
-  link.href = href
-  link.rel = 'noopener'
-  document.body.append(link)
-  link.click()
-  link.remove()
-}) {
-  for (const [index, photo] of photos.entries()) {
-    if (index) await new Promise((resolve) => setTimeout(resolve, gapMs))
-    click(boothDownloadUrl(photo))
-  }
-}
-
-/** Most booth photos used at once: Auto Fill and "save to phone" (keeps phones responsive). */
+/** Most booth photos used at once: Auto Fill (keeps phones responsive). */
 export const MAX_BOOTH_SELECTION = 20

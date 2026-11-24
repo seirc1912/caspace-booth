@@ -1,10 +1,11 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { UploadApiError } from './http.js'
 import type { SupabasePhotoUploadService } from './supabaseStorage.js'
-import { hasValidImageSignature, MAX_THUMBNAIL_BYTES, MAX_UPLOAD_FILE_BYTES, normalizeVietnamesePhone, sanitizeFilename, type UploadMetadata } from './uploadValidation.js'
+import { hasValidImageSignature, MAX_PREVIEW_BYTES, MAX_THUMBNAIL_BYTES, MAX_UPLOAD_FILE_BYTES, normalizeVietnamesePhone, sanitizeFilename, type UploadMetadata } from './uploadValidation.js'
 
 export const BOOTH_FOLDER = '_booth'
 export const BOOTH_THUMBS = '_thumbs'
+export const BOOTH_PREVIEWS = '_previews'
 export const BOOTH_ACCESS_FILE = '_access.json'
 const phonePattern = /^0(?:3|5|7|8|9)\d{8}$/
 const sha256Pattern = /^[a-f0-9]{64}$/
@@ -26,6 +27,19 @@ export function boothThumbnailPath(originalPath: string) {
   const name = originalPath.slice(slash + 1)
   const dot = name.lastIndexOf('.')
   return `${originalPath.slice(0, slash)}/${BOOTH_THUMBS}/${dot > 0 ? name.slice(0, dot) : name}-thumb.jpg`
+}
+
+/** `p/_booth/a.jpg` → `p/_booth/_previews/a-preview.jpg` (1600px copy for the large viewer). */
+export function boothPreviewPath(originalPath: string) {
+  const slash = originalPath.lastIndexOf('/')
+  const name = originalPath.slice(slash + 1)
+  const dot = name.lastIndexOf('.')
+  return `${originalPath.slice(0, slash)}/${BOOTH_PREVIEWS}/${dot > 0 ? name.slice(0, dot) : name}-preview.jpg`
+}
+
+/** Thumbnail or preview path for a derived variant of a booth original. */
+function derivedPath(variant: 'thumbnail' | 'preview', originalPath: string) {
+  return variant === 'thumbnail' ? boothThumbnailPath(originalPath) : boothPreviewPath(originalPath)
 }
 
 /** Same name, different content (two sessions, or a re-export) → keep both: `a.jpg` → `a__1a2b3c4d.jpg`. */
@@ -51,14 +65,14 @@ export function parseBoothUploadMetadata(value: unknown): BoothUploadMetadata {
   const size = Number(record.size)
   const sha256 = String(record.sha256 ?? '').toLowerCase()
   const prefix = String(record.prefix ?? '')
-  const variant = record.variant === 'thumbnail' ? 'thumbnail' : record.variant === 'original' ? 'original' : null
+  const variant = record.variant === 'thumbnail' || record.variant === 'preview' || record.variant === 'original' ? record.variant : null
   if (!variant) throw new UploadApiError(400, 'Thông tin ảnh phòng chụp không hợp lệ.')
-  const limit = variant === 'thumbnail' ? MAX_THUMBNAIL_BYTES : MAX_UPLOAD_FILE_BYTES
+  const limit = variant === 'thumbnail' ? MAX_THUMBNAIL_BYTES : variant === 'preview' ? MAX_PREVIEW_BYTES : MAX_UPLOAD_FILE_BYTES
   if (!Number.isSafeInteger(size) || size <= 0 || size > limit) throw new UploadApiError(413, 'Dung lượng ảnh phòng chụp không hợp lệ.')
   if (!sha256Pattern.test(sha256)) throw new UploadApiError(400, 'Thông tin xác minh ảnh không hợp lệ.')
   if (!hasValidImageSignature(prefix, 'image/jpeg')) throw new UploadApiError(415, 'Nội dung tệp không đúng định dạng JPEG.')
   let originalPath: string | null = null
-  if (variant === 'thumbnail') {
+  if (variant !== 'original') {
     originalPath = String(record.originalPath ?? '')
     if (!isBoothOriginalPath(phone, originalPath)) throw new UploadApiError(400, 'Ảnh nhỏ không khớp ảnh gốc.')
   }
@@ -71,8 +85,8 @@ export function parseBoothCompletion(value: unknown): BoothCompletion {
   const metadata = parseBoothUploadMetadata(value)
   const record = value as Record<string, unknown>
   const objectPath = String(record.objectPath ?? '')
-  const valid = metadata.variant === 'thumbnail'
-    ? objectPath === boothThumbnailPath(metadata.originalPath!)
+  const valid = metadata.variant !== 'original'
+    ? objectPath === derivedPath(metadata.variant, metadata.originalPath!)
     : isBoothOriginalPath(metadata.phone, objectPath)
   if (!valid) throw new UploadApiError(400, 'Thông tin xác nhận không hợp lệ.')
   return { ...metadata, objectPath, completionToken: String(record.completionToken ?? '') }
@@ -92,24 +106,25 @@ export function verifyBoothCompletionToken(secret: string, boothId: string, comp
   return expected.length === supplied.length && timingSafeEqual(expected, supplied)
 }
 
-type BoothStorage = Pick<SupabasePhotoUploadService, 'createSignedUploadAt' | 'objectExists' | 'objectSha256'>
+type BoothStorage = Pick<SupabasePhotoUploadService, 'createSignedUploadAt' | 'objectExists' | 'objectHead'>
 
 /**
- * Chooses where a booth file goes. Originals: same content at the plain path →
- * already uploaded; different content → `~sha8` sibling (never overwrite, never lose
- * a photo). Thumbnails: any existing thumbnail is good enough.
+ * Chooses where a booth file goes. Originals: same name and same size at the plain path →
+ * already uploaded; a different size → `__sha8` sibling (never overwrite, never lose a photo).
+ * Compared by size (HEAD) rather than by downloading the file, to keep Supabase Egress low.
+ * Thumbnails/previews: any existing copy is good enough.
  */
 export async function prepareBoothUpload(storage: BoothStorage, metadata: BoothUploadMetadata) {
-  if (metadata.variant === 'thumbnail') {
-    const objectPath = boothThumbnailPath(metadata.originalPath!)
+  if (metadata.variant !== 'original') {
+    const objectPath = derivedPath(metadata.variant, metadata.originalPath!)
     if (await storage.objectExists(objectPath)) return { alreadyUploaded: true as const, objectPath }
     return storage.createSignedUploadAt(objectPath, metadata)
   }
   const plain = boothOriginalPath(metadata.phone, metadata.filename)
   for (const objectPath of [plain, withContentSuffix(plain, metadata.sha256)]) {
-    const existing = await storage.objectSha256(objectPath)
+    const existing = await storage.objectHead(objectPath)
     if (existing === null) return storage.createSignedUploadAt(objectPath, metadata)
-    if (existing === metadata.sha256) return { alreadyUploaded: true as const, objectPath }
+    if (existing.size === metadata.size) return { alreadyUploaded: true as const, objectPath }
   }
   throw new UploadApiError(409, 'Ảnh trùng tên đã tồn tại với nội dung khác.')
 }

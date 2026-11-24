@@ -1,23 +1,54 @@
-import { BrandMark } from '../components/branding/BrandMark'
+import { useState } from 'react'
+import { Alert } from '../components/chrome/Alert'
+import { AppHeader } from '../components/chrome/AppHeader'
+import { Spinner } from '../components/chrome/Button'
+import { Stepper } from '../components/chrome/Stepper'
 import { PageShell } from '../components/layout/PageShell'
-import { StepHeader } from '../components/layout/StepHeader'
+import { displayRoomName, roomCode } from '../features/rooms/displayRoomName'
 import type { Room } from '../models/Room'
 
 interface RoomSelectionPageProps {
   rooms: Room[]
   templateCount: (roomId: string) => number
   onBack: () => void
-  onSelect: (roomId: string) => void
+  onSelect: (roomId: string) => Promise<void> | void
   loading?: boolean
   error?: string | null
+  /** e.g. a room that could not be opened. */
+  notice?: string | null
 }
 
-export function RoomSelectionPage({ rooms, templateCount, onBack, onSelect, loading = false, error = null }: RoomSelectionPageProps) {
+export function RoomSelectionPage({ rooms, templateCount, onBack, onSelect, loading = false, error = null, notice = null }: RoomSelectionPageProps) {
+  const [opening, setOpening] = useState<string | null>(null)
+  const open = async (roomId: string) => {
+    if (opening) return
+    setOpening(roomId)
+    try { await onSelect(roomId) } finally { setOpening(null) }
+  }
   const status = loading
-    ? <div className="rounded-[1.75rem] border border-stone-200 bg-white p-12 text-center font-semibold text-stone-500" role="status">Loading rooms…</div>
+    ? <div aria-busy="true" aria-label="Đang tải phòng…" className="grid grid-cols-2 gap-3" role="status">{Array.from({ length: 4 }, (_, index) => <div className="cs-panel animate-pulse rounded-[20px] p-2" key={index}><div className="aspect-[170/110] rounded-[14px] bg-cs-graphite/80" /><div className="mx-1 mb-1 mt-3 h-4 w-3/4 rounded bg-cs-chrome-400/60" /><div className="mx-1 mb-2 mt-2 h-3 w-1/2 rounded bg-cs-chrome-400/40" /></div>)}<p className="sr-only">Đang tải phòng…</p></div>
     : error
-      ? <div className="rounded-[1.75rem] border border-rose-200 bg-rose-50 p-12 text-center font-semibold text-rose-700" role="alert">Unable to load rooms. Please try again.</div>
-      : <div className="rounded-[1.75rem] border border-dashed border-stone-300 bg-white p-12 text-center text-stone-500">No rooms available.</div>
+      ? <div className="cs-panel rounded-[20px] p-6 text-center" role="alert"><p className="font-extrabold text-cs-red-text">Không tải được danh sách phòng.</p><p className="mt-1 text-sm text-cs-ink-3">Kiểm tra kết nối mạng rồi thử lại.</p><button className="cs-btn-chrome cs-press mt-4 min-h-11 rounded-[16px] px-5 text-sm font-bold" onClick={() => window.location.reload()} type="button">Tải lại</button></div>
+      : <div className="cs-panel rounded-[20px] p-6 text-center"><p className="font-extrabold">Chưa có phòng nào</p><p className="mt-1 text-sm text-cs-ink-3">Vui lòng hỏi nhân viên tại quầy.</p></div>
 
-  return <PageShell><div className="flex items-center justify-between pb-8"><button className="min-h-11 rounded-full bg-white px-4 text-sm font-semibold shadow-sm" onClick={onBack} type="button">← Back</button><BrandMark compact /></div><StepHeader description="Each room has its own mood, colors, and print collection." eyebrow="Step 2 of 6" title="Choose your room" />{rooms.length && !loading && !error ? <section aria-label="Available rooms" className="grid w-full touch-pan-y grid-cols-2 gap-3 pb-12 sm:gap-4 lg:grid-cols-3">{rooms.map((room) => <button className="group relative aspect-square overflow-hidden rounded-2xl border border-stone-200 bg-white text-left shadow-sm transition duration-300 hover:-translate-y-1 hover:shadow-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-stone-950 sm:aspect-auto sm:rounded-[1.75rem]" key={room.id} onClick={() => onSelect(room.id)} type="button"><span className="absolute inset-0 grid place-items-center overflow-hidden bg-gradient-to-br from-rose-100 via-stone-100 to-violet-100 sm:relative sm:aspect-[16/10]">{room.cover ? <img alt="" className="h-full w-full object-cover transition duration-500 group-hover:scale-105" src={room.cover} /> : <span className="text-5xl font-black text-stone-300">{room.name.slice(0, 1)}</span>}<span className="absolute right-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[10px] font-bold backdrop-blur sm:bottom-3 sm:right-3 sm:top-auto sm:px-3 sm:text-xs">{templateCount(room.id)} templates</span><span className="absolute inset-x-0 bottom-0 h-3/5 bg-gradient-to-t from-stone-950/80 to-transparent sm:hidden" /></span><span className="absolute inset-x-0 bottom-0 block p-3 text-white sm:static sm:p-5 sm:text-stone-950"><span className="block line-clamp-2 text-sm font-black leading-tight tracking-tight sm:text-xl">{room.name}</span><span className="mt-2 hidden min-h-12 text-sm leading-6 text-stone-500 sm:block">{room.description || 'Discover this room’s print collection.'}</span><span className="mt-2 inline-flex min-h-9 items-center rounded-full bg-white px-3 text-[11px] font-bold text-stone-950 sm:mt-4 sm:min-h-11 sm:bg-stone-950 sm:px-5 sm:text-sm sm:text-white">Enter Room</span></span></button>)}</section> : status}</PageShell>
+  return <PageShell>
+    <AppHeader onBack={onBack} step={2} variant="flow" />
+    <div className="mt-3"><Stepper step={2} /></div>
+    <h1 className="mt-6 text-[28px] font-black leading-tight tracking-[-0.035em]">Chọn phòng in</h1>
+    <p className="mt-1 text-[15px] leading-normal text-cs-ink-2">Mỗi phòng có phong cách và bộ khung in riêng.</p>
+    {notice ? <Alert className="mt-4" kind="error">{notice}</Alert> : null}
+    <div className="mt-5">{rooms.length && !loading && !error ? <ul aria-label="Danh sách phòng" className="grid grid-cols-2 gap-3">{rooms.map((room, index) => {
+      const name = displayRoomName(room.name)
+      const count = templateCount(room.id)
+      const busy = opening === room.id
+      return <li key={room.id}><button aria-busy={busy || undefined} aria-label={`${name}, ${count} mẫu in`} className="cs-panel cs-press block w-full rounded-[20px] p-2 text-left disabled:opacity-60" disabled={Boolean(opening) && !busy} onClick={() => void open(room.id)} type="button">
+        <span className="relative block aspect-[170/110] overflow-hidden rounded-[14px] bg-cs-graphite">
+          {room.cover ? <img alt="" className="h-full w-full object-cover" decoding="async" loading={index < 4 ? 'eager' : 'lazy'} src={room.cover} /> : null}
+          <span className="cs-mono absolute left-2 top-2 rounded-full bg-cs-ink/85 px-2 py-1 text-[10px] text-white">{roomCode(index)}</span>
+          {busy ? <span className="absolute inset-0 grid place-items-center bg-cs-ink/55 text-white"><Spinner className="size-6" /></span> : null}
+        </span>
+        <span className="block px-1 pb-1 pt-2.5"><span className="block break-words text-[15px] font-extrabold leading-tight">{name}</span><span className="mt-1 block text-[13px] text-cs-ink-3">{count} mẫu in</span></span>
+      </button></li>
+    })}</ul> : status}</div>
+  </PageShell>
 }

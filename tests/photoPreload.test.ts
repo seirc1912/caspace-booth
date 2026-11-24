@@ -45,7 +45,7 @@ test('upload page preloads on pick, shows a preparing state and releases memory'
   const page = readFileSync(new URL('../client/src/pages/PhotoUploadPage.tsx', import.meta.url), 'utf8')
   assert.match(page, /for \(const file of selectedFiles\) \{\n\s+void preloadPhoto\(file\)/)
   assert.match(page, /source,\n\s+onPrepared: \(\) => markPrepared\(photo\.file\)/)
-  assert.match(page, /'ĐANG CHUẨN BỊ ẢNH…'/)
+  assert.match(page, /preparing \? 'Đang chuẩn bị ảnh…'/)
   assert.match(page, /forgetPhoto\(removed\.file\)/)
   assert.match(page, /\.finally\(\(\) => releasePreload\(photo\.file\)\)/)
   const client = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
@@ -54,10 +54,10 @@ test('upload page preloads on pick, shows a preparing state and releases memory'
 
 test('upload page asks for photos first, then the phone number', () => {
   const page = readFileSync(new URL('../client/src/pages/PhotoUploadPage.tsx', import.meta.url), 'utf8')
-  const picker = page.indexOf('1. Chọn ảnh cần in')
-  const phone = page.indexOf('2. Số điện thoại nhận ảnh')
+  const picker = page.indexOf('{stepBadge(1)}Chọn ảnh cần in')
+  const phone = page.indexOf('{stepBadge(2)}Số điện thoại nhận ảnh')
   assert.ok(picker > 0 && phone > picker, 'photo picker is above the phone field')
-  assert.ok(page.indexOf('+ CHỌN ẢNH PNG / JPG') < page.indexOf('id="upload-phone"'))
+  assert.ok(page.indexOf('Chọn ảnh từ máy') < page.indexOf('id="upload-phone"'))
   assert.match(page, /if \(!validPhone\) window\.setTimeout\(\(\) => phoneRef\.current\?\.focus\(\), 0\)/)
 })
 

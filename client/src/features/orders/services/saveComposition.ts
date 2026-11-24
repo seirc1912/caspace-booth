@@ -1,5 +1,6 @@
 import { downloadBlob } from './downloadBlob'
 import { prepareCompositionDownload, type DownloadCompositionInput } from './downloadComposition'
+import { prefersShareSheet } from './shareSheet'
 
 interface FileShareNavigator {
   canShare?: (data: ShareData) => boolean
@@ -9,6 +10,8 @@ interface FileShareNavigator {
 interface FileDeliveryOptions {
   download?: (blob: Blob, filename: string) => void
   navigator?: FileShareNavigator
+  /** Use the share sheet when the browser supports it (default: iPhone/iPad only). */
+  shareSheet?: boolean
 }
 
 export type FileDelivery = 'shared' | 'downloaded' | 'cancelled'
@@ -22,7 +25,7 @@ export async function deliverImageFile(blob: Blob, filename: string, options: Fi
   const download = options.download ?? downloadBlob
   const file = new File([blob], filename, { type: blob.type || 'image/png' })
   const shareData: ShareData = { files: [file] }
-  let fileSharingSupported = typeof navigatorApi.share === 'function'
+  let fileSharingSupported = (options.shareSheet ?? prefersShareSheet()) && typeof navigatorApi.share === 'function'
   try {
     if (fileSharingSupported && typeof navigatorApi.canShare === 'function') fileSharingSupported = navigatorApi.canShare(shareData)
   } catch {
@@ -53,7 +56,7 @@ export async function deliverImageFiles(files: File[], options: FileDeliveryOpti
   const navigatorApi = options.navigator ?? navigator
   const download = options.download ?? downloadBlob
   const shareData: ShareData = { files }
-  let supported = typeof navigatorApi.share === 'function'
+  let supported = (options.shareSheet ?? prefersShareSheet()) && typeof navigatorApi.share === 'function'
   try { if (supported && typeof navigatorApi.canShare === 'function') supported = navigatorApi.canShare(shareData) } catch { supported = false }
   if (supported && navigatorApi.share) {
     try { await navigatorApi.share(shareData); return 'shared' }

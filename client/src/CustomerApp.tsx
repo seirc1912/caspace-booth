@@ -10,15 +10,17 @@ import { useSelfBooth } from './hooks/useSelfBooth'
 import { createCustomerSession, type CustomerSession } from './features/photos/customerSession'
 import { createBoothPhotoLoader, loadBoothPhotoFiles, type BoothPhoto } from './features/boothPhotos/boothPhotosClient'
 import { useBoothPhotos } from './features/boothPhotos/useBoothPhotos'
-import { SendFramesSheet, type SendFrameRow } from './components/editor/SendFramesSheet'
 import { frameSignature, isFrameFilled, renderFrameFile, sendFrames, type FrameSendState, type SendableFrame } from './features/orders/services/sendFrames'
 import { prefetchAdjacentTemplateDetails } from './features/templates/templateDetailLookahead'
 import { commitTransitionAfterLoad } from './features/templates/frameSelection'
 import { ComposerPage } from './pages/ComposerPage'
 import { HomePage } from './pages/HomePage'
+import { usableImageUrl } from './services/catalog/SupabaseCatalogService'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { RoomSelectionPage } from './pages/RoomSelectionPage'
-import { TemplateSelectionPage } from './pages/TemplateSelectionPage'
+import { SendFramesPage, type SendFrameRow } from './pages/SendFramesPage'
+import { displayRoomName } from './features/rooms/displayRoomName'
+import type { EditorFrame } from './components/editor/FrameSwitcherSheet'
 
 export function CustomerApp() {
   const branding = useBranding(); const { pathname, navigate } = usePathname()
@@ -43,12 +45,23 @@ export function CustomerApp() {
   const boothLoader = useMemo(() => (validPhone ? createBoothPhotoLoader() : null), [validPhone])
   const loadBoothOriginal = (photo: BoothPhoto) => (boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!))
 
-  const requiredFrameCount = booth.roomTemplateSummaries.length
+  // Frame previews show the frame artwork itself (no sample photos); details are small JSON, images load lazily.
+  const roomFrameIds = booth.roomTemplateSummaries.map((summary) => summary.id).join(',')
+  const { ensureTemplateDetail } = booth
+  useEffect(() => { if (roomFrameIds) for (const id of roomFrameIds.split(',')) void ensureTemplateDetail(id).catch(() => undefined) }, [roomFrameIds, ensureTemplateDetail])
+  const frameThumb = (summary: { id: string; thumbnailUrl: string | null }) => {
+    const detail = booth.roomTemplates.find((item) => item.id === summary.id)
+    return detail ? usableImageUrl(detail.backgroundUrl) ?? summary.thumbnailUrl : null
+  }
+  const editorFrames: EditorFrame[] = booth.roomTemplateSummaries.map((summary) => {
+    const slots = booth.frameSlots[summary.id]
+    return { id: summary.id, name: summary.name, slotCount: slots?.length ?? summary.slotCount, filledCount: slots?.filter(Boolean).length ?? 0, thumbnailUrl: frameThumb(summary) }
+  })
 
   // "Gửi khung cho quán": several finished frames in one tap (signatures stop re-sending unchanged frames).
-  const [sendOpen, setSendOpen] = useState(false)
   const [sending, setSending] = useState(false)
   const [sendMessage, setSendMessage] = useState<string | null>(null)
+  const [sentCount, setSentCount] = useState<number | null>(null)
   const [sendStates, setSendStates] = useState<Record<string, { state: FrameSendState; progress?: number }>>({})
   const sentKey = customerSession ? `caspace.sent-frames.${customerSession.sessionId}` : null
   const [sentSignatures, setSentSignatures] = useState<{ key: string | null; value: Record<string, string> }>({ key: null, value: {} })
@@ -56,12 +69,13 @@ export function CustomerApp() {
   const sendRows: SendFrameRow[] = booth.roomTemplateSummaries.map((summary, index) => {
     const slots = booth.frameSlots[summary.id]
     const filled = isFrameFilled(slots)
-    return { templateId: summary.id, frameNumber: index + 1, name: summary.name, filled, sent: filled && sentForSession[summary.id] === frameSignature(slots!), ...sendStates[summary.id] }
+    return { templateId: summary.id, frameNumber: index + 1, name: summary.name, thumbnailUrl: frameThumb(summary), slotCount: editorFrames[index]!.slotCount, filledCount: editorFrames[index]!.filledCount, filled, sent: filled && sentForSession[summary.id] === frameSignature(slots!), ...sendStates[summary.id] }
   })
   const sendSelectedFrames = async (templateIds: string[]) => {
     if (sending || !validPhone) return
     setSending(true)
     setSendMessage(null)
+    setSentCount(null)
     const assetCache = new RenderAssetCache(remoteExportAssets)
     try {
       const frames: SendableFrame[] = []
@@ -78,8 +92,10 @@ export function CustomerApp() {
       try { if (sentKey) sessionStorage.setItem(sentKey, JSON.stringify(next)) } catch { /* in-memory only */ }
       const failed = results.filter((result) => !result.ok).length
       const firstError = results.find((result) => result.error)?.error
-      setSendMessage(failed ? `Đã gửi ${results.length - failed} khung. ${failed} khung chưa gửi được${firstError ? ` (${firstError})` : ''} — bấm gửi lại.` : `Đã gửi ${results.length} khung cho quán. Cảm ơn bạn!`)
-    } catch (reason) { setSendMessage(reason instanceof Error ? reason.message : 'Không gửi được khung. Vui lòng thử lại.') }
+      if (firstError) console.warn('[send-frames] frame failed', firstError)
+      if (failed) setSendMessage(`${results.length - failed ? `Đã gửi ${results.length - failed} khung. ` : ''}${failed} khung chưa gửi được. Kiểm tra mạng rồi bấm gửi lại.`)
+      else setSentCount(results.length)
+    } catch (reason) { console.warn('[send-frames] send failed', reason); setSendMessage('Không gửi được khung. Kiểm tra mạng rồi thử lại.') }
     finally { assetCache.clear(); setSending(false) }
   }
 
@@ -99,7 +115,7 @@ export function CustomerApp() {
         },
       )
     }
-    catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to load this Room’s first frame.') }
+    catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Không mở được phòng này. Vui lòng thử lại.') }
   }
 
   const saveCurrentFrame = async () => {
@@ -117,13 +133,13 @@ export function CustomerApp() {
         () => {
           booth.completeCurrentFrame()
           // Timings are only logged (frame-save); nothing is shown to customers.
-          setSaveConfirmation(`Frame ${frameNumber} photo saved.`)
+          setSaveConfirmation(`Đã lưu ảnh khung ${String(frameNumber).padStart(2, '0')} về máy.`)
           if (saveConfirmationTimer.current !== null) window.clearTimeout(saveConfirmationTimer.current)
           saveConfirmationTimer.current = window.setTimeout(() => { saveConfirmationTimer.current = null; setSaveConfirmation(null) }, 2200)
         },
       )
     }
-    catch (reason) { booth.reportPhotoError(reason instanceof Error ? reason.message : 'Unable to save this photo.') }
+    catch (reason) { console.warn('[frame-save] failed', reason); booth.reportPhotoError('Không lưu được ảnh về máy. Vui lòng thử lại.') }
     finally { assetCache.clear(); setDownloading(false) }
   }
 
@@ -178,18 +194,21 @@ export function CustomerApp() {
     }, 0)
     return () => { active = false; window.clearTimeout(timer) }
   }, [booth.ensureTemplateDetail, booth.roomTemplateSummaries, booth.template.id, booth.templateReady, branding, debugAssetPrefetch, pathname, remoteExportAssets])
-  // Old links to the removed picker step land in the editor.
-  useEffect(() => { if (pathname === '/booth-photos') navigate('/editor') }, [navigate, pathname])
+  // Old links to the removed picker / template steps land in the editor.
+  useEffect(() => { if (pathname === '/booth-photos' || pathname === '/templates') navigate('/editor', true) }, [navigate, pathname])
+  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
   useEffect(() => () => remoteExportAssets.clear(), [remoteExportAssets])
   useEffect(() => () => { if (saveConfirmationTimer.current !== null) window.clearTimeout(saveConfirmationTimer.current) }, [])
 
+  const roomsPage = <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} notice={booth.photoError} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} />
   if (pathname === '/') return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} /> : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/booth-photos') return null
-  if (pathname === '/templates' && booth.room) return <TemplateSelectionPage onBack={() => navigate('/rooms')} onContinue={() => { booth.openEditor(); navigate('/editor') }} onSelect={booth.selectTemplate} roomName={booth.room.name} selectedTemplateId={booth.selectedTemplateId} templates={booth.roomTemplates} />
-  if (pathname === '/editor' && !booth.draftReady) return null
-  if (pathname === '/editor' && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
-  if (pathname === '/editor' && !booth.selectedTemplateId) return <RoomSelectionPage error={booth.roomsError} loading={booth.roomsLoading} onBack={() => navigate('/')} onSelect={enterRoom} rooms={booth.rooms} templateCount={(roomId) => booth.templates.filter((template) => template.roomId === roomId).length} />
-  if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} autoFillHasExistingPhotos={booth.autoFillHasExistingPhotos} autoFillPhotoCount={booth.autoFillPhotoCount} autoFillPreparing={booth.autoFillPreparing} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} completedFrameIds={booth.completedFrameIds} currentSlot={booth.currentSlot} downloading={downloading} frameCount={requiredFrameCount} frameIds={booth.roomTemplateSummaries.map((template) => template.id)} frameIndex={booth.currentFrameIndex} onAutoFillPhotos={booth.autoFillAllFrames} boothPhotos={boothPhotoList} loadBoothOriginal={loadBoothOriginal} sendableFrameCount={sendRows.filter((row) => row.filled).length} onOpenSendFrames={() => { setSendStates({}); setSendMessage(null); setSendOpen(true) }} onBack={() => navigate('/rooms')} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onPrevious={() => booth.selectFrame(booth.currentFrameIndex - 1)} onRemove={booth.removeSlot} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} onFitChange={booth.updateFit} saveConfirmation={saveConfirmation} slots={booth.slots} template={booth.template} photoError={booth.photoError} onClearPhotoError={booth.clearPhotoError} onPhotoError={booth.reportPhotoError} />{sendOpen ? <SendFramesSheet message={sendMessage} onClose={() => setSendOpen(false)} onSend={(ids) => void sendSelectedFrames(ids)} rows={sendRows} sending={sending} /> : null}</EditorErrorBoundary>
+  if (pathname === '/rooms') return isValidPhoneNumber(booth.phoneNumber) ? roomsPage : <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (pathname === '/booth-photos' || pathname === '/templates') return null
+  const inFlow = pathname === '/editor' || pathname === '/gui-in'
+  if (inFlow && !booth.draftReady) return null
+  if (inFlow && !isValidPhoneNumber(booth.phoneNumber)) return <HomePage onContinue={continueFromPhone} phoneNumber={booth.phoneNumber} />
+  if (inFlow && !booth.selectedTemplateId) return roomsPage
+  if (pathname === '/gui-in' && validPhone) return <SendFramesPage message={sendMessage} onBack={() => navigate('/editor')} onContinueFrame={(frameNumber) => { booth.selectFrame(frameNumber - 1); navigate('/editor') }} onHome={() => navigate('/')} onRooms={() => navigate('/rooms')} onSend={(ids) => void sendSelectedFrames(ids)} phone={validPhone} roomName={booth.room ? displayRoomName(booth.room.name) : ''} rows={sendRows} sending={sending} sentCount={sentCount} />
+  if (pathname === '/editor' && booth.selectedTemplateId && booth.templateReady) return <EditorErrorBoundary onError={booth.reportPhotoError}><ComposerPage allBwEnabled={booth.allBwEnabled} autoFillHasExistingPhotos={booth.autoFillHasExistingPhotos} autoFillPhotoCount={booth.autoFillPhotoCount} autoFillPreparing={booth.autoFillPreparing} backgroundUrl={editorBackground?.canonical === booth.template.backgroundUrl ? editorBackground.local : booth.template.backgroundUrl && !/^https?:/i.test(booth.template.backgroundUrl) ? booth.template.backgroundUrl : null} boothPhotos={boothPhotoList} currentSlot={booth.currentSlot} downloading={downloading} frameIndex={booth.currentFrameIndex} frames={editorFrames} loadBoothOriginal={loadBoothOriginal} onAutoFillPhotos={booth.autoFillAllFrames} onBack={() => navigate('/rooms')} onClearPhotoError={booth.clearPhotoError} onCurrentSlotChange={booth.setCurrentSlot} onDownload={saveCurrentFrame} onFilterChange={booth.updateFilter} onFitChange={booth.updateFit} onOpenSendFrames={() => { setSendStates({}); setSendMessage(null); setSentCount(null); navigate('/gui-in') }} onPhotoError={booth.reportPhotoError} onPickFramePhotos={booth.addPhotosToFrame} onPickPhoto={booth.addPhotoToTarget} onRemove={booth.removeSlot} onSelectFrame={booth.selectFrame} onToggleAllBw={booth.toggleAllBw} onTransform={booth.updateTransform} photoError={booth.photoError} printSize={booth.roomTemplateSummaries[booth.currentFrameIndex]?.printSize} saveConfirmation={saveConfirmation} sendableFrameCount={sendRows.filter((row) => row.filled).length} slots={booth.slots} template={booth.template} /></EditorErrorBoundary>
   return <NotFoundPage />
 }

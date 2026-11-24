@@ -11,11 +11,12 @@ interface TemplateCanvasProps {
   slots: Array<FilledSlot | null>
   activeSlot: number | null
   cropSlot?: number | null
+  /** Slots the customer locked: no drag, pinch, double-tap reset or crop until unlocked. */
+  lockedSlots?: number[]
   onActiveSlotChange: (index: number) => void
   onAdd: (index: number) => void
   onRemove: (index: number) => void
   onReset?: (index: number) => void
-  onReplace: (index: number) => void
   onBeginCrop?: (index: number) => void
   onDropPhoto?: (index: number, photoId: string) => void
   onImageError?: (message: string) => void
@@ -23,10 +24,10 @@ interface TemplateCanvasProps {
   readonly?: boolean
 }
 
-export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cropSlot = null, onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onReplace, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
+export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cropSlot = null, lockedSlots = [], onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onBeginCrop = () => undefined, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
   return (
     <TemplateSurface
-      className="rounded-[1.75rem] shadow-xl shadow-stone-900/10"
+      className="rounded-[6px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.8)]"
       renderSlot={(templateSlot, index) => {
         const slot = slots[index] ?? null
         const borderRadius = templateSlot.mask === 'circle' || templateSlot.mask === 'ellipse' ? '50%' : `${templateSlot.borderRadius / Math.min(templateSlot.width, templateSlot.height) * 100}%`
@@ -36,9 +37,10 @@ export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cro
             {readonly && slot ? (
               <CustomerPhotoLayer slot={slot} />
             ) : (
-              <EditorErrorBoundary fallback={<button className="grid h-full w-full place-items-center bg-rose-50 p-2 text-xs font-bold text-rose-600" onClick={() => onRemove(index)} type="button">Remove unavailable image</button>} onError={onImageError}><PhotoFrame
+              <EditorErrorBoundary fallback={<button className="grid h-full w-full place-items-center bg-cs-alert-error-bg p-2 text-xs font-bold text-cs-alert-error-fg" onClick={() => onRemove(index)} type="button">Ảnh lỗi · chạm để xoá</button>} onError={onImageError}><PhotoFrame
                 active={activeSlot === index}
-                cropMode={cropSlot === index}
+                cropMode={!lockedSlots.includes(index) && (cropSlot === index || activeSlot === index)}
+                locked={lockedSlots.includes(index)}
                 index={index}
                 slotLabel={template.slots.length > 1 ? `Hình ${index + 1}` : undefined}
                 onActivate={() => onActiveSlotChange(index)}
@@ -46,9 +48,7 @@ export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cro
                 onBeginCrop={() => onBeginCrop(index)}
                 onDropPhoto={(photoId) => onDropPhoto(index, photoId)}
                 onImageError={onImageError}
-                onRemove={() => onRemove(index)}
                 onReset={() => onReset(index)}
-                onReplace={() => onReplace(index)}
                 onTransform={(transform) => onTransform(index, transform)}
                 rules={templateSlot.editableRules}
                 slot={slot}

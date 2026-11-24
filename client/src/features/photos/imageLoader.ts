@@ -10,7 +10,7 @@ function photoId() {
 export function loadPhotoFile(file: File): Promise<PhotoAsset> {
   return new Promise((resolve, reject) => {
     const supportedExtension = /\.(?:jpe?g|png|heic|heif)$/i.test(file?.name ?? '')
-    if (!(file instanceof File) || (!file.type.startsWith('image/') && !supportedExtension)) { reject(new Error('Please choose a supported image file.')); return }
+    if (!(file instanceof File) || (!file.type.startsWith('image/') && !supportedExtension)) { reject(new Error('Hãy chọn tệp ảnh JPG, PNG hoặc HEIC.')); return }
     const src = URL.createObjectURL(file)
     const image = new Image()
     const releaseImage = () => { image.onload = null; image.onerror = null; image.src = '' }
@@ -28,19 +28,19 @@ export function loadPhotoFile(file: File): Promise<PhotoAsset> {
         canvas.width = Math.max(1, Math.round(image.naturalWidth * exportScale))
         canvas.height = Math.max(1, Math.round(image.naturalHeight * exportScale))
         const context = canvas.getContext('2d', { alpha: true })
-        if (!context) throw new Error('Image preview is unavailable')
+        if (!context) throw new Error('Không tạo được bản xem trước của ảnh.')
         context.drawImage(image, 0, 0, canvas.width, canvas.height)
         const preserveAlpha = file.type === 'image/png' || /\.png$/i.test(file.name)
-        const exportBlob = await new Promise<Blob>((resolveBlob, rejectBlob) => canvas.toBlob((blob) => blob ? resolveBlob(blob) : rejectBlob(new Error('Image could not be prepared for export')), preserveAlpha ? 'image/png' : 'image/jpeg', 0.98))
+        const exportBlob = await new Promise<Blob>((resolveBlob, rejectBlob) => canvas.toBlob((blob) => blob ? resolveBlob(blob) : rejectBlob(new Error('Không chuẩn bị được ảnh.')), preserveAlpha ? 'image/png' : 'image/jpeg', 0.98))
         const exportSrc = URL.createObjectURL(exportBlob)
         const previewScale = Math.min(1, 1600 / Math.max(canvas.width, canvas.height))
         const previewCanvas = document.createElement('canvas')
         previewCanvas.width = Math.max(1, Math.round(canvas.width * previewScale))
         previewCanvas.height = Math.max(1, Math.round(canvas.height * previewScale))
         const previewContext = previewCanvas.getContext('2d', { alpha: true })
-        if (!previewContext) throw new Error('Image preview is unavailable')
+        if (!previewContext) throw new Error('Không tạo được bản xem trước của ảnh.')
         previewContext.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height)
-        const previewBlob = await new Promise<Blob>((resolveBlob, rejectBlob) => previewCanvas.toBlob((blob) => blob ? resolveBlob(blob) : rejectBlob(new Error('Image preview could not be created')), preserveAlpha ? 'image/png' : 'image/jpeg', 0.9))
+        const previewBlob = await new Promise<Blob>((resolveBlob, rejectBlob) => previewCanvas.toBlob((blob) => blob ? resolveBlob(blob) : rejectBlob(new Error('Không tạo được bản xem trước của ảnh.')), preserveAlpha ? 'image/png' : 'image/jpeg', 0.9))
         context.clearRect(0, 0, canvas.width, canvas.height); canvas.width = 1; canvas.height = 1
         previewCanvas.width = 1; previewCanvas.height = 1
         releaseImage()
