@@ -11,7 +11,6 @@ interface BrandingProviderProps {
 
 type BrandStyles = CSSProperties & {
   '--brand-primary': string
-  '--brand-secondary': string
 }
 
 export function BrandingProvider({ branding, children }: BrandingProviderProps) {
@@ -33,7 +32,6 @@ export function BrandingProvider({ branding, children }: BrandingProviderProps) 
 
   const style: BrandStyles = {
     '--brand-primary': current.primaryColor,
-    '--brand-secondary': current.secondaryColor,
   }
 
   return (
