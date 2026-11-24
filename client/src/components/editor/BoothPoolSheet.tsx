@@ -19,6 +19,9 @@ interface BoothPoolSheetProps {
   /** pick mode: chosen ids in pick order; the editor downloads their originals. */
   onConfirm?: (ids: string[]) => void
   onUsePhone?: () => void
+  /** Pick mode outside the editor (Cá Color Lab): own subtitle and confirm label. */
+  pickSubtitle?: string
+  confirmLabel?: string
   onClose: () => void
 }
 
@@ -26,7 +29,7 @@ interface BoothPoolSheetProps {
  * Booth photos inside the editor: thumbnails only (instant); the large viewer uses the 1600px
  * preview, and originals are fetched only for the photos actually placed in a frame.
  */
-export function BoothPoolSheet({ photos, mode, capacity = 1, slotNumbers = [], onConfirm, onUsePhone, onClose }: BoothPoolSheetProps) {
+export function BoothPoolSheet({ photos, mode, capacity = 1, slotNumbers = [], onConfirm, onUsePhone, onClose, pickSubtitle, confirmLabel }: BoothPoolSheetProps) {
   const browse = mode === 'browse'
   const limit = capacity
   const [selected, setSelected] = useState<string[]>([])
@@ -43,13 +46,14 @@ export function BoothPoolSheet({ photos, mode, capacity = 1, slotNumbers = [], o
     ? 'Chưa có ảnh của số điện thoại này.'
     : browse
     ? `${photos.length} ảnh. Chạm vào ảnh để xem lớn. Ảnh phòng chụp được lưu 6 giờ; sau đó vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive.`
+    : pickSubtitle ? pickSubtitle
     : limit === 1
       ? (slotNumbers.length ? `Chọn 1 ảnh cho hình ${slotNumbers[0]}.` : 'Chọn 1 ảnh cho khung này.')
       : `Chọn tối đa ${limit} ảnh. Ảnh chọn trước vào hình trước: ${slotNumbers.map((number) => `hình ${number}`).join(', ')}.`
 
   const footer = browse
     ? undefined
-    : <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)] gap-2.5"><Button icon={<Icon className="size-[18px]" name="mobile" />} onClick={onUsePhone} variant="chrome">Từ điện thoại</Button><Button disabled={!selected.length} onClick={() => onConfirm?.(selected)}>{selected.length && slotNumbers.length ? `Thêm vào ${selected.map((_, order) => `hình ${slotNumbers[order]}`).join(', ')}` : selected.length ? `Thêm ${selected.length} ảnh` : 'Chọn ảnh để thêm'}</Button></div>
+    : <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)] gap-2.5"><Button icon={<Icon className="size-[18px]" name="mobile" />} onClick={onUsePhone} variant="chrome">Từ điện thoại</Button><Button disabled={!selected.length} onClick={() => onConfirm?.(selected)}>{selected.length && confirmLabel ? confirmLabel : selected.length && slotNumbers.length ? `Thêm vào ${selected.map((_, order) => `hình ${slotNumbers[order]}`).join(', ')}` : selected.length ? `Thêm ${selected.length} ảnh` : 'Chọn ảnh để thêm'}</Button></div>
 
   return <BottomSheet footer={footer} onClose={onClose} subtitle={subtitle} title="Ảnh phòng chụp">
     {browse && !photos.length ? <p className="rounded-[14px] bg-cs-graphite/5 p-4 text-center text-[15px] leading-normal text-cs-ink-2">Ảnh phòng chụp hiện lên ở đây vài phút sau khi chụp và được lưu 6 giờ. Nếu chưa thấy ảnh hoặc đã quá 6 giờ, vui lòng liên hệ nhân viên để nhận ảnh qua Google Drive.</p> : null}
