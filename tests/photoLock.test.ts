@@ -20,3 +20,13 @@ test('the crop bar lock button locks the photo; a locked slot cannot be dragged,
   assert.match(toolbar, /icon="lock" label="Mở khoá"/)
   assert.match(toolbar, /disabled=\{disabled \|\| !hasPhoto \|\| locked\} icon="zoomIn"/, '"Phóng to" cannot move a locked photo')
 })
+
+test('the lock button sits on the photo itself: shown on the selected or locked slot, toggles without entering crop mode', () => {
+  const read = (file: string) => readFileSync(new URL(`../client/src/${file}`, import.meta.url), 'utf8')
+  const frame = read('components/editor/PhotoFrame.tsx')
+  assert.match(frame, /slot && onToggleLock && \(locked \|\| active\) \? <button aria-label=\{locked \? 'Mở khoá ảnh' : 'Khoá ảnh, giữ cách cắt này'\}/)
+  assert.match(frame, /onPointerDown=\{\(event\) => event\.stopPropagation\(\)\}/, 'tapping the lock never starts a drag')
+  const composer = read('pages/ComposerPage.tsx')
+  assert.match(composer, /onToggleLock=\{toggleLock\}/)
+  assert.match(composer, /Kéo để căn ảnh · bấm ổ khoá trên ảnh để giữ ảnh/)
+})
