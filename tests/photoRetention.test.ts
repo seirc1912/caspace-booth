@@ -33,7 +33,7 @@ test('retention paginates past 1,000 customer folders and includes _thumbs', asy
 
 test('retention is 3 days and covers frames, thumbnails, booth photos and booth thumbnails', () => {
   assert.equal(PHOTO_RETENTION_DAYS, 3)
-  assert.deepEqual(retentionPrefixes('0947860616'), ['0947860616', '0947860616/_thumbs', '0947860616/_booth', '0947860616/_booth/_thumbs'])
+  assert.deepEqual(retentionPrefixes('0947860616'), ['0947860616', '0947860616/_thumbs', '0947860616/_booth', '0947860616/_booth/_thumbs', '0947860616/_booth/_previews'])
 })
 
 test('removal is batched by 100', async () => {

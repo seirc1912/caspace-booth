@@ -8,7 +8,7 @@ import { UploadQueue } from './queue.ts'
 import { AUTOMATIC_RESCAN_MS, PERIODIC_RESCAN_MS, pendingJobs, scanExports } from './scanner.ts'
 import { StateStore } from './stateStore.ts'
 import { startStatusServer } from './statusServer.ts'
-import { makeThumbnail } from './thumbnail.ts'
+import { makePreview, makeThumbnail } from './thumbnail.ts'
 
 const configPath = path.resolve(process.argv[2] ?? 'config.json')
 const config = loadConfig(configPath)
@@ -23,6 +23,7 @@ const queue = new UploadQueue({
   api: { baseUrl: config.apiBaseUrl, key: config.boothKey },
   state,
   makeThumbnail,
+  makePreview,
   concurrency: config.concurrency,
   onEvent: (event) => {
     if (event.type === 'uploaded') { lastError = null; log(`[sent] ${event.job.sessionFolder}/${path.basename(event.job.filePath)}${event.alreadyUploaded ? ' (đã có)' : ''}`) }

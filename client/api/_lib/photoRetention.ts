@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
-import { BOOTH_FOLDER, BOOTH_THUMBS } from './boothPaths.js'
+import { BOOTH_FOLDER, BOOTH_PREVIEWS, BOOTH_THUMBS } from './boothPaths.js'
 import { customerPhotoBucket, THUMBNAIL_FOLDER } from './supabaseStorage.js'
 
 // Owner decision (23/11/2026): booth originals AND frames customers send are kept 3 days.
@@ -21,7 +21,7 @@ async function listAll(client: SupabaseClient, prefix: string, sortColumn: 'name
 
 /** Every prefix that holds objects for one customer folder. */
 export function retentionPrefixes(folder: string) {
-  return [folder, `${folder}/${THUMBNAIL_FOLDER}`, `${folder}/${BOOTH_FOLDER}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_THUMBS}`]
+  return [folder, `${folder}/${THUMBNAIL_FOLDER}`, `${folder}/${BOOTH_FOLDER}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_THUMBS}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_PREVIEWS}`]
 }
 
 /**

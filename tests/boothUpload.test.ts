@@ -5,7 +5,7 @@ import test from 'node:test'
 import { UploadApiError } from '../client/api/_lib/http.ts'
 import { requireBooth } from '../client/api/_lib/boothAuth.ts'
 import { resetRateLimitsForTests } from '../client/api/_lib/rateLimit.ts'
-import { boothOriginalPath, boothThumbnailPath, parseBoothCompletion, parseBoothUploadMetadata, prepareBoothUpload, withContentSuffix } from '../client/api/_lib/boothPaths.ts'
+import { boothOriginalPath, boothPreviewPath, boothThumbnailPath, parseBoothCompletion, parseBoothUploadMetadata, prepareBoothUpload, withContentSuffix } from '../client/api/_lib/boothPaths.ts'
 import { isLocalDevelopmentUrl, resumableEndpoint, SupabasePhotoUploadService } from '../client/api/_lib/supabaseStorage.ts'
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 16, 0x4a, 0x46, 0x49, 0x46, 0, 1, 2, 3, 4, 5, 6, 7])
@@ -121,4 +121,13 @@ test('20 wrong booth keys from one IP lock that IP out, even for the right key',
   for (let attempt = 0; attempt < 20; attempt += 1) assert.throws(() => requireBooth(from('198.51.100.7', `guess${attempt}xx`), { BOOTH_UPLOAD_KEYS: keys }), (error: unknown) => error instanceof UploadApiError && error.status === 401)
   assert.throws(() => requireBooth(from('198.51.100.7', 'secret-one'), { BOOTH_UPLOAD_KEYS: keys }), (error: unknown) => error instanceof UploadApiError && error.status === 429)
   assert.deepEqual(requireBooth(from('203.0.113.9', 'secret-one'), { BOOTH_UPLOAD_KEYS: keys }), { boothId: 'booth-1' }, 'other IPs (the shop) unaffected')
+})
+
+test('booth previews: 2 MB limit, stored under _previews, tied to their original', async () => {
+  const preview = parseBoothUploadMetadata({ ...original(), filename: '0947860616-103333-preview.jpg', variant: 'preview', size: 300_000, originalPath: '0947860616/_booth/0947860616-103333.jpg' })
+  assert.equal(boothPreviewPath(preview.originalPath!), '0947860616/_booth/_previews/0947860616-103333-preview.jpg')
+  assert.throws(() => parseBoothUploadMetadata({ ...original(), variant: 'preview', size: 3 * 1024 * 1024, originalPath: '0947860616/_booth/0947860616-103333.jpg' }))
+  assert.throws(() => parseBoothUploadMetadata({ ...original(), variant: 'preview', size: 300_000, originalPath: '0999999999/_booth/0947860616-103333.jpg' }))
+  const { service } = storage({ '0947860616/_booth/_previews/0947860616-103333-preview.jpg': jpeg })
+  assert.deepEqual(await prepareBoothUpload(service, preview), { alreadyUploaded: true, objectPath: '0947860616/_booth/_previews/0947860616-103333-preview.jpg' })
 })

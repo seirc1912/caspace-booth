@@ -31,6 +31,7 @@ test('listing returns thumbnails + originals inside the window, without Image Tr
   assert.deepEqual(result.photos.map((item) => item.id), ['0947860616-1.jpg', '0947860616-2.jpg'])
   assert.equal(result.photos[0]!.thumbUrl, 'https://signed/0947860616/_booth/_thumbs/0947860616-1-thumb.jpg')
   assert.equal(result.photos[0]!.originalUrl, 'https://signed/0947860616/_booth/0947860616-1.jpg')
+  assert.equal(result.photos[0]!.previewUrl, 'https://signed/0947860616/_booth/_previews/0947860616-1-preview.jpg')
   assert.ok(signCalls.every((args) => args.length === 2), 'plain signed URLs, no transform options')
 })
 
@@ -192,4 +193,16 @@ test('no viewing window: photos stay visible until the 3-day cleanup deletes the
   assert.equal(twoDaysOld.status, 'ok')
   assert.equal(twoDaysOld.photos.length, 1)
   assert.ok(!('viewableUntil' in twoDaysOld))
+})
+
+test('booth photos without a preview fall back to null; the viewer shows the preview when present', async () => {
+  const bucket = {
+    list: async (prefix: string) => ({ data: prefix === '0947860616/_booth' ? [photo('a.jpg', HOUR)] : [], error: null }),
+    createSignedUrls: async (paths: string[]) => ({ data: paths.map((path) => path.includes('_previews') ? { path, signedUrl: '', error: 'Object not found' } : { path, signedUrl: `https://signed/${path}`, error: null }), error: null }),
+  }
+  const result = await listBoothPhotos({ storage: { from: () => bucket } } as never, '0947860616')
+  assert.equal(result.photos[0]!.previewUrl, null)
+  assert.equal(result.photos[0]!.originalUrl, 'https://signed/0947860616/_booth/a.jpg')
+  const viewer = readFileSync(new URL('../client/src/components/booth/BoothPhotoViewer.tsx', import.meta.url), 'utf8')
+  assert.match(viewer, /photo\.previewUrl \|\| photo\.originalUrl/)
 })

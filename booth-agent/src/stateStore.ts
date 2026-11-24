@@ -9,7 +9,11 @@ export class StateStore {
     try { this.uploaded = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string> } catch { this.uploaded = {} }
   }
 
-  static key(path: string, size: number, mtimeMs: number) { return `${path}|${size}|${Math.round(mtimeMs)}` }
+  /**
+   * `|p`: uploaded together with its 1600px preview. Keys from older versions lack it, so after an
+   * update the last 24 hours are sent once more; originals already stored are skipped, only previews go up.
+   */
+  static key(path: string, size: number, mtimeMs: number) { return `${path}|${size}|${Math.round(mtimeMs)}|p` }
 
   has(key: string) { return key in this.uploaded }
 

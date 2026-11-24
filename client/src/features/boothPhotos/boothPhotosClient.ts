@@ -1,6 +1,7 @@
 import { clearUploadSession, ensureUploadSession } from '../photoUpload/uploadClient'
 
-export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; originalUrl: string; uploadedAt: string }
+/** previewUrl: 1600px copy for viewing large; originalUrl: full file for saving and printing. */
+export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; previewUrl?: string | null; originalUrl: string; uploadedAt: string }
 export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[] } | { status: 'unavailable'; photos: [] }
 /**
  * Originals for the photos actually used (Auto Fill, Add Image), with progress; a

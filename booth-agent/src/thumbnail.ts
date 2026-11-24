@@ -4,3 +4,8 @@ import sharp from 'sharp'
 export async function makeThumbnail(bytes: Buffer) {
   return sharp(bytes).rotate().resize(400, 400, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 70, mozjpeg: true }).toBuffer()
 }
+
+/** 1600px long edge (~200–300 KB): sharp on a phone screen, shown when the customer views a photo large. Server limit 2 MB. */
+export async function makePreview(bytes: Buffer) {
+  return sharp(bytes).rotate().resize(1600, 1600, { fit: 'inside', withoutEnlargement: true }).jpeg({ quality: 80, mozjpeg: true }).toBuffer()
+}
