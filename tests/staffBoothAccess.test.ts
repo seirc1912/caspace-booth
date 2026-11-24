@@ -51,5 +51,5 @@ test('staff see how many photos the customer can pick; no reopen button any more
   assert.match(source, /request\.method !== 'GET'/)
   const page = readFileSync('client/src/pages/StaffPhotosPage.tsx', 'utf8')
   assert.doesNotMatch(page, /Mở lại 6 giờ/)
-  assert.match(page, /ảnh phòng chụp tự xoá sau 6 giờ, ảnh khách gửi sau 3 ngày/)
+  assert.match(page, /ảnh phòng chụp và ảnh khách gửi tự xoá sau 6 giờ/)
 })
