@@ -28,12 +28,14 @@ interface SendFramesPageProps {
   onBack: () => void
   onContinueFrame: (frameNumber: number) => void
   onHome: () => void
+  /** Back to the room list to pick another room. */
+  onRooms: () => void
 }
 
 const stateLabel: Record<FrameSendState, string> = { waiting: 'Đang chờ', rendering: 'Đang tạo ảnh…', uploading: 'Đang gửi', sent: 'Đã gửi', failed: 'Lỗi · thử gửi lại' }
 
 /** Step 4 · Gửi in: tick finished frames and send them to the print counter in one tap. */
-export function SendFramesPage({ rows, phone, roomName, sending, message, sentCount, onSend, onBack, onContinueFrame, onHome }: SendFramesPageProps) {
+export function SendFramesPage({ rows, phone, roomName, sending, message, sentCount, onSend, onBack, onContinueFrame, onHome, onRooms }: SendFramesPageProps) {
   const branding = useBranding()
   const [ticked, setTicked] = useState<string[]>(() => rows.filter((row) => row.filled && !row.sent).map((row) => row.templateId))
   const toggle = (id: string) => setTicked((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
@@ -49,7 +51,7 @@ export function SendFramesPage({ rows, phone, roomName, sending, message, sentCo
         <h1 className="mt-6 text-[28px] font-black tracking-[-0.035em]">Đã gửi {sentCount} khung</h1>
         <p className="mt-2 max-w-[20rem] text-[15px] leading-normal text-cs-ink-2">Báo số <strong className="whitespace-nowrap">{formatPhoneDisplay(phone)}</strong> tại quầy để nhận ảnh in.</p>
         {socials.length ? <div className="mt-6 w-full"><p className="cs-mono text-[11px] text-cs-ink-2">Theo dõi Cá Space</p><ul className="mt-2 flex flex-wrap justify-center gap-2">{socials.map((item) => <li key={item.label}><a className={buttonClass('chrome', { className: 'min-h-11 rounded-full px-4' })} href={item.href} rel="noopener noreferrer" target="_blank"><Icon className="size-[18px]" name={item.icon} />{item.label}</a></li>)}</ul></div> : null}
-        <div className="mt-8 grid w-full gap-2.5"><Button onClick={onBack} variant="chrome">Ghép thêm khung</Button><Button onClick={onHome}>Về trang chủ</Button></div>
+        <div className="mt-8 grid w-full gap-2.5"><Button onClick={onBack} variant="chrome">Ghép thêm khung</Button><Button onClick={onRooms} variant="chrome">Chọn phòng khác</Button><Button onClick={onHome}>Về trang chủ</Button></div>
       </section>
     </PageShell>
   }
@@ -79,5 +81,6 @@ export function SendFramesPage({ rows, phone, roomName, sending, message, sentCo
       <div className="flex justify-between gap-4"><dt className="shrink-0 text-white/80">Phòng</dt><dd className="truncate text-right font-bold">{roomName}</dd></div>
       <div className="flex justify-between gap-4"><dt className="text-white/80">Số khung gửi</dt><dd className="font-bold">{count}</dd></div>
     </dl></section>
+    <Button className="mt-3 w-full" disabled={sending} icon={<Icon name="back" />} onClick={onRooms} variant="chrome">Chọn phòng khác</Button>
   </PageShell>
 }
