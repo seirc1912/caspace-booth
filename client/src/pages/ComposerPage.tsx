@@ -241,7 +241,8 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
     </div>
 
     <div className="mt-2.5 grid auto-cols-fr grid-flow-col gap-2">
-      {boothPhotos.length ? <button className="cs-btn-chrome cs-press flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1.5 py-1.5 text-[12px] font-bold leading-tight" onClick={() => setBrowseBooth(true)} type="button"><Icon className="size-[18px] shrink-0" name="camera" /><span>Ảnh phòng chụp ({boothPhotos.length})</span></button> : null}
+      {/* Always shown (owner, 25/11/2026): with no photos the sheet explains the 6-hour window. */}
+      <button className="cs-btn-chrome cs-press flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1.5 py-1.5 text-[12px] font-bold leading-tight" onClick={() => setBrowseBooth(true)} type="button"><Icon className="size-[18px] shrink-0" name="camera" /><span>{boothPhotos.length ? `Ảnh phòng chụp (${boothPhotos.length})` : 'Ảnh phòng chụp'}</span></button>
       <button aria-pressed={allBwEnabled} className={`cs-press flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1.5 py-1.5 text-[12px] font-bold leading-tight disabled:opacity-40 ${allBwEnabled ? 'cs-btn-primary' : 'cs-btn-chrome'}`} disabled={!onToggleAllBw || downloading} onClick={onToggleAllBw} type="button"><Icon className="size-[18px] shrink-0" name="contrast" /><span>Đen trắng tất cả</span></button>
       {onDownload ? <button aria-busy={downloading || undefined} className="cs-btn-chrome cs-press flex min-h-14 min-w-0 flex-col items-center justify-center gap-1 rounded-[16px] px-1.5 py-1.5 text-[12px] font-bold leading-tight disabled:opacity-40" disabled={!canSave || downloading} onClick={onDownload} type="button">{downloading ? <Spinner /> : <Icon className="size-[18px] shrink-0" name="download" />}<span>{downloading ? 'Đang lưu…' : 'Lưu về máy'}</span></button> : null}
     </div>
