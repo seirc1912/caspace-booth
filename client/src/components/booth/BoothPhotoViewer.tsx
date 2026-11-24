@@ -21,7 +21,8 @@ const roundButton = 'grid size-11 place-items-center rounded-full border border-
 export function BoothPhotoViewer({ photos, index, selectedIds, slotNumbers = [], onIndexChange, onToggle, onDownload, downloadLabel, onClose }: BoothPhotoViewerProps) {
   const photo = photos[index]
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null)
-  const touchStart = useRef<number | null>(null)
+  // One-finger horizontal flick only: a pinch-zoom, a vertical drag or a slow drag must not change photo.
+  const touchStart = useRef<{ x: number; y: number; at: number } | null>(null)
   const go = (step: number) => { const next = index + step; if (next >= 0 && next < photos.length) onIndexChange(next) }
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -50,8 +51,15 @@ export function BoothPhotoViewer({ photos, index, selectedIds, slotNumbers = [],
   const showingOriginal = loadedUrl === largeUrl
   const selectedLabel = slotNumbers[order] ? `Đã chọn · vào hình ${slotNumbers[order]} (bỏ chọn)` : `Đã chọn · thứ tự ${order + 1} (bỏ chọn)`
   return <div aria-label={`Ảnh ${index + 1} / ${photos.length}`} aria-modal="true" className="fixed inset-0 z-[90] flex flex-col bg-[radial-gradient(120%_60%_at_50%_0%,#2A2D32_0%,#0B0C0E_60%)] text-white" role="dialog"
-    onTouchEnd={(event) => { const start = touchStart.current; touchStart.current = null; if (start === null) return; const dx = event.changedTouches[0]!.clientX - start; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1) }}
-    onTouchStart={(event) => { touchStart.current = event.touches[0]!.clientX }}>
+    onTouchEnd={(event) => {
+      const start = touchStart.current; touchStart.current = null
+      if (!start || event.touches.length > 0) return
+      const end = event.changedTouches[0]!
+      const dx = end.clientX - start.x, dy = end.clientY - start.y
+      if (Math.abs(dx) > 60 && Math.abs(dx) > 2 * Math.abs(dy) && Date.now() - start.at < 700) go(dx < 0 ? 1 : -1)
+    }}
+    onTouchMove={(event) => { if (event.touches.length > 1) touchStart.current = null }}
+    onTouchStart={(event) => { const touch = event.touches[0]!; touchStart.current = event.touches.length === 1 ? { x: touch.clientX, y: touch.clientY, at: Date.now() } : null }}>
     <div className="mx-auto grid w-full max-w-[430px] grid-cols-[2.75rem_1fr_2.75rem] items-center px-4 pt-[max(12px,env(safe-area-inset-top))]"><button aria-label="Đóng" className="cs-btn-chrome cs-press grid size-11 place-items-center rounded-full" onClick={onClose} type="button"><Icon name="close" /></button><span className="cs-mono text-center text-sm">{index + 1} / {photos.length}</span><span /></div>
     <div className="relative mx-auto my-4 min-h-0 w-full max-w-[430px] flex-1 px-4">
       <div className={`relative h-full overflow-hidden rounded-[20px] ${selected ? 'ring-[3px] ring-cs-led' : ''}`}>

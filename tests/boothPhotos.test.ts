@@ -173,7 +173,8 @@ test('"Ảnh phòng chụp" sheet: ⤢ opens the full-screen viewer; browse mode
   const viewer = readFileSync('client/src/components/booth/BoothPhotoViewer.tsx', 'utf8')
   assert.match(viewer, /aria-label="Ảnh trước"/)
   assert.match(viewer, /aria-label="Ảnh sau"/)
-  assert.match(viewer, /if \(Math\.abs\(dx\) > 50\) go\(dx < 0 \? 1 : -1\)/, 'swipe left/right')
+  assert.match(viewer, /Math\.abs\(dx\) > 60 && Math\.abs\(dx\) > 2 \* Math\.abs\(dy\)/, 'swipe left/right: clearly horizontal flicks only')
+  assert.match(viewer, /event\.touches\.length > 1\) touchStart\.current = null/, 'a pinch-zoom never changes photo')
 })
 test('Android/desktop download originals directly; only iPhone/iPad use the share sheet', async () => {
   const { boothDownloadUrl, downloadBoothPhotos, prefersShareSheet } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
