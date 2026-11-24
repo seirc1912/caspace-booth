@@ -50,7 +50,7 @@ test('booth photos and photos customers send both expire after 6 hours', async (
 })
 
 test('retention covers frames, thumbnails, booth photos and booth thumbnails', () => {
-  assert.deepEqual(retentionPrefixes('0947860616'), ['0947860616', '0947860616/_thumbs', '0947860616/_booth', '0947860616/_booth/_thumbs', '0947860616/_booth/_previews'])
+  assert.deepEqual(retentionPrefixes('0947860616'), ['0947860616', '0947860616/_thumbs', '0947860616/_previews', '0947860616/_booth', '0947860616/_booth/_thumbs', '0947860616/_booth/_previews'])
 })
 
 test('removal is batched by 100', async () => {

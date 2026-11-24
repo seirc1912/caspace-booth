@@ -5,6 +5,8 @@ import { hasValidImageSignature, type UploadMetadata } from './uploadValidation.
 
 export const customerPhotoBucket = 'customer-photo-uploads'
 export const THUMBNAIL_FOLDER = '_thumbs'
+/** 1600px copies of /upload-anh photos for the large viewer (made on the customer's phone). */
+export const PREVIEW_FOLDER = '_previews'
 
 export interface SupabaseStorageEnvironment {
   serviceRoleKey: string
@@ -52,7 +54,7 @@ function splitFilename(filename: string) {
 export function objectPathForUpload(metadata: UploadMetadata) {
   const { base, extension } = splitFilename(metadata.filename)
   const safeBase = base.replace(/[^\p{L}\p{N} _.-]/gu, '').replace(/\s+/g, ' ').trim().slice(0, 90) || 'photo'
-  const folder = metadata.variant === 'thumbnail' ? `${THUMBNAIL_FOLDER}/` : ''
+  const folder = metadata.variant === 'thumbnail' ? `${THUMBNAIL_FOLDER}/` : metadata.variant === 'preview' ? `${PREVIEW_FOLDER}/` : ''
   return `${metadata.phone}/${folder}${safeBase}--${metadata.requestId}${extension}`
 }
 
@@ -62,6 +64,14 @@ export function thumbnailPathFor(originalPath: string) {
   const name = originalPath.slice(slash + 1)
   const dot = name.lastIndexOf('.')
   return `${originalPath.slice(0, slash)}/${THUMBNAIL_FOLDER}/${dot > 0 ? name.slice(0, dot) : name}-thumb.jpg`
+}
+
+/** `0901234567/a--req.png` → `0901234567/_previews/a--req-preview.jpg` (same naming as a preview upload). */
+export function previewPathFor(originalPath: string) {
+  const slash = originalPath.indexOf('/')
+  const name = originalPath.slice(slash + 1)
+  const dot = name.lastIndexOf('.')
+  return `${originalPath.slice(0, slash)}/${PREVIEW_FOLDER}/${dot > 0 ? name.slice(0, dot) : name}-preview.jpg`
 }
 
 function encodedObjectPath(path: string) {

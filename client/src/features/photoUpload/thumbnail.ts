@@ -7,6 +7,10 @@ import { uploadPhotoToStorage } from './uploadClient'
 
 export const THUMBNAIL_MAX_EDGE = 400
 export const THUMBNAIL_QUALITY = 0.75
+// 1600px copy for the customer's large viewer, like booth previews (~250–400 KB); the server takes ≤ 2 MB.
+export const PREVIEW_MAX_EDGE = 1600
+export const PREVIEW_QUALITY = 0.82
+const PREVIEW_MAX_BYTES = 2 * 1024 * 1024
 
 /** Same base name as the original, `.jpg` extension → server derives `_thumbs/<base>--<req>-thumb.jpg`. */
 export function thumbnailFilename(originalName: string) {
@@ -37,9 +41,22 @@ async function decode(file: File): Promise<{ source: CanvasImageSource; width: n
 }
 
 export async function createThumbnail(file: File) {
+  return resizedJpeg(file, THUMBNAIL_MAX_EDGE, THUMBNAIL_QUALITY)
+}
+
+/** 1600px JPEG for the large viewer; null when it cannot be made small enough (then the viewer uses the original). */
+export async function createPreview(file: File) {
+  for (const quality of [PREVIEW_QUALITY, 0.7]) {
+    const preview = await resizedJpeg(file, PREVIEW_MAX_EDGE, quality)
+    if (preview.size <= PREVIEW_MAX_BYTES) return preview
+  }
+  return null
+}
+
+async function resizedJpeg(file: File, maxEdge: number, quality: number) {
   const decoded = await decode(file)
   try {
-    const size = thumbnailSize(decoded.width, decoded.height)
+    const size = thumbnailSize(decoded.width, decoded.height, maxEdge)
     const canvas = document.createElement('canvas')
     canvas.width = size.width; canvas.height = size.height
     const context = canvas.getContext('2d', { alpha: false })
@@ -47,7 +64,7 @@ export async function createThumbnail(file: File) {
     context.fillStyle = '#ffffff'; context.fillRect(0, 0, size.width, size.height) // transparent PNG areas → white
     context.imageSmoothingQuality = 'high'
     context.drawImage(decoded.source, 0, 0, size.width, size.height)
-    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Thumbnail encode failed')), 'image/jpeg', THUMBNAIL_QUALITY))
+    const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Thumbnail encode failed')), 'image/jpeg', quality))
     canvas.width = 1; canvas.height = 1
     return new File([blob], thumbnailFilename(file.name), { type: 'image/jpeg' })
   } finally { decoded.release() }
@@ -55,14 +72,25 @@ export async function createThumbnail(file: File) {
 
 let chain: Promise<void> = Promise.resolve()
 
-/** Queues one thumbnail after its original was verified; runs one at a time in the background. */
-export function queueThumbnailUpload(input: { file: File; thumbnail?: Promise<File | null>; phone: string; requestId: string }) {
+/**
+ * Queues one thumbnail (and, with `preview`, the 1600px viewer copy) after its original was
+ * verified; runs one at a time in the background. Each copy is best effort and independent.
+ */
+export function queueThumbnailUpload(input: { file: File; thumbnail?: Promise<File | null>; phone: string; requestId: string; preview?: boolean }, deps: { upload?: typeof uploadPhotoToStorage; makeThumbnail?: typeof createThumbnail; makePreview?: typeof createPreview } = {}) {
+  const upload = deps.upload ?? uploadPhotoToStorage
   chain = chain.then(async () => {
     try {
-      const thumbnail = (await input.thumbnail) ?? await createThumbnail(input.file)
-      await uploadPhotoToStorage({ file: thumbnail, phone: input.phone, requestId: `${input.requestId}-thumb`, variant: 'thumbnail', onProgress: () => {}, onTiming: () => {} })
+      const thumbnail = (await input.thumbnail) ?? await (deps.makeThumbnail ?? createThumbnail)(input.file)
+      await upload({ file: thumbnail, phone: input.phone, requestId: `${input.requestId}-thumb`, variant: 'thumbnail', onProgress: () => {}, onTiming: () => {} })
     } catch (reason) {
       console.warn('[photo-upload] thumbnail skipped', reason instanceof Error ? reason.name : 'unknown')
+    }
+    if (!input.preview) return
+    try {
+      const preview = await (deps.makePreview ?? createPreview)(input.file)
+      if (preview) await upload({ file: new File([preview], thumbnailFilename(input.file.name), { type: 'image/jpeg' }), phone: input.phone, requestId: `${input.requestId}-preview`, variant: 'preview', onProgress: () => {}, onTiming: () => {} })
+    } catch (reason) {
+      console.warn('[photo-upload] preview skipped', reason instanceof Error ? reason.name : 'unknown')
     }
   })
   return chain

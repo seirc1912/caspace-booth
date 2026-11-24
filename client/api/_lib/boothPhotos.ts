@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import { BOOTH_FOLDER, boothPreviewPath, boothThumbnailPath } from './boothPaths.js'
 import { UploadApiError } from './http.js'
 import { originalFilename } from './staffPhotos.js'
-import { customerPhotoBucket, thumbnailPathFor } from './supabaseStorage.js'
+import { customerPhotoBucket, previewPathFor, thumbnailPathFor } from './supabaseStorage.js'
 
 export const BOOTH_SIGNED_URL_SECONDS = 60 * 60
 const imagePattern = /\.jpe?g$/i
@@ -55,7 +55,7 @@ export async function listPickerCandidates(client: SupabaseClient, phone: string
   const [booth, uploads] = await Promise.all([listBoothObjects(client, phone), listCustomerUploads(client, phone)])
   const candidates: PickerCandidate[] = [
     ...booth.photos.map((entry) => { const path = `${phone}/${BOOTH_FOLDER}/${entry.name}`; return { id: entry.name, name: entry.name, path, thumbPath: boothThumbnailPath(path), previewPath: boothPreviewPath(path), uploadedAt: entry.created_at ?? '' } }),
-    ...uploads.map((entry) => { const path = `${phone}/${entry.name}`; return { id: `upload:${entry.name}`, name: originalFilename(entry.name), path, thumbPath: thumbnailPathFor(path), previewPath: null, uploadedAt: entry.created_at ?? '' } }),
+    ...uploads.map((entry) => { const path = `${phone}/${entry.name}`; return { id: `upload:${entry.name}`, name: originalFilename(entry.name), path, thumbPath: thumbnailPathFor(path), previewPath: previewPathFor(path), uploadedAt: entry.created_at ?? '' } }),
   ]
   return { candidates, boothCount: booth.photos.length }
 }
@@ -71,7 +71,7 @@ export async function listBoothPhotos(client: SupabaseClient, phone: string): Pr
     bucket.createSignedUrls(candidates.map((item) => item.path), BOOTH_SIGNED_URL_SECONDS),
     previewCandidates.length ? bucket.createSignedUrls(previewCandidates.map((item) => item.previewPath!), BOOTH_SIGNED_URL_SECONDS) : Promise.resolve({ data: [], error: null }),
   ])
-  // Photos sent before the booth PC was updated have no preview: the viewer falls back to the original.
+  // Photos without a preview (older booth PCs, uploads before 25/11/2026): the viewer falls back to the original.
   const previewUrls = new Map<string, string>()
   previewCandidates.forEach((item, index) => { const signed = previews.data?.[index]; if (signed && !signed.error && signed.signedUrl) previewUrls.set(item.id, signed.signedUrl) })
   if (originals.error) throw new UploadApiError(502, 'Không thể tải ảnh phòng chụp.')
