@@ -69,6 +69,15 @@ const hudCorner = 'pointer-events-none absolute size-5 border-white/55'
 
 export function ComposerPage({ template, backgroundUrl, printSize, slots, currentSlot, onBack, onCurrentSlotChange, onRemove, onPickPhoto, onPickFramePhotos, onAutoFillPhotos, autoFillPhotoCount = null, autoFillPreparing = false, autoFillHasExistingPhotos = false, onTransform, onFitChange, onFilterChange, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frames = [], onSelectFrame, onDownload, downloading = false, saveConfirmation, boothPhotos = [], loadBoothOriginal, sendableFrameCount = 0, onOpenSendFrames }: ComposerPageProps) {
   const [crop, setCrop] = useState<CropSnapshot | null>(null)
+  // Locks are tied to the photo in the slot: replacing or removing the photo unlocks the slot.
+  const [lockedKeys, setLockedKeys] = useState<Record<string, true>>({})
+  const lockKey = (index: number) => { const slot = slots[index]; return slot ? `${template.id}:${index}:${slot.photo.id}` : null }
+  const isLocked = (index: number) => { const key = lockKey(index); return key !== null && Boolean(lockedKeys[key]) }
+  const setLocked = (index: number, locked: boolean) => {
+    const key = lockKey(index)
+    if (key) setLockedKeys((current) => { const next = { ...current }; if (locked) next[key] = true; else delete next[key]; return next })
+  }
+  const lockedSlots = slots.map((_, index) => index).filter(isLocked)
   const photoInput = useRef<HTMLInputElement>(null)
   const framePhotoInput = useRef<HTMLInputElement>(null)
   const autoFillPhotoInput = useRef<HTMLInputElement>(null)
@@ -149,11 +158,20 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
   }
   const beginCrop = (index: number) => {
     const slot = slots[index]
-    if (!slot) return
+    if (!slot || isLocked(index)) return
     onCurrentSlotChange(index)
     setCrop({ index, transform: { ...slot.transform }, fit: slot.fit ?? 'contain', filter: slot.filter ?? 'none' })
   }
-  const finishCrop = () => setCrop(null)
+  /** The lock button in the crop bar: keep this framing and stop accidental drags. */
+  const finishCrop = () => { if (crop) setLocked(crop.index, true); setCrop(null) }
+  /** "Mở khoá" in the toolbar: unlock and go straight back to cropping. */
+  const unlockAndCrop = (index: number) => {
+    const slot = slots[index]
+    if (!slot) return
+    setLocked(index, false)
+    onCurrentSlotChange(index)
+    setCrop({ index, transform: { ...slot.transform }, fit: slot.fit ?? 'contain', filter: slot.filter ?? 'none' })
+  }
   const cancelCrop = () => {
     if (!crop) return
     onTransform(crop.index, crop.transform)
@@ -212,14 +230,14 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, curren
       <p className="cs-mono absolute left-10 top-3.5 text-[11px] text-white/80">{stageLabel}</p>
       {allBwEnabled ? <p className="cs-mono absolute right-10 top-3.5 text-[11px] text-white/80">Đen trắng</p> : null}
       <div className="mx-auto" style={{ width: `min(100%, calc(min(54dvh, 420px) * ${template.canvas.width} / ${template.canvas.height}))`, aspectRatio: aspect }}>
-        <TemplateCanvas activeSlot={currentSlot} backgroundUrl={backgroundUrl} cropSlot={crop?.index ?? null} onActiveSlotChange={selectSlot} onAdd={openPhotoPicker} onBeginCrop={beginCrop} onImageError={onPhotoError} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, createInitialPhotoTransform()); onFitChange(index, 'contain') }} onTransform={onTransform} slots={slots} template={template} />
+        <TemplateCanvas activeSlot={currentSlot} backgroundUrl={backgroundUrl} cropSlot={crop?.index ?? null} lockedSlots={lockedSlots} onActiveSlotChange={selectSlot} onAdd={openPhotoPicker} onBeginCrop={beginCrop} onImageError={onPhotoError} onRemove={(index) => { onRemove(index); if (crop?.index === index) setCrop(null) }} onReset={(index) => { onTransform(index, createInitialPhotoTransform()); onFitChange(index, 'contain') }} onTransform={onTransform} slots={slots} template={template} />
       </div>
-      <p className="mt-3 text-center text-[13px] leading-snug text-white/85">{crop ? 'Kéo để căn · chụm hai ngón để phóng · chạm đúp để đặt lại' : 'Chạm một ô để chỉnh · kéo để căn ảnh'}</p>
+      <p className="mt-3 text-center text-[13px] leading-snug text-white/85">{crop ? 'Kéo để căn · chụm hai ngón để phóng · bấm ổ khoá để giữ ảnh' : currentSlot !== null && isLocked(currentSlot) ? 'Ảnh đã khoá · bấm "Mở khoá" để chỉnh lại' : 'Chạm một ô để chỉnh · kéo để căn ảnh'}</p>
     </section>
 
     <div className="mt-3">
       {crop ? <CropToolbar onCancel={cancelCrop} onDone={finishCrop} onPositionXChange={(x) => onTransform(crop.index, { x })} onPositionYChange={(y) => onTransform(crop.index, { y })} onZoomChange={(zoom) => onTransform(crop.index, { zoom })} positionX={slots[crop.index]?.transform.x ?? 0} positionY={slots[crop.index]?.transform.y ?? 0} zoom={slots[crop.index]?.transform.zoom ?? 1} />
-        : <EditorToolbar autoFillBusy={autoFillPreparing || Boolean(poolProgress)} autoFillDisabled={autoFillPreparing || !autoFillPhotoCount || !onAutoFillPhotos} bwActive={allBwEnabled || selectedSlot?.filter === 'grayscale'} bwDisabled={allBwEnabled || !selectedSlot} cropActive={false} disabled={downloading} hasPhoto={Boolean(selectedSlot)} onAutoFill={() => setAutoFillDialogOpen(true)} onCrop={() => { if (currentSlot !== null) beginCrop(currentSlot) }} onRemove={removeSelected} onReplace={replaceSelected} onToggleBw={toggleSlotBw} onZoom={toggleAutoFit} replaceDisabled={!selectedSlot && remainingSlotCount === 0} replaceMode={selectedSlot ? 'replace' : 'add'} />}
+        : <EditorToolbar autoFillBusy={autoFillPreparing || Boolean(poolProgress)} autoFillDisabled={autoFillPreparing || !autoFillPhotoCount || !onAutoFillPhotos} bwActive={allBwEnabled || selectedSlot?.filter === 'grayscale'} bwDisabled={allBwEnabled || !selectedSlot} cropActive={false} disabled={downloading} hasPhoto={Boolean(selectedSlot)} onAutoFill={() => setAutoFillDialogOpen(true)} locked={currentSlot !== null && isLocked(currentSlot)} onCrop={() => { if (currentSlot === null) return; if (isLocked(currentSlot)) unlockAndCrop(currentSlot); else beginCrop(currentSlot) }} onRemove={removeSelected} onReplace={replaceSelected} onToggleBw={toggleSlotBw} onZoom={toggleAutoFit} replaceDisabled={!selectedSlot && remainingSlotCount === 0} replaceMode={selectedSlot ? 'replace' : 'add'} />}
     </div>
 
     <div className="mt-2.5 grid auto-cols-fr grid-flow-col gap-2">

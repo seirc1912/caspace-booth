@@ -7,6 +7,7 @@ import { Icon } from '../ui/Icon'
 
 interface CropToolbarProps {
   onCancel: () => void
+  /** Lock the photo where it is and leave cropping (replaces the old ✓). */
   onDone: () => void
   positionX: number
   positionY: number
@@ -91,7 +92,7 @@ export function CropToolbar({ onCancel, onDone, positionX, positionY, zoom, onPo
       <button aria-label={`Phóng ${Math.round(zoom * 100)}%`} aria-pressed={activeControl === 'zoom'} className={controlClass(activeControl === 'zoom')} onClick={() => setActiveControl('zoom')} type="button"><Icon className="size-4" name="zoomIn" />{Math.round(zoom * 100)}%</button>
       <button aria-label={`Trái phải ${positionLabel(positionX)}`} aria-pressed={activeControl === 'x'} className={controlClass(activeControl === 'x')} onClick={() => setActiveControl('x')} type="button"><Icon className="size-4" name="moveX" />{positionLabel(positionX)}</button>
       <button aria-label={`Lên xuống ${positionLabel(positionY)}`} aria-pressed={activeControl === 'y'} className={controlClass(activeControl === 'y')} onClick={() => setActiveControl('y')} type="button"><Icon className="size-4" name="moveY" />{positionLabel(positionY)}</button>
-      <button aria-label="Xong, giữ cách cắt này" className="cs-btn-chrome grid size-11 place-items-center rounded-xl" onClick={onDone} type="button"><Icon name="check" /></button>
+      <button aria-label="Khoá ảnh, giữ cách cắt này" className="cs-btn-chrome grid size-11 place-items-center rounded-xl" onClick={onDone} title="Khoá ảnh" type="button"><Icon name="unlock" /></button>
     </div>
     <div className="mt-1 flex min-w-0 items-center gap-1 overflow-hidden rounded-xl bg-black/25 px-1">
       <button aria-label="Huỷ thay đổi cắt ảnh" className="grid size-11 shrink-0 place-items-center rounded-xl text-white/80 hover:bg-white/10" onClick={onCancel} type="button"><Icon name="close" /></button>

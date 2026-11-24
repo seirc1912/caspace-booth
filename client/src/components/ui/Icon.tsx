@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 export type IconName =
   | 'add' | 'alert' | 'arrowRight' | 'back' | 'camera' | 'check' | 'chevronRight' | 'close' | 'contrast' | 'crop'
-  | 'download' | 'expand' | 'facebook' | 'globe' | 'image' | 'instagram' | 'lock' | 'mail' | 'minus' | 'mobile'
+  | 'download' | 'expand' | 'facebook' | 'globe' | 'image' | 'instagram' | 'lock' | 'unlock' | 'mail' | 'minus' | 'mobile'
   | 'moveX' | 'moveY' | 'phone' | 'pin' | 'send' | 'sparkles' | 'swap' | 'tiktok' | 'trash' | 'upload' | 'wifiOff'
   | 'zalo' | 'zoomIn'
 
@@ -29,6 +29,7 @@ const paths: Record<IconName, ReactNode> = {
   image: <><rect x="3" y="4" width="18" height="16" rx="2.5" /><circle cx="9" cy="9.5" r="1.8" /><path d="m21 16-5-5-9 9" /></>,
   instagram: <><rect x="3.5" y="3.5" width="17" height="17" rx="5" /><circle cx="12" cy="12" r="4" /><path d="M17.2 6.8h.01" /></>,
   lock: <><rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></>,
+  unlock: <><rect x="5" y="11" width="14" height="9.5" rx="2" /><path d="M8 11V8a4 4 0 0 1 7.6-1.7" /></>,
   mail: <><rect x="3" y="5" width="18" height="14" rx="2.5" /><path d="m4 7 8 6 8-6" /></>,
   minus: <path d="M5 12h14" />,
   mobile: <><rect x="6.5" y="2.5" width="11" height="19" rx="2.5" /><path d="M10.5 18.5h3" /></>,

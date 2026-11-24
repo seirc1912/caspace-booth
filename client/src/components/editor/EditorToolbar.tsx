@@ -9,6 +9,8 @@ interface EditorToolbarProps {
   autoFillDisabled: boolean
   autoFillBusy: boolean
   cropActive: boolean
+  /** The selected photo is locked: the crop tool shows a closed lock and unlocks it. */
+  locked?: boolean
   bwActive: boolean
   bwDisabled: boolean
   disabled?: boolean
@@ -29,12 +31,12 @@ function Tool({ icon, label, onClick, disabled = false, pressed, danger = false,
   </button>
 }
 
-/** Six slot tools: Tự xếp · Cắt · Phóng to · Đen trắng · Thay ảnh · Xoá. */
-export function EditorToolbar({ hasPhoto, replaceMode, replaceDisabled, autoFillDisabled, autoFillBusy, cropActive, bwActive, bwDisabled, disabled = false, onAutoFill, onCrop, onZoom, onToggleBw, onReplace, onRemove }: EditorToolbarProps) {
+/** Six slot tools: Tự xếp · Cắt (Mở khoá when locked) · Phóng to · Đen trắng · Thay ảnh · Xoá. */
+export function EditorToolbar({ hasPhoto, replaceMode, replaceDisabled, autoFillDisabled, autoFillBusy, cropActive, locked = false, bwActive, bwDisabled, disabled = false, onAutoFill, onCrop, onZoom, onToggleBw, onReplace, onRemove }: EditorToolbarProps) {
   return <div aria-label="Công cụ chỉnh ảnh" className="cs-panel grid grid-cols-6 gap-px rounded-[20px] p-1" role="toolbar">
     <Tool busy={autoFillBusy} disabled={disabled || autoFillDisabled} icon="sparkles" label="Tự xếp" onClick={onAutoFill} />
-    <Tool disabled={disabled || !hasPhoto} icon="crop" label="Cắt" onClick={onCrop} pressed={cropActive} />
-    <Tool disabled={disabled || !hasPhoto} icon="zoomIn" label="Phóng to" onClick={onZoom} />
+    {locked && hasPhoto ? <Tool disabled={disabled} icon="lock" label="Mở khoá" onClick={onCrop} pressed /> : <Tool disabled={disabled || !hasPhoto} icon="crop" label="Cắt" onClick={onCrop} pressed={cropActive} />}
+    <Tool disabled={disabled || !hasPhoto || locked} icon="zoomIn" label="Phóng to" onClick={onZoom} />
     <Tool disabled={disabled || bwDisabled} icon="contrast" label="Đen trắng" onClick={onToggleBw} pressed={bwActive} />
     <Tool disabled={disabled || replaceDisabled} icon={replaceMode === 'add' ? 'add' : 'swap'} label={replaceMode === 'add' ? 'Thêm ảnh' : 'Thay ảnh'} onClick={onReplace} />
     <Tool danger disabled={disabled || !hasPhoto} icon="trash" label="Xoá" onClick={onRemove} />
