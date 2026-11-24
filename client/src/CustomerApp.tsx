@@ -45,11 +45,14 @@ export function CustomerApp() {
   const boothLoader = useMemo(() => (validPhone ? createBoothPhotoLoader() : null), [validPhone])
   const loadBoothOriginal = (photo: BoothPhoto) => (boothLoader ? boothLoader.load(photo) : loadBoothPhotoFiles([photo]).then((files) => files[0]!))
 
-  // Frames whose saved thumbnail is unusable fall back to the frame artwork itself.
-  const missingThumbIds = booth.roomTemplateSummaries.filter((summary) => !summary.thumbnailUrl).map((summary) => summary.id).join(',')
+  // Frame previews show the frame artwork itself (no sample photos); details are small JSON, images load lazily.
+  const roomFrameIds = booth.roomTemplateSummaries.map((summary) => summary.id).join(',')
   const { ensureTemplateDetail } = booth
-  useEffect(() => { if (missingThumbIds) for (const id of missingThumbIds.split(',')) void ensureTemplateDetail(id).catch(() => undefined) }, [missingThumbIds, ensureTemplateDetail])
-  const frameThumb = (summary: { id: string; thumbnailUrl: string | null }) => summary.thumbnailUrl ?? usableImageUrl(booth.roomTemplates.find((item) => item.id === summary.id)?.backgroundUrl)
+  useEffect(() => { if (roomFrameIds) for (const id of roomFrameIds.split(',')) void ensureTemplateDetail(id).catch(() => undefined) }, [roomFrameIds, ensureTemplateDetail])
+  const frameThumb = (summary: { id: string; thumbnailUrl: string | null }) => {
+    const detail = booth.roomTemplates.find((item) => item.id === summary.id)
+    return detail ? usableImageUrl(detail.backgroundUrl) ?? summary.thumbnailUrl : null
+  }
   const editorFrames: EditorFrame[] = booth.roomTemplateSummaries.map((summary) => {
     const slots = booth.frameSlots[summary.id]
     return { id: summary.id, name: summary.name, slotCount: slots?.length ?? summary.slotCount, filledCount: slots?.filter(Boolean).length ?? 0, thumbnailUrl: frameThumb(summary) }
