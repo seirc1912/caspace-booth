@@ -74,8 +74,8 @@ test('thumbnail helpers keep aspect ratio and naming', () => {
   assert.equal(thumbnailFilename('a.b.jpeg'), 'a.b.jpg')
 })
 
-test('thumbnail failures are not reported as customer upload failures', () => {
+test('thumbnail and preview failures are not reported as customer upload failures', () => {
   const source = readFileSync(new URL('../client/src/features/photoUpload/uploadClient.ts', import.meta.url), 'utf8')
-  assert.match(source, /if \(variant === 'thumbnail'\) silentCorrelationIds\.add\(correlationId\)/)
+  assert.match(source, /if \(variant !== 'original'\) silentCorrelationIds\.add\(correlationId\)/)
   assert.match(source, /if \(silentCorrelationIds\.has\(diagnostic\.correlationId\)\) return/)
 })

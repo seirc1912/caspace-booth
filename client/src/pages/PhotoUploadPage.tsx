@@ -132,8 +132,9 @@ export function PhotoUploadPage() {
           })
           okCount += 1
           const thumbnailRequestId = `${submissionIdRef.current}-${index}`
-          // Upload the preview JPEG made at pick time as the staff thumbnail, then free the in-memory copy.
-          void queueThumbnailUpload({ file: photo.file, thumbnail: photoThumbnail(photo.file), phone: normalizedPhone, requestId: thumbnailRequestId }).finally(() => releasePreload(photo.file))
+          // Upload the JPEG made at pick time as the thumbnail, plus a 1600px copy for the large viewer,
+          // then free the in-memory copy.
+          void queueThumbnailUpload({ file: photo.file, thumbnail: photoThumbnail(photo.file), phone: normalizedPhone, requestId: thumbnailRequestId, preview: true }).finally(() => releasePreload(photo.file))
           if (activeBatchRef.current?.runId === runId) activeBatchRef.current.okCount = okCount
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
         } catch (reason) {

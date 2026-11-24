@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { BOOTH_FOLDER, BOOTH_PREVIEWS, BOOTH_THUMBS } from './boothPaths.js'
-import { customerPhotoBucket, THUMBNAIL_FOLDER } from './supabaseStorage.js'
+import { customerPhotoBucket, PREVIEW_FOLDER, THUMBNAIL_FOLDER } from './supabaseStorage.js'
 
 // Owner decisions: booth photos and their thumbnails/previews are kept 6 hours (24/11/2026);
 // photos customers send (/upload-anh) also 6 hours (25/11/2026), to keep Storage small.
@@ -25,7 +25,7 @@ export async function listAll(client: SupabaseClient, prefix: string, sortColumn
 
 /** Every prefix that holds objects for one customer folder. */
 export function retentionPrefixes(folder: string) {
-  return [folder, `${folder}/${THUMBNAIL_FOLDER}`, `${folder}/${BOOTH_FOLDER}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_THUMBS}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_PREVIEWS}`]
+  return [folder, `${folder}/${THUMBNAIL_FOLDER}`, `${folder}/${PREVIEW_FOLDER}`, `${folder}/${BOOTH_FOLDER}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_THUMBS}`, `${folder}/${BOOTH_FOLDER}/${BOOTH_PREVIEWS}`]
 }
 
 const isBoothPrefix = (prefix: string) => prefix.split('/')[1] === BOOTH_FOLDER

@@ -367,10 +367,10 @@ export async function inMemoryFile(file: File) {
   catch { return file }
 }
 
-export async function uploadPhotoToStorage(input: { file: File; source?: Promise<File>; phone: string; requestId: string; variant?: 'original' | 'thumbnail'; onPrepared?: () => void; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
+export async function uploadPhotoToStorage(input: { file: File; source?: Promise<File>; phone: string; requestId: string; variant?: 'original' | 'thumbnail' | 'preview'; onPrepared?: () => void; onProgress: (progress: UploadProgress) => void; onTiming?: (timing: UploadTiming) => void }) {
   const variant = input.variant ?? 'original'
   const correlationId = uploadCorrelationId()
-  if (variant === 'thumbnail') silentCorrelationIds.add(correlationId)
+  if (variant !== 'original') silentCorrelationIds.add(correlationId)
   const totalStartedAt = performance.now()
   const mimeType = supportedImageMime(input.file)
   if (!mimeType) throw new Error('Chỉ hỗ trợ ảnh PNG, JPG và JPEG.')
