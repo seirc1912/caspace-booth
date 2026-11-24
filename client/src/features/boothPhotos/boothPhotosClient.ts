@@ -75,3 +75,27 @@ export async function loadBoothPhotoFiles(photos: BoothPhoto[], onProgress?: (do
 
 /** Most booth photos used at once: Auto Fill (keeps phones responsive). */
 export const MAX_BOOTH_SELECTION = 20
+
+/**
+ * Signed links last 60 minutes, but the editor re-lists every 10 s and each answer carries new
+ * links. A new link makes the browser download the image again (the large viewer restarted its
+ * sharp download every 10 s, and thumbnails were fetched again each time). Photos already known
+ * keep their first links for 45 minutes, so nothing reloads; the array itself is kept when
+ * nothing changed, so React does not re-render.
+ */
+export const BOOTH_URL_REUSE_MS = 45 * 60_000
+export interface StableBoothPhotos { photos: BoothPhoto[]; issuedAt: Record<string, number> }
+
+export function stabilizeBoothPhotos(previous: StableBoothPhotos | null, next: BoothPhoto[], now = Date.now()): StableBoothPhotos {
+  const known = new Map((previous?.photos ?? []).map((photo) => [photo.id, photo]))
+  const issuedAt: Record<string, number> = {}
+  const photos = next.map((photo) => {
+    const old = known.get(photo.id)
+    const oldIssuedAt = previous?.issuedAt[photo.id]
+    if (old && oldIssuedAt !== undefined && now - oldIssuedAt < BOOTH_URL_REUSE_MS) { issuedAt[photo.id] = oldIssuedAt; return old }
+    issuedAt[photo.id] = now
+    return photo
+  })
+  const unchanged = previous !== null && previous.photos.length === photos.length && photos.every((photo, index) => photo === previous.photos[index])
+  return unchanged ? previous : { photos, issuedAt }
+}
