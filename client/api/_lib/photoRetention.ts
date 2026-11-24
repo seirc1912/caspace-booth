@@ -11,12 +11,12 @@ export const BOOTH_RETENTION_HOURS = 6
 const PAGE = 1_000
 const LIST_CONCURRENCY = 8
 
-type Entry = { id: string | null; name: string; created_at: string | null; updated_at?: string | null }
+export type Entry = { id: string | null; name: string; created_at: string | null; updated_at?: string | null }
 
-async function listAll(client: SupabaseClient, prefix: string, sortColumn: 'name' | 'created_at') {
+export async function listAll(client: SupabaseClient, prefix: string, sortColumn: 'name' | 'created_at', bucket = customerPhotoBucket) {
   const entries: Entry[] = []
   for (let offset = 0; ; offset += PAGE) {
-    const page = await client.storage.from(customerPhotoBucket).list(prefix, { limit: PAGE, offset, sortBy: { column: sortColumn, order: 'asc' } })
+    const page = await client.storage.from(bucket).list(prefix, { limit: PAGE, offset, sortBy: { column: sortColumn, order: 'asc' } })
     if (page.error) throw page.error
     entries.push(...(page.data as Entry[]))
     if (page.data.length < PAGE) return entries
