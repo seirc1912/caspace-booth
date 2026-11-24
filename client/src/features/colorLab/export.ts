@@ -1,3 +1,4 @@
+import { deliverImageFile } from '../orders/services/saveComposition'
 import { renderFilmImage, type FilmEffectState } from './processor'
 import type { ColorLabPresetId } from './presets'
 import { fitColorLabDimensions } from './dimensions'
@@ -25,21 +26,7 @@ export function canvasToBlob(canvas: HTMLCanvasElement, type: string, quality: n
   return new Promise<Blob>((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The edited photo could not be exported.')), type, quality))
 }
 
-export async function deliverColorLabImage(blob: Blob, filename: string) {
-  const file = new File([blob], filename, { type: blob.type })
-  const shareData: ShareData = { files: [file] }
-  try {
-    if (typeof navigator.share === 'function' && (typeof navigator.canShare !== 'function' || navigator.canShare(shareData))) {
-      await navigator.share(shareData)
-      return 'shared' as const
-    }
-  } catch (reason) {
-    if (reason instanceof DOMException && reason.name === 'AbortError') return 'cancelled' as const
-  }
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url; anchor.download = filename; anchor.rel = 'noopener'
-  document.body.appendChild(anchor); anchor.click(); anchor.remove()
-  window.setTimeout(() => URL.revokeObjectURL(url), 60_000)
-  return 'downloaded' as const
+/** iPhone: share sheet ("Lưu hình ảnh"); Android/desktop: straight download. */
+export function deliverColorLabImage(blob: Blob, filename: string) {
+  return deliverImageFile(blob, filename)
 }

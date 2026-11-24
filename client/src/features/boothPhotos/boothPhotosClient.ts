@@ -76,9 +76,7 @@ export async function loadBoothPhotoFiles(photos: BoothPhoto[], onProgress?: (do
  * iPhone/iPad can only put images into Photos through the share sheet; Android and
  * desktop browsers save straight to Downloads (which the gallery shows).
  */
-export function prefersShareSheet(userAgent = navigator.userAgent, maxTouchPoints = navigator.maxTouchPoints) {
-  return /iPhone|iPad|iPod/i.test(userAgent) || (/Macintosh/i.test(userAgent) && maxTouchPoints > 1)
-}
+export { prefersShareSheet } from '../orders/services/shareSheet'
 
 /** Signed URL that makes Storage answer with Content-Disposition: attachment. */
 export function boothDownloadUrl(photo: Pick<BoothPhoto, 'originalUrl' | 'name'>) {

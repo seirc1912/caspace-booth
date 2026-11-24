@@ -8,6 +8,7 @@ test('supported file sharing receives the existing rendered image as a real File
   let sharedFile: File | undefined
   let downloaded = false
   const delivery = await deliverImageFile(image, 'caspace.png', {
+    shareSheet: true,
     navigator: {
       canShare: ({ files }) => Boolean(files?.length),
       share: async ({ files }) => { sharedFile = files?.[0] },
@@ -27,6 +28,7 @@ test('supported file sharing receives the existing rendered image as a real File
 test('cancelling the share sheet is a no-op', async () => {
   let downloaded = false
   const delivery = await deliverImageFile(image, 'caspace.png', {
+    shareSheet: true,
     navigator: { canShare: () => true, share: async () => { throw new DOMException('Cancelled', 'AbortError') } },
     download: () => { downloaded = true },
   })
@@ -39,6 +41,7 @@ test('cancelling the share sheet is a no-op', async () => {
 test('unsupported file sharing falls back to the existing download', async () => {
   let downloaded: { blob: Blob; filename: string } | undefined
   const delivery = await deliverImageFile(image, 'caspace.png', {
+    shareSheet: true,
     navigator: { canShare: () => false, share: async () => undefined },
     download: (blob, filename) => { downloaded = { blob, filename } },
   })
@@ -51,10 +54,24 @@ test('unsupported file sharing falls back to the existing download', async () =>
 test('an unexpected share failure safely falls back to download', async () => {
   let downloads = 0
   const delivery = await deliverImageFile(image, 'caspace.png', {
+    shareSheet: true,
     navigator: { canShare: () => true, share: async () => { throw new Error('Share failed') } },
     download: () => { downloads += 1 },
   })
 
   assert.equal(delivery, 'downloaded')
   assert.equal(downloads, 1)
+})
+
+test('Android downloads straight to the device even when the browser can share files', async () => {
+  let shared = false
+  let downloaded = false
+  const delivery = await deliverImageFile(image, 'caspace.png', {
+    shareSheet: false,
+    navigator: { canShare: () => true, share: async () => { shared = true } },
+    download: () => { downloaded = true },
+  })
+  assert.equal(delivery, 'downloaded')
+  assert.equal(shared, false)
+  assert.equal(downloaded, true)
 })

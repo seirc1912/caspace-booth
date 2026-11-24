@@ -153,12 +153,12 @@ test('saving several photos uses one share sheet, or one download per file when 
   const { deliverImageFiles } = await import('../client/src/features/orders/services/saveComposition.ts')
   const files = [new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' }), new File([new Uint8Array([2])], 'b.jpg', { type: 'image/jpeg' })]
   const shared: ShareData[] = []
-  assert.equal(await deliverImageFiles(files, { navigator: { canShare: () => true, share: async (data) => { shared.push(data) } }, download: () => assert.fail('no download when sharing works') }), 'shared')
+  assert.equal(await deliverImageFiles(files, { shareSheet: true, navigator: { canShare: () => true, share: async (data) => { shared.push(data) } }, download: () => assert.fail('no download when sharing works') }), 'shared')
   assert.equal(shared[0]!.files!.length, 2, 'one share sheet for all photos')
   const downloaded: string[] = []
   assert.equal(await deliverImageFiles(files, { navigator: {}, download: (_blob, name) => downloaded.push(name) }), 'downloaded')
   assert.deepEqual(downloaded, ['a.jpg', 'b.jpg'])
-  assert.equal(await deliverImageFiles(files, { navigator: { canShare: () => true, share: async () => { throw Object.assign(new Error('x'), { name: 'AbortError' }) } }, download: () => assert.fail() }), 'cancelled')
+  assert.equal(await deliverImageFiles(files, { shareSheet: true, navigator: { canShare: () => true, share: async () => { throw Object.assign(new Error('x'), { name: 'AbortError' }) } }, download: () => assert.fail() }), 'cancelled')
 })
 
 test('"Ảnh phòng chụp" sheet: ⤢ opens the full-screen viewer; browse mode saves up to 20 photos', async () => {
