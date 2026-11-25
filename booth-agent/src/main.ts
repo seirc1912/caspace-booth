@@ -5,7 +5,7 @@ import { loadConfig } from './config.ts'
 import { notifyOnce } from './notify.ts'
 import { classifyExport } from './phoneFolder.ts'
 import { UploadQueue } from './queue.ts'
-import { AUTOMATIC_RESCAN_MS, isOnOrAfterUploadFrom, PERIODIC_RESCAN_MS, pendingJobs, scanExports } from './scanner.ts'
+import { AUTOMATIC_RESCAN_MS, describeResend, isOnOrAfterUploadFrom, PERIODIC_RESCAN_MS, pendingJobs, planResend, scanExports } from './scanner.ts'
 import { StateStore } from './stateStore.ts'
 import { startStatusServer } from './statusServer.ts'
 import { makePreview, makeThumbnail } from './thumbnail.ts'
@@ -51,13 +51,14 @@ async function handle(filePath: string) {
   queue.enqueue({ filePath, phone: classified.phone, sessionFolder: classified.sessionFolder })
 }
 
-async function resend(folder: string) {
-  if (!folder || folder.includes('/') || folder.includes('\\') || folder.startsWith('.')) return 'Tên thư mục không hợp lệ.'
-  const result = await scanExports(config.watchRoot, { onlyFolder: folder })
-  if (!result.jobs.length) return result.unrecognized.length ? `Thư mục "${folder}" không có số điện thoại hợp lệ.` : `Không tìm thấy ảnh từ 25/11/2026 trở đi trong ${folder}\\Output.`
-  state.forgetFolder(path.join(config.watchRoot, folder) + path.sep)
-  result.jobs.forEach((job) => queue.enqueue(job))
-  return `Đang gửi lại ${result.jobs.length} ảnh của ${folder}.`
+async function resend(input: string) {
+  if (!input || input.includes('/') || input.includes('\\') || input.startsWith('.')) return 'Tên thư mục không hợp lệ.'
+  const plan = await planResend(config.watchRoot, input)
+  for (const folder of new Set(plan.jobs.map((job) => job.sessionFolder))) state.forgetFolder(path.join(config.watchRoot, folder) + path.sep)
+  plan.jobs.forEach((job) => queue.enqueue(job))
+  const message = describeResend(input, plan, config.watchRoot)
+  log(`[resend] ${message}`)
+  return message
 }
 
 async function rescanRecent() {
