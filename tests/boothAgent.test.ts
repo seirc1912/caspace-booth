@@ -249,3 +249,57 @@ test('photos exported before 25/11/2026 (Vietnam time) are never sent, even by m
   assert.equal(await isOnOrAfterUploadFrom(before), false)
   assert.equal(await isOnOrAfterUploadFrom(after), true)
 })
+
+test('status page never auto-refreshes while staff type a folder name (meta refresh wiped the box)', () => {
+  const html = renderStatusPage({ boothId: 'b', watchRoot: 'r', apiBaseUrl: 'a', pending: 0, uploaded: 0, lastError: null, unrecognized: [], failures: [] }, '', 'tok', 'n0nce')
+  assert.ok(!/http-equiv="refresh"/.test(html), 'no meta refresh')
+  assert.match(html, /<script nonce="n0nce">/)
+  assert.match(html, /i\.value\|\|document\.activeElement===i/, 'skips refresh while typing or focused')
+  assert.match(html, /location\.replace\('\/'\)/, 'reloads with GET, never re-posts the form')
+})
+
+test('resend finds a folder by phone number and reads Output even if the folder mtime is stale', async () => {
+  const { planResend, describeResend } = await import('../booth-agent/src/scanner.ts')
+  const root = mkdtempSync(path.join(tmpdir(), 'pictures-'))
+  const now = Date.now()
+  const put = (relative: string, atMs = now) => {
+    const file = path.join(root, relative)
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, jpeg)
+    utimesSync(file, atMs / 1000, atMs / 1000)
+  }
+  put('0912000111 Lan/Output/a.jpg')
+  put('0912000111 Lan/Output/b.JPG')
+  // Google Drive / network folders: the Output folder's own date can stay old.
+  const old = (UPLOAD_FROM_MS - 86_400_000) / 1000
+  utimesSync(path.join(root, '0912000111 Lan/Output'), old, old)
+  const plan = await planResend(root, '0912000111')
+  assert.deepEqual(plan.jobs.map((job) => path.basename(job.filePath)).sort(), ['a.jpg', 'b.JPG'])
+  assert.ok(plan.jobs.every((job) => job.phone === '0912000111' && job.sessionFolder === '0912000111 Lan'))
+  assert.match(describeResend('0912000111', plan, root), /Đang gửi lại 2 ảnh của 0912000111 Lan/)
+  const manual = await scanExports(root, { onlyFolder: '0912000111 Lan' })
+  assert.equal(manual.jobs.length, 2, 'exact-name resend no longer skipped by folder mtime')
+})
+
+test('resend explains why nothing was sent', async () => {
+  const { planResend, describeResend } = await import('../booth-agent/src/scanner.ts')
+  const root = mkdtempSync(path.join(tmpdir(), 'pictures-'))
+  const put = (relative: string, atMs = Date.now()) => {
+    const file = path.join(root, relative)
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, jpeg)
+    utimesSync(file, atMs / 1000, atMs / 1000)
+  }
+  const say = async (input: string) => describeResend(input, await planResend(root, input), root)
+  assert.match(await say('0911111111'), /Không thấy thư mục "0911111111"/)
+  mkdirSync(path.join(root, '0922222222/Capture'), { recursive: true })
+  assert.match(await say('0922222222'), /chưa có thư mục Output/)
+  put('0933333333/Output/old.jpg', UPLOAD_FROM_MS - 60_000)
+  assert.match(await say('0933333333'), /cả 1 ảnh JPG đều xuất trước 25\/11\/2026/)
+  put('0944444444/Output/JPG/a.jpg')
+  assert.match(await say('0944444444'), /thư mục con của Output/)
+  put('0955555555/Output/a.tif')
+  assert.match(await say('0955555555'), /không phải ảnh JPG/)
+  put('tim/Output/a.jpg')
+  assert.match(await say('tim'), /không có số điện thoại 10 số/)
+})

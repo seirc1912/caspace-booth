@@ -14,7 +14,7 @@ khách nhập số điện thoại là thấy ảnh. Không cần Google Drive h
 - Chờ Capture One ghi xong file rồi mới gửi; mỗi lần 1 ảnh để không làm chậm máy.
 - Mất mạng: tự thử lại liên tục; có mạng lại là gửi tiếp. Tắt máy rồi bật lại: tự gửi bù ảnh của 6 giờ gần nhất.
 - Chỉ gửi ảnh xuất từ ngày 25/11/2026 trở đi; ảnh cũ hơn không bao giờ được gửi (kể cả khi bấm "Gửi lại thư mục").
-- Ảnh phòng chụp trên hệ thống tự xoá sau 6 giờ (thư mục trên máy vẫn giữ nguyên). Khách cần ảnh cũ hơn: gửi link Google Drive, hoặc dùng **"Gửi lại thư mục"** ở trang trạng thái.
+- Ảnh phòng chụp trên hệ thống tự xoá sau 6 giờ (thư mục trên máy vẫn giữ nguyên). Khách cần ảnh cũ hơn: gửi link Google Drive, hoặc dùng **"Gửi lại thư mục"** ở trang trạng thái (gõ số điện thoại hoặc tên thư mục; nếu không gửi được, trang ghi rõ lý do).
 
 ## Trang trạng thái
 
