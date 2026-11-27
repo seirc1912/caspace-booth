@@ -1,7 +1,8 @@
 import { readFile, stat } from 'node:fs/promises'
 import { waitUntilStable } from './stableFile.ts'
 import { StateStore } from './stateStore.ts'
-import { AgentUploadError, uploadExport, type BoothApi } from './uploader.ts'
+import { MAX_CONCURRENCY } from './config.ts'
+import { AgentUploadError, uploadExport, type BoothApi, type TransferTiming } from './uploader.ts'
 
 export interface QueueJob { filePath: string; phone: string; sessionFolder: string }
 export interface QueueDeps {
@@ -18,13 +19,13 @@ export interface QueueDeps {
   onEvent?: (event: QueueEvent) => void
 }
 export type QueueEvent =
-  | { type: 'uploaded'; job: QueueJob; alreadyUploaded: boolean }
+  | { type: 'uploaded'; job: QueueJob; alreadyUploaded: boolean; transfer: TransferTiming | null; durationMs: number }
   | { type: 'retry'; job: QueueJob; attempt: number; delayMs: number; reason: string }
   | { type: 'failed'; job: QueueJob; reason: string }
 
 const MAX_PERMANENT_ATTEMPTS = 3
 
-/** Serial (or 2-lane) upload queue: never blocks Capture One, retries network errors forever. */
+/** Upload queue with up to MAX_CONCURRENCY lanes: never blocks Capture One, retries network errors forever. */
 export class UploadQueue {
   private readonly pending: QueueJob[] = []
   private readonly known = new Set<string>()
@@ -48,7 +49,7 @@ export class UploadQueue {
   idle() { return this.pendingCount === 0 ? Promise.resolve() : new Promise<void>((resolve) => this.idleResolvers.push(resolve)) }
 
   private pump() {
-    const lanes = Math.min(2, Math.max(1, this.deps.concurrency ?? 1))
+    const lanes = Math.min(MAX_CONCURRENCY, Math.max(1, this.deps.concurrency ?? 1))
     while (this.active < lanes && this.pending.length) {
       const job = this.pending.shift()!
       this.active += 1
@@ -76,10 +77,11 @@ export class UploadQueue {
         const key = StateStore.key(job.filePath, info.size, info.mtimeMs)
         if (state.has(key)) return
         const bytes = await readImpl(job.filePath)
+        const startedAt = performance.now()
         const result = await upload({ api, phone: job.phone, filePath: job.filePath, bytes, makeThumbnail, makePreview })
         state.mark(key, result.objectPath)
         this.uploadedCount += 1
-        this.deps.onEvent?.({ type: 'uploaded', job, alreadyUploaded: result.alreadyUploaded })
+        this.deps.onEvent?.({ type: 'uploaded', job, alreadyUploaded: result.alreadyUploaded, transfer: result.transfer ?? null, durationMs: Math.round(performance.now() - startedAt) })
         return
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error)

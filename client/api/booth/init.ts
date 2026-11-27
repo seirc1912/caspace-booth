@@ -1,4 +1,4 @@
-import { requireBooth } from '../_lib/boothAuth.js'
+import { BOOTH_UPLOAD_IP_LIMIT, enforceBoothUploadLimit, requireBooth } from '../_lib/boothAuth.js'
 import { createBoothCompletionToken, parseBoothUploadMetadata, prepareBoothUpload } from '../_lib/boothPaths.js'
 import { readJsonBody, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse } from '../_lib/http.js'
 import { enforceRateLimit } from '../_lib/rateLimit.js'
@@ -14,8 +14,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   let boothId = 'unknown'
   const startedAt = performance.now()
   try {
-    enforceRateLimit(request, { limit: 600, windowMs: 10 * 60_000, scope: 'booth-upload' })
+    enforceRateLimit(request, BOOTH_UPLOAD_IP_LIMIT)
     boothId = requireBooth(request).boothId
+    enforceBoothUploadLimit(boothId)
     const metadata = parseBoothUploadMetadata(readJsonBody(request))
     const environment = loadSupabaseStorageEnvironment()
     const result = await prepareBoothUpload(new SupabasePhotoUploadService(environment), metadata)

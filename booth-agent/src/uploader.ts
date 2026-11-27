@@ -7,6 +7,9 @@ export class AgentUploadError extends Error {
   constructor(message: string, readonly status: number, readonly retryable: boolean) { super(message) }
 }
 
+/** How long the original's bytes took to reach storage (PUT only, not the API calls). */
+export interface TransferTiming { bytes: number; ms: number }
+
 interface InitResult { alreadyUploaded: boolean; objectPath: string; uploadUrl?: string; completionToken: string }
 
 async function call<T>(api: BoothApi, route: string, body: unknown): Promise<T> {
@@ -50,11 +53,13 @@ async function send(api: BoothApi, bytes: Buffer, fields: Record<string, unknown
   const init = await call<InitResult>(api, '/api/booth/init', metadata)
   // Already stored: the server compared the original's SHA-256 itself; an existing thumbnail or
   // preview is kept even if a re-made copy differs by a few bytes, so there is nothing to verify.
-  if (init.alreadyUploaded) return init
+  if (init.alreadyUploaded) return { ...init, transfer: null }
   if (!init.uploadUrl) throw new AgentUploadError('NO_UPLOAD_URL', 502, true)
+  const startedAt = performance.now()
   await put(api, init.uploadUrl, bytes, filename)
+  const transfer: TransferTiming = { bytes: bytes.length, ms: Math.max(1, Math.round(performance.now() - startedAt)) }
   await call(api, '/api/booth/complete', { ...metadata, objectPath: init.objectPath, completionToken: init.completionToken })
-  return init
+  return { ...init, transfer }
 }
 
 /** Original first, then its 400px thumbnail and 1600px preview. Idempotent: re-sending the same file is cheap. */
@@ -70,5 +75,5 @@ export async function uploadExport(input: { api: BoothApi; phone: string; filePa
     try { await send(input.api, preview, { phone: input.phone, variant: 'preview', originalPath: original.objectPath }, `${basename(filename, extname(filename))}-preview.jpg`) }
     catch (error) { if (!(error instanceof AgentUploadError) || error.retryable) throw error }
   }
-  return { objectPath: original.objectPath, alreadyUploaded: original.alreadyUploaded }
+  return { objectPath: original.objectPath, alreadyUploaded: original.alreadyUploaded, transfer: original.transfer }
 }

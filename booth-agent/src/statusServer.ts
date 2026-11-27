@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
+import type { SpeedSummary } from './speed.ts'
 
 export interface AgentStatus {
   boothId: string
@@ -8,6 +9,8 @@ export interface AgentStatus {
   pending: number
   uploaded: number
   lastError: string | null
+  concurrency?: number
+  speed?: SpeedSummary | null
   unrecognized: string[]
   failures: Array<{ file: string; reason: string }>
 }
@@ -21,6 +24,15 @@ const escape = (value: string) => value.replace(/[&<>"']/g, (character) => `&#${
  */
 const autoRefresh = (nonce: string) => `<script nonce="${escape(nonce)}">setInterval(function(){var i=document.querySelector('input[name=folder]');if(i&&(i.value||document.activeElement===i))return;location.replace('/')},5000)</script>`
 
+const decimal = (value: number) => value.toFixed(1).replace('.', ',')
+
+function speedLine(status: AgentStatus) {
+  const lanes = status.concurrency ? ` · gửi ${status.concurrency} ảnh cùng lúc` : ''
+  if (!status.speed) return `<p class="muted">Chưa gửi ảnh nào từ khi bật máy${lanes}</p>`
+  const { photos, avgSeconds, avgPhotoSeconds, mbps } = status.speed
+  return `<p>${photos} ảnh gần nhất: ảnh gốc mất trung bình <b>${decimal(avgSeconds)} giây</b> (${decimal(mbps)} Mbps mỗi ảnh), cả ảnh ${decimal(avgPhotoSeconds)} giây${lanes}.</p>`
+}
+
 export function renderStatusPage(status: AgentStatus, message = '', csrfToken = '', nonce = '') {
   const list = (items: string[]) => items.length ? `<ul>${items.map((item) => `<li>${escape(item)}</li>`).join('')}</ul>` : '<p class="muted">Không có</p>'
   return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><title>Caspace – ${escape(status.boothId)}</title>
@@ -29,6 +41,7 @@ export function renderStatusPage(status: AgentStatus, message = '', csrfToken = 
 ${message ? `<p class="card">${escape(message)}</p>` : ''}
 <div class="card"><div class="big">${status.pending}</div><div class="muted">ảnh đang chờ gửi</div></div>
 <div class="card"><div class="big">${status.uploaded}</div><div class="muted">ảnh đã gửi từ khi bật máy</div></div>
+<div class="card"><b>Tốc độ gửi</b>${speedLine(status)}</div>
 <div class="card ${status.lastError ? 'warn' : ''}">Mạng / máy chủ: ${status.lastError ? `lỗi gần nhất — ${escape(status.lastError)} (đang tự thử lại)` : 'bình thường'}</div>
 <div class="card"><b>Thư mục sai tên (không gửi)</b> — đổi tên để bắt đầu bằng số điện thoại 10 số, app tự gửi lại:${list(status.unrecognized)}</div>
 <div class="card"><b>Ảnh gửi thất bại</b>${list(status.failures.map((item) => `${item.file}: ${item.reason}`))}</div>
