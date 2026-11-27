@@ -174,7 +174,7 @@ test('Setup.exe pieces: config writer keeps old values on upgrade and rejects ba
   assert.equal(spawnSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn', dir]).stdout.length, 0, 'no text output for NSIS to garble')
   execFileSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn/', dir])
   execFileSync('node', [script, file, '', '', '', ''])
-  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 4, statusPort: 47821 })
+  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 8, statusPort: 47821 })
   const task = read('booth-agent/installer/task.xml', 'utf8')
   assert.match(task, /<RestartOnFailure><Interval>PT1M<\/Interval><Count>999<\/Count><\/RestartOnFailure>/)
   assert.match(task, /<LogonTrigger>/)
@@ -304,26 +304,26 @@ test('resend explains why nothing was sent', async () => {
   assert.match(await say('tim'), /không có số điện thoại 10 số/)
 })
 
-test('1.1.3: up to 4 photos upload at the same time (was 2); config default and ceiling are 4', async () => {
+test('1.1.4: up to 8 photos upload at the same time; config default and ceiling are 8', async () => {
   const { loadConfig, MAX_CONCURRENCY } = await import('../booth-agent/src/config.ts')
-  assert.equal(MAX_CONCURRENCY, 4)
+  assert.equal(MAX_CONCURRENCY, 8)
   const dir = mkdtempSync(path.join(tmpdir(), 'cfg-'))
   const file = path.join(dir, 'config.json')
   const base = { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-3', boothKey: 'k'.repeat(8), watchRoot: dir }
   writeFileSync(file, JSON.stringify(base))
-  assert.equal(loadConfig(file).concurrency, 4)
-  writeFileSync(file, JSON.stringify({ ...base, concurrency: 9 }))
-  assert.equal(loadConfig(file).concurrency, 4)
+  assert.equal(loadConfig(file).concurrency, 8)
+  writeFileSync(file, JSON.stringify({ ...base, concurrency: 20 }))
+  assert.equal(loadConfig(file).concurrency, 8)
   let active = 0
   let peak = 0
   const queue = new UploadQueue({
-    api: { baseUrl: 'http://api', key: 'k' }, state: tempState(), makeThumbnail: async () => jpeg, concurrency: 4,
+    api: { baseUrl: 'http://api', key: 'k' }, state: tempState(), makeThumbnail: async () => jpeg, concurrency: 8,
     waitStable: async () => 1, statImpl: async () => ({ size: 1, mtimeMs: 1 }), readImpl: async () => jpeg,
     upload: async () => { active += 1; peak = Math.max(peak, active); await new Promise((resolve) => setTimeout(resolve, 5)); active -= 1; return { objectPath: 'x', alreadyUploaded: false, transfer: { bytes: 3_000_000, ms: 1_000 } } },
   })
-  for (let index = 0; index < 10; index += 1) queue.enqueue({ filePath: `/p/0912345678/Output/${index}.jpg`, phone: '0912345678', sessionFolder: '0912345678' })
+  for (let index = 0; index < 20; index += 1) queue.enqueue({ filePath: `/p/0912345678/Output/${index}.jpg`, phone: '0912345678', sessionFolder: '0912345678' })
   await queue.idle()
-  assert.equal(peak, 4)
+  assert.equal(peak, 8)
 })
 
 test('1.1.3: the original PUT is timed and the status page shows the recent upload speed', async () => {
