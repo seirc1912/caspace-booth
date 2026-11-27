@@ -7,13 +7,13 @@ import { assertBelowLimit, enforceRateLimit } from './rateLimit.js'
 export const BOOTH_AUTH_FAILURES = { limit: 20, windowMs: 10 * 60_000, scope: 'booth-auth-fail' }
 
 // Upload budget is counted per booth PC, not per IP: the 4 booth PCs share the shop's
-// public IP, and with 4 photos in flight each (agent 1.1.3) a shared 600/10 min budget
+// public IP, and with 8 photos in flight each (agent 1.1.4) a shared 600/10 min budget
 // would make them throttle each other. The IP ceiling only stops abuse before auth.
 const UPLOAD_WINDOW_MS = 10 * 60_000
-export const BOOTH_UPLOAD_IP_LIMIT = { limit: 8_000, windowMs: UPLOAD_WINDOW_MS, scope: 'booth-upload-ip' }
-export const BOOTH_UPLOAD_PER_BOOTH = { limit: 1_500, windowMs: UPLOAD_WINDOW_MS, scope: 'booth-upload' }
+export const BOOTH_UPLOAD_IP_LIMIT = { limit: 15_000, windowMs: UPLOAD_WINDOW_MS, scope: 'booth-upload-ip' }
+export const BOOTH_UPLOAD_PER_BOOTH = { limit: 3_000, windowMs: UPLOAD_WINDOW_MS, scope: 'booth-upload' }
 
-/** Call after requireBooth: 1,500 init/complete calls per booth per 10 min (~250 photos). */
+/** Call after requireBooth: 3,000 init/complete calls per booth per 10 min (~500 photos, 8 lanes). */
 export function enforceBoothUploadLimit(boothId: string) {
   enforceRateLimit({ headers: { 'x-forwarded-for': `booth:${boothId}` } }, BOOTH_UPLOAD_PER_BOOTH)
 }

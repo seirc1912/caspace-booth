@@ -1,7 +1,7 @@
 {
   "name": "@caspace/booth-agent",
   "private": true,
-  "version": "1.1.3",
+  "version": "1.1.4",
   "type": "module",
   "description": "Gửi ảnh Capture One (Pictures\\<sđt>\\Output) từ máy phòng chụp lên caspace.vn",
   "scripts": {

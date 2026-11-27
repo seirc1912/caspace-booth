@@ -153,5 +153,7 @@ test('booth upload budget is per booth PC: 4 booths behind one shop IP do not th
   for (let call = 0; call < BOOTH_UPLOAD_PER_BOOTH.limit; call += 1) enforceBoothUploadLimit('booth-1')
   assert.throws(() => enforceBoothUploadLimit('booth-1'), (error: unknown) => (error as { status?: number }).status === 429)
   for (const booth of ['booth-2', 'booth-3', 'booth-4']) assert.doesNotThrow(() => enforceBoothUploadLimit(booth))
-  assert.ok(BOOTH_UPLOAD_PER_BOOTH.limit >= 1_200, '4 lanes × 6 calls per photo need room')
+  assert.ok(BOOTH_UPLOAD_PER_BOOTH.limit >= 3_000, '8 lanes: ~50 photos/min × 6 calls per photo need room')
+  const { BOOTH_UPLOAD_IP_LIMIT } = await import('../client/api/_lib/boothAuth.ts')
+  assert.ok(BOOTH_UPLOAD_IP_LIMIT.limit >= 4 * BOOTH_UPLOAD_PER_BOOTH.limit, 'the shared IP ceiling never throttles 4 booths at full speed')
 })

@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs'
 
-/** Photos uploaded at the same time. 1.1.3 raised it from 2: the shop line has room to spare. */
-export const MAX_CONCURRENCY = 4
+/**
+ * Photos uploaded at the same time. 1.1.3 raised it from 2 to 4; 1.1.4 to 8 so a 200-photo
+ * batch finishes in ~8 minutes even on a slow evening (owner target 8–10 minutes).
+ */
+export const MAX_CONCURRENCY = 8
 
 export interface AgentConfig { apiBaseUrl: string; boothId: string; boothKey: string; watchRoot: string; concurrency: number; statusPort: number }
 
