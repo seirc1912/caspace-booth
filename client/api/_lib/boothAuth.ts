@@ -6,6 +6,18 @@ import { assertBelowLimit, enforceRateLimit } from './rateLimit.js'
 // refused even with the right key, so guessing is not practical.
 export const BOOTH_AUTH_FAILURES = { limit: 20, windowMs: 10 * 60_000, scope: 'booth-auth-fail' }
 
+// Upload budget is counted per booth PC, not per IP: the 4 booth PCs share the shop's
+// public IP, and with 4 photos in flight each (agent 1.1.3) a shared 600/10 min budget
+// would make them throttle each other. The IP ceiling only stops abuse before auth.
+const UPLOAD_WINDOW_MS = 10 * 60_000
+export const BOOTH_UPLOAD_IP_LIMIT = { limit: 8_000, windowMs: UPLOAD_WINDOW_MS, scope: 'booth-upload-ip' }
+export const BOOTH_UPLOAD_PER_BOOTH = { limit: 1_500, windowMs: UPLOAD_WINDOW_MS, scope: 'booth-upload' }
+
+/** Call after requireBooth: 1,500 init/complete calls per booth per 10 min (~250 photos). */
+export function enforceBoothUploadLimit(boothId: string) {
+  enforceRateLimit({ headers: { 'x-forwarded-for': `booth:${boothId}` } }, BOOTH_UPLOAD_PER_BOOTH)
+}
+
 const boothIdPattern = /^[a-z0-9-]{1,32}$/
 const hashPattern = /^[a-f0-9]{64}$/
 

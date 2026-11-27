@@ -174,7 +174,7 @@ test('Setup.exe pieces: config writer keeps old values on upgrade and rejects ba
   assert.equal(spawnSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn', dir]).stdout.length, 0, 'no text output for NSIS to garble')
   execFileSync('node', [script, file, 'booth-2', 'k'.repeat(24), 'https://caspace.vn/', dir])
   execFileSync('node', [script, file, '', '', '', ''])
-  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 2, statusPort: 47821 })
+  assert.deepEqual(JSON.parse(read(file, 'utf8')), { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-2', boothKey: 'k'.repeat(24), watchRoot: dir, concurrency: 4, statusPort: 47821 })
   const task = read('booth-agent/installer/task.xml', 'utf8')
   assert.match(task, /<RestartOnFailure><Interval>PT1M<\/Interval><Count>999<\/Count><\/RestartOnFailure>/)
   assert.match(task, /<LogonTrigger>/)
@@ -302,4 +302,47 @@ test('resend explains why nothing was sent', async () => {
   assert.match(await say('0955555555'), /không phải ảnh JPG/)
   put('tim/Output/a.jpg')
   assert.match(await say('tim'), /không có số điện thoại 10 số/)
+})
+
+test('1.1.3: up to 4 photos upload at the same time (was 2); config default and ceiling are 4', async () => {
+  const { loadConfig, MAX_CONCURRENCY } = await import('../booth-agent/src/config.ts')
+  assert.equal(MAX_CONCURRENCY, 4)
+  const dir = mkdtempSync(path.join(tmpdir(), 'cfg-'))
+  const file = path.join(dir, 'config.json')
+  const base = { apiBaseUrl: 'https://caspace.vn', boothId: 'booth-3', boothKey: 'k'.repeat(8), watchRoot: dir }
+  writeFileSync(file, JSON.stringify(base))
+  assert.equal(loadConfig(file).concurrency, 4)
+  writeFileSync(file, JSON.stringify({ ...base, concurrency: 9 }))
+  assert.equal(loadConfig(file).concurrency, 4)
+  let active = 0
+  let peak = 0
+  const queue = new UploadQueue({
+    api: { baseUrl: 'http://api', key: 'k' }, state: tempState(), makeThumbnail: async () => jpeg, concurrency: 4,
+    waitStable: async () => 1, statImpl: async () => ({ size: 1, mtimeMs: 1 }), readImpl: async () => jpeg,
+    upload: async () => { active += 1; peak = Math.max(peak, active); await new Promise((resolve) => setTimeout(resolve, 5)); active -= 1; return { objectPath: 'x', alreadyUploaded: false, transfer: { bytes: 3_000_000, ms: 1_000 } } },
+  })
+  for (let index = 0; index < 10; index += 1) queue.enqueue({ filePath: `/p/0912345678/Output/${index}.jpg`, phone: '0912345678', sessionFolder: '0912345678' })
+  await queue.idle()
+  assert.equal(peak, 4)
+})
+
+test('1.1.3: the original PUT is timed and the status page shows the recent upload speed', async () => {
+  const { TransferStats, describeTransfer } = await import('../booth-agent/src/speed.ts')
+  const { calls, api } = fakeApi()
+  const result = await uploadExport({ api, phone: '0947860616', filePath: '/p/0947860616/Output/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg })
+  assert.equal(result.transfer?.bytes, jpeg.length)
+  assert.ok((result.transfer?.ms ?? 0) >= 1)
+  assert.ok(calls.length > 0)
+  const again = fakeApi({ alreadyUploaded: true })
+  assert.equal((await uploadExport({ api: again.api, phone: '0947860616', filePath: '/p/a.jpg', bytes: jpeg, makeThumbnail: async () => jpeg })).transfer, null, 'nothing sent → no timing')
+  assert.equal(describeTransfer({ bytes: 3 * 1_048_576, ms: 2_000 }), '3.0 MB trong 2.0s (12.6 Mbps)')
+  const stats = new TransferStats(2)
+  assert.equal(stats.summary(), null)
+  stats.add({ bytes: 1_000_000, ms: 1_000 }, 3_000)
+  stats.add({ bytes: 3_000_000, ms: 3_000 }, 5_000)
+  stats.add({ bytes: 2_000_000, ms: 1_000 }, 2_000)
+  assert.deepEqual(stats.summary(), { photos: 2, avgSeconds: 2, avgPhotoSeconds: 3.5, mbps: 12 }, 'keeps only the last N')
+  const html = renderStatusPage({ boothId: 'b', watchRoot: 'r', apiBaseUrl: 'a', pending: 0, uploaded: 2, lastError: null, unrecognized: [], failures: [], concurrency: 4, speed: stats.summary() })
+  assert.match(html, /2 ảnh gần nhất: ảnh gốc mất trung bình <b>2,0 giây<\/b> \(12,0 Mbps mỗi ảnh\), cả ảnh 3,5 giây · gửi 4 ảnh cùng lúc/)
+  assert.match(renderStatusPage({ boothId: 'b', watchRoot: 'r', apiBaseUrl: 'a', pending: 0, uploaded: 0, lastError: null, unrecognized: [], failures: [] }), /Chưa gửi ảnh nào/)
 })

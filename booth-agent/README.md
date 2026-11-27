@@ -15,6 +15,7 @@ khách nhập số điện thoại là thấy ảnh. Không cần Google Drive h
 - Mất mạng: tự thử lại liên tục; có mạng lại là gửi tiếp. Tắt máy rồi bật lại: tự gửi bù ảnh của 6 giờ gần nhất.
 - Chỉ gửi ảnh xuất từ ngày 25/11/2026 trở đi; ảnh cũ hơn không bao giờ được gửi (kể cả khi bấm "Gửi lại thư mục").
 - Ảnh phòng chụp trên hệ thống tự xoá sau 6 giờ (thư mục trên máy vẫn giữ nguyên). Khách cần ảnh cũ hơn: gửi link Google Drive, hoặc dùng **"Gửi lại thư mục"** ở trang trạng thái (gõ số điện thoại hoặc tên thư mục; nếu không gửi được, trang ghi rõ lý do).
+- Mỗi máy gửi 4 ảnh cùng lúc (từ bản 1.1.3). Ô **"Tốc độ gửi"** ở trang trạng thái cho biết ảnh gốc mất bao nhiêu giây và bao nhiêu Mbps (20 ảnh gần nhất): máy nào chậm hẳn so với máy khác là máy đó có vấn đề (mạng, Google Drive, diệt virus).
 
 ## Trang trạng thái
 

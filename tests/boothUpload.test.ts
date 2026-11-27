@@ -115,7 +115,8 @@ test('booth endpoints authenticate the booth, skip same-origin, and never log pa
     const source = readFileSync(file, 'utf8')
     assert.match(source, /requireBooth\(request\)/)
     assert.doesNotMatch(source, /enforceSameOrigin/)
-    assert.match(source, /scope: 'booth-upload'/)
+    assert.match(source, /enforceRateLimit\(request, BOOTH_UPLOAD_IP_LIMIT\)/)
+    assert.match(source, /requireBooth\(request\)\.boothId\n\s+enforceBoothUploadLimit\(boothId\)/)
     assert.doesNotMatch(source, /console\.\w+\([^)]*(phone|objectPath|filename)/)
   }
 })
@@ -144,4 +145,13 @@ test('booth completion checks size and type with HEAD only (no download, no Egre
   await assert.rejects(() => ok.service.verifyBoothObjectAt({ size: jpeg.length + 1, mimeType: 'image/jpeg' }, '0947860616/_booth/0947860616-103333.jpg'), /Dung lượng ảnh đã nhận không khớp/)
   await assert.rejects(() => ok.service.verifyBoothObjectAt({ size: jpeg.length, mimeType: 'image/jpeg' }, '0947860616/_booth/missing.jpg'), UploadApiError)
   assert.match(readFileSync('client/api/booth/complete.ts', 'utf8'), /\.verifyBoothObjectAt\(completion, completion\.objectPath\)/)
+})
+
+test('booth upload budget is per booth PC: 4 booths behind one shop IP do not throttle each other', async () => {
+  const { enforceBoothUploadLimit, BOOTH_UPLOAD_PER_BOOTH } = await import('../client/api/_lib/boothAuth.ts')
+  resetRateLimitsForTests()
+  for (let call = 0; call < BOOTH_UPLOAD_PER_BOOTH.limit; call += 1) enforceBoothUploadLimit('booth-1')
+  assert.throws(() => enforceBoothUploadLimit('booth-1'), (error: unknown) => (error as { status?: number }).status === 429)
+  for (const booth of ['booth-2', 'booth-3', 'booth-4']) assert.doesNotThrow(() => enforceBoothUploadLimit(booth))
+  assert.ok(BOOTH_UPLOAD_PER_BOOTH.limit >= 1_200, '4 lanes × 6 calls per photo need room')
 })

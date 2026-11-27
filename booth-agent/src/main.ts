@@ -6,6 +6,7 @@ import { notifyOnce } from './notify.ts'
 import { classifyExport } from './phoneFolder.ts'
 import { UploadQueue } from './queue.ts'
 import { AUTOMATIC_RESCAN_MS, describeResend, isOnOrAfterUploadFrom, PERIODIC_RESCAN_MS, pendingJobs, planResend, scanExports } from './scanner.ts'
+import { describeTransfer, TransferStats } from './speed.ts'
 import { StateStore } from './stateStore.ts'
 import { startStatusServer } from './statusServer.ts'
 import { makePreview, makeThumbnail } from './thumbnail.ts'
@@ -17,6 +18,7 @@ if (!existsSync(config.watchRoot)) throw new Error(`Không thấy thư mục the
 const state = new StateStore(path.join(path.dirname(configPath), 'state', 'uploaded.json'))
 const unrecognized = new Set<string>()
 let lastError: string | null = null
+const speed = new TransferStats()
 const log = (message: string) => console.log(`${new Date().toISOString()} ${message}`)
 
 const queue = new UploadQueue({
@@ -26,7 +28,12 @@ const queue = new UploadQueue({
   makePreview,
   concurrency: config.concurrency,
   onEvent: (event) => {
-    if (event.type === 'uploaded') { lastError = null; log(`[sent] ${event.job.sessionFolder}/${path.basename(event.job.filePath)}${event.alreadyUploaded ? ' (đã có)' : ''}`) }
+    if (event.type === 'uploaded') {
+      lastError = null
+      if (event.transfer) speed.add(event.transfer, event.durationMs)
+      const detail = event.transfer ? ` — ảnh gốc ${describeTransfer(event.transfer)}, cả ảnh ${(event.durationMs / 1000).toFixed(1)}s` : ''
+      log(`[sent] ${event.job.sessionFolder}/${path.basename(event.job.filePath)}${event.alreadyUploaded ? ' (đã có)' : ''}${detail}`)
+    }
     if (event.type === 'retry') { lastError = event.reason; log(`[retry ${event.attempt}] ${path.basename(event.job.filePath)}: ${event.reason} — thử lại sau ${Math.round(event.delayMs / 1000)}s`) }
     if (event.type === 'failed') {
       log(`[failed] ${path.basename(event.job.filePath)}: ${event.reason}`)
@@ -93,6 +100,8 @@ startStatusServer(config.statusPort, () => ({
   pending: queue.pendingCount,
   uploaded: queue.uploadedCount,
   lastError,
+  concurrency: config.concurrency,
+  speed: speed.summary(),
   unrecognized: [...unrecognized],
   failures: [...queue.failures].map(([file, reason]) => ({ file: path.relative(config.watchRoot, file), reason })),
 }), resend)

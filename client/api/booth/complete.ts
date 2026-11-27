@@ -1,4 +1,4 @@
-import { requireBooth } from '../_lib/boothAuth.js'
+import { BOOTH_UPLOAD_IP_LIMIT, enforceBoothUploadLimit, requireBooth } from '../_lib/boothAuth.js'
 import { parseBoothCompletion, verifyBoothCompletionToken } from '../_lib/boothPaths.js'
 import { readJsonBody, sendApiError, setPrivateResponse, type ApiRequest, type ApiResponse, UploadApiError } from '../_lib/http.js'
 import { enforceRateLimit } from '../_lib/rateLimit.js'
@@ -12,8 +12,9 @@ export default async function handler(request: ApiRequest, response: ApiResponse
   let boothId = 'unknown'
   const startedAt = performance.now()
   try {
-    enforceRateLimit(request, { limit: 600, windowMs: 10 * 60_000, scope: 'booth-upload' })
+    enforceRateLimit(request, BOOTH_UPLOAD_IP_LIMIT)
     boothId = requireBooth(request).boothId
+    enforceBoothUploadLimit(boothId)
     const completion = parseBoothCompletion(readJsonBody(request))
     const environment = loadSupabaseStorageEnvironment()
     if (!verifyBoothCompletionToken(environment.serviceRoleKey, boothId, completion)) throw new UploadApiError(403, 'Phiên xác minh ảnh không hợp lệ.')
