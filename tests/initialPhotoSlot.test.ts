@@ -1,24 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createInitialPhotoSlot, createInitialPhotoTransform, initialPhotoTransform } from '../client/src/features/photos/initialPhotoSlot'
+import { createInitialPhotoSlot } from '../client/src/features/photos/initialPhotoSlot'
 import type { PhotoAsset } from '../client/src/types/selfBooth'
 
 const photo: PhotoAsset = { id: 'photo', src: 'blob:photo', alt: 'Original photo', source: 'phone' }
 
-test('new and replacement photos initialize centered at a sensible contain fit', () => {
-  assert.deepEqual(createInitialPhotoSlot(photo), { photo, fit: 'contain', filter: 'none', transform: initialPhotoTransform })
-  assert.deepEqual(initialPhotoTransform, { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false })
+test('new and replacement photos start covering their slot, centred (no empty edges)', () => {
+  assert.deepEqual(createInitialPhotoSlot(photo), { photo, transform: { scale: 1, offsetX: 0, offsetY: 0, rotation: 0, flipX: false, grayscale: false } })
+  assert.equal(createInitialPhotoSlot(photo, true).transform.grayscale, true, 'All B&W: new photos start B&W')
 })
 
 test('each initialization receives independent transform state', () => {
   const first = createInitialPhotoSlot(photo)
   const second = createInitialPhotoSlot(photo)
   assert.notEqual(first.transform, second.transform)
-  first.transform.zoom = 2
-  assert.equal(second.transform.zoom, 1.5)
-})
-
-test('Reset returns a fresh centered 150% transform', () => {
-  assert.deepEqual(createInitialPhotoTransform(), { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false })
-  assert.notStrictEqual(createInitialPhotoTransform(), initialPhotoTransform)
+  first.transform.scale = 2
+  assert.equal(second.transform.scale, 1)
 })

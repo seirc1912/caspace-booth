@@ -4,14 +4,13 @@ import { assignPhotoToTarget } from '../client/src/features/photos/directPhotoTa
 import type { FilledSlot, PhotoAsset } from '../client/src/types/selfBooth'
 
 const photo = (id: string): PhotoAsset => ({ id, src: `blob:${id}`, alt: id, source: 'phone' })
-const filled = (id: string, zoom = 1): FilledSlot => ({
+const filled = (id: string, scale = 1): FilledSlot => ({
   photo: photo(id),
-  fit: 'contain',
-  transform: { zoom, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+  transform: { scale, offsetX: 0, offsetY: 0, rotation: 0, flipX: false, grayscale: false },
 })
 
 test('direct selection assigns only the captured frame and slot', () => {
-  const frameOne = [filled('existing', 0.8), null]
+  const frameOne = [filled('existing', 1.2), null]
   const frameTwo = [null, null, null]
   const current = { 'frame-1': frameOne, 'frame-2': frameTwo }
 
@@ -23,7 +22,7 @@ test('direct selection assigns only the captured frame and slot', () => {
   assert.equal(next['frame-2']?.[1]?.photo.id, 'selected')
 })
 
-test('replacement receives a fresh centered 150% contain transform without inheriting edits', () => {
+test('replacement receives a fresh centred cover transform without inheriting edits', () => {
   const next = assignPhotoToTarget(
     { frame: [filled('old', 1.75)] },
     { templateId: 'frame', slotIndex: 0, slotCount: 1 },
@@ -32,9 +31,7 @@ test('replacement receives a fresh centered 150% contain transform without inher
 
   assert.deepEqual(next.frame?.[0], {
     photo: photo('replacement'),
-    fit: 'contain',
-    filter: 'none',
-    transform: { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+    transform: { scale: 1, offsetX: 0, offsetY: 0, rotation: 0, flipX: false, grayscale: false },
   })
 })
 

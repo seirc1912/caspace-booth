@@ -67,10 +67,15 @@ test('entering a room goes straight to the editor; booth photos live in its "Ả
   assert.match(app, /useBoothPhotos\(validPhone, pathname === '\/editor'\)/, 'list refreshes while editing')
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
   assert.match(composer, /withBoothFiles\(boothPhotos\.slice\(0, MAX_BOOTH_SELECTION\), \(files\) => onAutoFillPhotos\?\.\(files\)\)/, 'Auto Fill: first 20 booth photos')
-  assert.match(composer, /`Ảnh phòng chụp \(\$\{boothPhotos\.length\}\)`/)
+  assert.match(composer, /<span>Ảnh phòng chụp\{boothPhotos\.length \? ` \(\$\{boothPhotos\.length\}\)` : ''\}<\/span>/, 'always on the tray row')
+  assert.match(composer, /else if \(emptySlots\.length\) setPoolRequest\(\{ kind: 'frame'/, 'pick large photos for the empty slots')
+  assert.match(composer, /else setPoolRequest\(\{ kind: 'replace' \}\)/, 'a full frame can still pick: one photo, then the slot it replaces')
+  const pool = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
+  assert.match(pool, /\{`Ô \$\{inSlot\}`\}/, 'photos already in the frame show which slot they are in')
+  assert.match(pool, /if \(usedBy\[id\] !== undefined\) \{ setNotice/, 'and are not picked twice')
   assert.doesNotMatch(composer, /\{boothPhotos\.length \? <button[^>]*setBrowseBooth/, 'the button is always shown, even with no photos')
   const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
-  assert.match(sheet, /loading="lazy" src=\{photo\.thumbUrl\}/, 'sheet grid loads thumbnails only')
+  assert.match(sheet, /loading="lazy" src=\{boothPhotoThumb\(photo\)\}/, 'sheet grid loads thumbnails (preview only when a thumbnail is missing)')
   assert.doesNotMatch(sheet, /src=\{photo\.originalUrl\}/)
 })
 test('one browser session may look up at most 3 different phone numbers per 10 minutes', async () => {
@@ -96,22 +101,23 @@ test('ticking a photo prefetches its original once; continuing reuses it', async
   assert.deepEqual(fetched, ['o/a'], 'downloaded once')
 })
 
-test('multi-photo frames label empty slots "Hình N" and the sheet says which photo goes where', () => {
-  assert.match(readFileSync('client/src/components/editor/TemplateCanvas.tsx', 'utf8'), /slotLabel=\{template\.slots\.length > 1 \? `Hình \$\{index \+ 1\}` : undefined\}/)
+test('multi-photo frames label empty slots "Ô N" and the sheet says which photo goes where', () => {
+  assert.match(readFileSync('client/src/components/editor/TemplateCanvas.tsx', 'utf8'), /\{many \? <span[^>]*>Ô \{number\}<\/span> : null\}/)
   const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
   assert.match(sheet, /`Hình \$\{target\}`/)
   assert.match(sheet, /Ảnh chọn trước vào hình trước/)
 })
 
-test('tapping an empty slot lets the customer pick several booth photos: tapped slot first, then the other empty slots', async () => {
-  const { assignPhotosToFrameTarget, createFramePhotoTarget } = await import('../client/src/features/photos/framePhotoTarget.ts')
+test('"+ Thêm ảnh" takes the next unused tray photo; the booth sheet opens only when the tray is used up', async () => {
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
-  assert.match(composer, /emptySlotIndices: \[slotIndex, \.\.\.frameTarget\.emptySlotIndices\.filter\(\(index\) => index !== slotIndex\)\]/)
+  assert.match(composer, /const unusedTray = boothPhotos\.filter\(\(photo\) => !usedNames\.has\(photo\.name\)\)/)
+  assert.match(composer, /const next = unusedTray\[0\]\n\s+if \(next\) placeBoothPhoto\(next, slotIndex\)\n\s+else openPhotoPicker\(slotIndex\)/)
+  const { assignPhotosToFrameTarget, createFramePhotoTarget } = await import('../client/src/features/photos/framePhotoTarget.ts')
   const target = createFramePhotoTarget('t', [null, null, null])
   const reordered = { ...target, emptySlotIndices: [1, 0, 2] }
   const photo = (id: string) => ({ id, src: `blob:${id}`, alt: id, source: 'selfbooth' as const })
   const next = assignPhotosToFrameTarget({}, reordered, [photo('a'), photo('b')])
-  assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'first pick → tapped Hình 2, second → Hình 1')
+  assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'photos fill the requested slot order')
 })
 
 test('photos the customer uploaded via /upload-anh are offered too; exported frames (caspace-…) are not', async () => {

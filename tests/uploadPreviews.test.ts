@@ -27,12 +27,28 @@ test('the upload page sends thumbnail then preview; a failed preview never break
   const file = new File([new Uint8Array([1])], 'IMG 1.png', { type: 'image/png' })
   const tiny = new File([new Uint8Array([2])], 'IMG 1.jpg', { type: 'image/jpeg' })
   const upload = async (input: { variant?: string; requestId: string }) => { calls.push({ variant: input.variant, requestId: input.requestId }); return {} as never }
-  await queueThumbnailUpload({ file, thumbnail: Promise.resolve(tiny), phone: '0906341807', requestId: 'sub12345-0', preview: true }, { upload: upload as never, makePreview: async () => tiny })
+  const job = queueThumbnailUpload({ file, thumbnail: Promise.resolve(tiny), phone: '0906341807', requestId: 'sub12345-0', preview: true }, { upload: upload as never, makePreview: async () => tiny })
+  await job.thumbnail
+  assert.deepEqual(calls.map((call) => call.variant).slice(0, 1), ['thumbnail'], 'the upload page can wait for the thumbnail alone')
+  await job.done
   assert.deepEqual(calls, [{ variant: 'thumbnail', requestId: 'sub12345-0-thumb' }, { variant: 'preview', requestId: 'sub12345-0-preview' }])
   calls.length = 0
-  await queueThumbnailUpload({ file, thumbnail: Promise.resolve(tiny), phone: '0906341807', requestId: 'sub12345-1', preview: true }, { upload: upload as never, makePreview: async () => { throw new Error('decode') } })
+  await queueThumbnailUpload({ file, thumbnail: Promise.resolve(tiny), phone: '0906341807', requestId: 'sub12345-1', preview: true }, { upload: upload as never, makePreview: async () => { throw new Error('decode') } }).done
   assert.deepEqual(calls.map((call) => call.variant), ['thumbnail'])
   calls.length = 0
-  await queueThumbnailUpload({ file, thumbnail: Promise.resolve(tiny), phone: '0906341807', requestId: 'sub12345-2' }, { upload: upload as never })
+  await queueThumbnailUpload({ file, thumbnail: Promise.resolve(tiny), phone: '0906341807', requestId: 'sub12345-2' }, { upload: upload as never }).done
   assert.deepEqual(calls.map((call) => call.variant), ['thumbnail'], 'frames sent for printing get no preview')
+})
+
+test('"Đã gửi" waits for every thumbnail; grids fall back to the preview / original when a thumbnail is missing', async () => {
+  const { readFileSync } = await import('node:fs')
+  const page = readFileSync('client/src/pages/PhotoUploadPage.tsx', 'utf8')
+  assert.match(page, /thumbnails\.push\(job\.thumbnail\)/)
+  assert.match(page, /await Promise\.allSettled\(thumbnails\)\n\s+if \(failures\.length\)/)
+  const { boothPhotoThumb } = await import('../client/src/features/boothPhotos/boothPhotosClient.ts')
+  const base = { id: 'a', name: 'a.jpg', originalUrl: 'o', uploadedAt: '' }
+  assert.equal(boothPhotoThumb({ ...base, thumbUrl: 't', previewUrl: 'p' }), 't')
+  assert.equal(boothPhotoThumb({ ...base, thumbUrl: null, previewUrl: 'p' }), 'p')
+  assert.equal(boothPhotoThumb({ ...base, thumbUrl: null, previewUrl: null }), 'o')
+  for (const file of ['client/src/components/editor/BoothPoolSheet.tsx', 'client/src/pages/ComposerPage.tsx']) assert.doesNotMatch(readFileSync(file, 'utf8'), /src=\{photo\.thumbUrl\}/)
 })

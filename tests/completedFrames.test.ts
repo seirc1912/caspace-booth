@@ -4,11 +4,9 @@ import { completedFramesForOrder, isFrameComplete, type OrderFrame } from '../cl
 import type { FilledSlot, PhotoAsset, PrintTemplate } from '../client/src/types/selfBooth'
 
 const photo: PhotoAsset = { id: 'photo', src: 'blob:photo', alt: 'Photo', source: 'phone' }
-const filled = (filter: FilledSlot['filter'] = 'none'): FilledSlot => ({
+const filled = (filter: 'none' | 'grayscale' = 'none'): FilledSlot => ({
   photo,
-  filter,
-  fit: 'contain',
-  transform: { zoom: 1, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+  transform: { scale: 1, rotation: 0, offsetX: 0, offsetY: 0, flipX: false, grayscale: filter === 'grayscale' },
 })
 const frame = (index: number, slotCount: number, slots: Array<FilledSlot | null>): OrderFrame => ({
   index,
@@ -47,6 +45,6 @@ test('partial ordering retains existing B&W and Original slot metadata', () => {
   const frames = [frame(0, 1, [filled('grayscale')]), frame(1, 1, [null]), frame(2, 1, [filled('none')])]
   const selected = completedFramesForOrder(frames)
   assert.deepEqual(selected.map(({ index }) => index), [0, 2])
-  assert.equal(selected[0]?.slots[0]?.filter, 'grayscale')
-  assert.equal(selected[1]?.slots[0]?.filter, 'none')
+  assert.equal(selected[0]?.slots[0]?.transform.grayscale, true)
+  assert.equal(selected[1]?.slots[0]?.transform.grayscale, false)
 })

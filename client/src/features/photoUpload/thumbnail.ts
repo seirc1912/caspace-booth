@@ -70,22 +70,28 @@ async function resizedJpeg(file: File, maxEdge: number, quality: number) {
   } finally { decoded.release() }
 }
 
-let chain: Promise<void> = Promise.resolve()
+let thumbnailChain: Promise<void> = Promise.resolve()
+let previewChain: Promise<void> = Promise.resolve()
 
 /**
  * Queues one thumbnail (and, with `preview`, the 1600px viewer copy) after its original was
- * verified; runs one at a time in the background. Each copy is best effort and independent.
+ * verified. Thumbnails (~30 KB) run one at a time on their own queue so the upload page can wait
+ * for them before saying "đã gửi" — photos without one showed as black tiles when the customer
+ * left early (28/11/2026). Previews follow on a second queue in the background; the viewer
+ * falls back to the original when one is missing. Each copy is best effort and independent.
  */
 export function queueThumbnailUpload(input: { file: File; thumbnail?: Promise<File | null>; phone: string; requestId: string; preview?: boolean }, deps: { upload?: typeof uploadPhotoToStorage; makeThumbnail?: typeof createThumbnail; makePreview?: typeof createPreview } = {}) {
   const upload = deps.upload ?? uploadPhotoToStorage
-  chain = chain.then(async () => {
+  const thumbnail = thumbnailChain = thumbnailChain.then(async () => {
     try {
-      const thumbnail = (await input.thumbnail) ?? await (deps.makeThumbnail ?? createThumbnail)(input.file)
-      await upload({ file: thumbnail, phone: input.phone, requestId: `${input.requestId}-thumb`, variant: 'thumbnail', onProgress: () => {}, onTiming: () => {} })
+      const file = (await input.thumbnail) ?? await (deps.makeThumbnail ?? createThumbnail)(input.file)
+      await upload({ file, phone: input.phone, requestId: `${input.requestId}-thumb`, variant: 'thumbnail', onProgress: () => {}, onTiming: () => {} })
     } catch (reason) {
       console.warn('[photo-upload] thumbnail skipped', reason instanceof Error ? reason.name : 'unknown')
     }
-    if (!input.preview) return
+  })
+  if (!input.preview) return { thumbnail, done: thumbnail }
+  const done = previewChain = previewChain.then(() => thumbnail).then(async () => {
     try {
       const preview = await (deps.makePreview ?? createPreview)(input.file)
       if (preview) await upload({ file: new File([preview], thumbnailFilename(input.file.name), { type: 'image/jpeg' }), phone: input.phone, requestId: `${input.requestId}-preview`, variant: 'preview', onProgress: () => {}, onTiming: () => {} })
@@ -93,5 +99,5 @@ export function queueThumbnailUpload(input: { file: File; thumbnail?: Promise<Fi
       console.warn('[photo-upload] preview skipped', reason instanceof Error ? reason.name : 'unknown')
     }
   })
-  return chain
+  return { thumbnail, done }
 }

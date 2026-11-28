@@ -10,7 +10,7 @@ import type { FilledSlot, PhotoAsset, PrintTemplate } from '../client/src/types/
 const identity = { sessionId: 'failure-session', boothId: 'failure-room', phoneNumber: '84901112222' }
 const sourceBlob = new Blob(['customer-photo'], { type: 'image/jpeg' })
 const photo: PhotoAsset = { id: 'photo-1', src: 'blob:live-photo', blob: sourceBlob, alt: 'Customer photo', source: 'phone' }
-const filled: FilledSlot = { photo, transform: { zoom: 1.2, rotation: 3, x: 0.1, y: -0.1 }, fit: 'cover', filter: 'grayscale' }
+const filled: FilledSlot = { photo, transform: { scale: 1.2, rotation: 90, offsetX: 10, offsetY: -10, flipX: false, grayscale: true } }
 const template = { id: 'frame-1', slots: [{ id: 'slot-1' }], canvas: { width: 100, height: 100 }, elements: [], variables: [] } as unknown as PrintTemplate
 
 test('draft flush success continues into the existing Order path', async () => {
@@ -151,13 +151,13 @@ test('I failed order leaves a nine-photo IndexedDB draft restorable after reload
   const scope = editorDraftScopeKey(identity)
   const photos = Array.from({ length: 9 }, (_, index) => ({ ...photo, id: `reload-${index}`, src: `blob:reload-${index}`, blob: new Blob([`photo-${index}`], { type: 'image/jpeg' }) }))
   await Promise.all(photos.map((asset) => persistPhotoOnce(scope, asset)))
-  const frameSlots = { 'frame-1': photos.map((asset, index) => ({ ...filled, photo: asset, transform: { ...filled.transform, zoom: 1 + index / 10 } })) }
+  const frameSlots = { 'frame-1': photos.map((asset, index) => ({ ...filled, photo: asset, transform: { ...filled.transform, scale: 1 + index / 10 } })) }
   await saveEditorDraft(createEditorDraftMetadata(identity, { roomId: identity.boothId, selectedTemplateId: 'frame-1', currentSlot: 4, frameSlots, completedFrameIds: ['frame-1'], allBwEnabled: true }, photos.map((asset) => asset.id)))
   await assert.rejects(runFailureSafeOrder(async () => { throw new Error('forced upload failure') }, async () => clearEditorDraft(scope)))
   const restored = await loadEditorDraft(identity)
   assert.equal(restored?.uploadedPhotos.length, 9)
-  assert.equal(restored?.frameSlots['frame-1']?.[4]?.transform.zoom, 1.4)
-  assert.equal(restored?.frameSlots['frame-1']?.[0]?.filter, 'grayscale')
+  assert.equal(restored?.frameSlots['frame-1']?.[4]?.transform.scale, 1.4)
+  assert.equal(restored?.frameSlots['frame-1']?.[0]?.transform.grayscale, true)
   assert.equal(restored?.allBwEnabled, true)
   restored?.uploadedPhotos.forEach((asset) => { URL.revokeObjectURL(asset.src); if (asset.previewSrc) URL.revokeObjectURL(asset.previewSrc) })
   await clearEditorDraft(scope)

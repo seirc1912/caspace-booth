@@ -1,11 +1,7 @@
-import type { FilledSlot, ImageTransform, PhotoAsset } from '../../types/selfBooth'
+import type { FilledSlot, PhotoAsset } from '../../types/selfBooth'
+import { createSlotTransform } from './slotTransform'
 
-export const initialPhotoTransform: ImageTransform = { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false }
-
-export function createInitialPhotoTransform(): ImageTransform {
-  return { ...initialPhotoTransform }
-}
-
-export function createInitialPhotoSlot(photo: PhotoAsset): FilledSlot {
-  return { photo, transform: createInitialPhotoTransform(), fit: 'contain', filter: 'none' }
+/** A new photo covers its slot, centred (Tự xếp / Vừa ô then move it to the face). */
+export function createInitialPhotoSlot(photo: PhotoAsset, grayscale = false): FilledSlot {
+  return { photo, transform: createSlotTransform(grayscale) }
 }

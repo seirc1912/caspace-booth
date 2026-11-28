@@ -2,6 +2,8 @@ import { clearUploadSession, ensureUploadSession } from '../photoUpload/uploadCl
 
 /** previewUrl: 1600px copy for viewing large; originalUrl: full file for saving and printing. */
 export interface BoothPhoto { id: string; name: string; thumbUrl: string | null; previewUrl?: string | null; originalUrl: string; uploadedAt: string }
+/** Small image for grids and the tray: thumbnail, else the 1600px preview, else the original (photos whose thumbnail never finished uploading). */
+export const boothPhotoThumb = (photo: BoothPhoto) => photo.thumbUrl ?? photo.previewUrl ?? photo.originalUrl
 export type BoothPhotoList = { status: 'ok'; photos: BoothPhoto[] } | { status: 'unavailable'; photos: [] }
 /**
  * Originals for the photos actually used (Auto Fill, Add Image), with progress; a

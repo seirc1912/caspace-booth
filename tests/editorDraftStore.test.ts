@@ -21,9 +21,7 @@ const identity = { sessionId: 'session-a', boothId: 'room-a', phoneNumber: '8490
 const photo = (index: number): PhotoAsset => ({ id: `photo-${index}`, src: `blob:photo-${index}`, previewSrc: `blob:preview-${index}`, alt: `Photo ${index}`, source: 'phone' })
 const slot = (asset: PhotoAsset, index: number): FilledSlot => ({
   photo: asset,
-  transform: { zoom: 0.8 + index / 10, rotation: index, x: -0.2 + index / 100, y: 0.4 - index / 100, flipX: false, flipY: false },
-  fit: index % 2 ? 'cover' : 'contain',
-  filter: index === 1 ? 'grayscale' : 'none',
+  transform: { scale: 1 + index / 10, rotation: ([0, 90, 180, 270] as const)[index % 4]!, offsetX: -20 + index, offsetY: 40 - index, flipX: index % 2 === 1, grayscale: index === 1 },
 })
 
 class MemoryStorage {
@@ -53,8 +51,7 @@ test('single photo assignment and current frame restore with exact metadata', ()
   assert.equal(restored?.currentSlot, 0)
   assert.deepEqual(restored?.completedFrameIds, ['frame-7'])
   assert.deepEqual(restored?.frameSlots['frame-7']?.[0]?.transform, filled.transform)
-  assert.equal(restored?.frameSlots['frame-7']?.[0]?.fit, 'cover')
-  assert.equal(restored?.frameSlots['frame-7']?.[0]?.filter, 'grayscale')
+  assert.equal(restored?.frameSlots['frame-7']?.[0]?.transform.grayscale, true)
 })
 
 test('nine-photo frame restores every photo in its original slot', () => {
@@ -75,7 +72,7 @@ test('removed, missing, or corrupt photo references degrade to empty slots', () 
     roomId: 'room-a', selectedTemplateId: 'frame', currentSlot: null,
     frameSlots: { frame: [slot(asset, 0), slot(photo(2), 2)] }, completedFrameIds: [],
   }, [asset.id])
-  metadata.frameSlots.frame![0]!.transform.zoom = Number.NaN
+  ;(metadata.frameSlots.frame![0]!.transform as { scale: number }).scale = Number.NaN
   const restored = hydrateEditorDraft(metadata, [asset])
 
   assert.deepEqual(restored?.frameSlots.frame, [null, null])
@@ -104,18 +101,22 @@ test('All B&W enabled state survives draft hydration with per-slot filters', () 
   assert.equal(restored?.allBwEnabled, true)
 })
 
-test('existing draft zoom values remain unchanged by the new assignment default', () => {
+test('a session saved before the editor upgrade ({ zoom, x, y } + fit/filter) is migrated once on load', () => {
   const photos = [photo(41), photo(42), photo(43)]
-  const frameSlots = { one: [slot(photos[0]!, 0), slot(photos[1]!, 1), slot(photos[2]!, 2)] }
-  frameSlots.one[0]!.transform.zoom = 0.8
-  frameSlots.one[1]!.transform.zoom = 1
-  frameSlots.one[2]!.transform.zoom = 2
   const metadata = createEditorDraftMetadata(identity, {
-    roomId: 'room-a', selectedTemplateId: 'one', currentSlot: 0, frameSlots,
-    completedFrameIds: [], allBwEnabled: false,
+    roomId: 'room-a', selectedTemplateId: 'one', currentSlot: 0, frameSlots: {}, completedFrameIds: [], allBwEnabled: false,
   }, photos.map((asset) => asset.id))
+  metadata.frameSlots = { one: [
+    { photoId: 'photo-41', transform: { zoom: 2, x: 0.1, y: -0.05, rotation: 88, flipX: false, flipY: false }, fit: 'cover', filter: 'grayscale' },
+    { photoId: 'photo-42', transform: { zoom: 1.5, x: 0, y: 0, rotation: 0, flipX: true, flipY: true }, fit: 'contain', filter: 'none' },
+    { photoId: 'photo-43', transform: { zoom: 9, x: 0, y: 0, rotation: -91 }, fit: 'cover' },
+  ] }
   const restored = hydrateEditorDraft(metadata, photos)
-  assert.deepEqual(restored?.frameSlots.one?.map((item) => item?.transform.zoom), [0.8, 1, 2])
+  assert.deepEqual(restored?.frameSlots.one?.map((item) => item?.transform), [
+    { scale: 2, offsetX: 10, offsetY: -5, rotation: 88, flipX: false, grayscale: true },
+    { scale: 1, offsetX: 0, offsetY: 0, rotation: 180, flipX: false, grayscale: false },
+    { scale: 3, offsetX: 0, offsetY: 0, rotation: -91, flipX: false, grayscale: false },
+  ])
 })
 
 test('abandoned draft TTL is a conservative 24 hours', () => {
@@ -126,7 +127,7 @@ test('app reinitialization rediscovers and loads the exact IndexedDB draft witho
   const storage = new MemoryStorage()
   const recoveredIdentity = { sessionId: 'reinit-session', boothId: 'room-a', phoneNumber: '84905550123' }
   const photos = Array.from({ length: 9 }, (_, index) => photo(index + 20))
-  const frameSlots = { 'frame-7': photos.map((asset, index) => ({ ...slot(asset, index), filter: 'grayscale' as const })) }
+  const frameSlots = { 'frame-7': photos.map((asset, index) => { const item = slot(asset, index); return { ...item, transform: { ...item.transform, grayscale: true } } }) }
   const metadata = createEditorDraftMetadata(recoveredIdentity, {
     roomId: 'room-a', selectedTemplateId: 'frame-7', currentSlot: 4, frameSlots, completedFrameIds: ['frame-7'], allBwEnabled: true,
   }, photos.map((asset) => asset.id))
@@ -150,7 +151,7 @@ test('app reinitialization rediscovers and loads the exact IndexedDB draft witho
   assert.deepEqual(restored?.completedFrameIds, ['frame-7'])
   assert.deepEqual(restored?.frameSlots['frame-7']?.map((item) => item?.photo.id), photos.map((asset) => asset.id))
   assert.deepEqual(restored?.frameSlots['frame-7']?.[1]?.transform, frameSlots['frame-7'][1]?.transform)
-  assert.equal(restored?.frameSlots['frame-7']?.[1]?.filter, 'grayscale')
+  assert.equal(restored?.frameSlots['frame-7']?.[1]?.transform.grayscale, true)
   assert.equal(restored?.allBwEnabled, true)
   restored?.uploadedPhotos.forEach((asset) => { URL.revokeObjectURL(asset.src); if (asset.previewSrc) URL.revokeObjectURL(asset.previewSrc) })
 

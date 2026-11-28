@@ -8,7 +8,7 @@ import type { FilledSlot, PhotoAsset } from '../client/src/types/selfBooth'
 const photo = (index: number): PhotoAsset => ({ id: `photo-${index}`, src: `blob:${index}`, alt: `Photo ${index}`, source: 'phone' })
 const template = (id: string, count: number): CustomerTemplate => ({ id, name: id, roomId: 'room', printSize: '', width: 1200, height: 1800, backgroundUrl: '', elements: [], slots: Array.from({ length: count }, (_, index) => ({ id: `${id}-${index}`, x: 0, y: 0, width: 100, height: 100, rotation: 0, zIndex: index })) })
 const summary = (id: string): CustomerTemplateSummary => ({ id, name: id, roomId: 'room', printSize: '', thumbnailUrl: '', displayOrder: 0 })
-const existingSlot = (asset = photo(99)): FilledSlot => ({ photo: asset, transform: { zoom: 2, rotation: 5, x: 0.1, y: -0.2, flipX: false, flipY: false }, fit: 'cover', filter: 'none' })
+const existingSlot = (asset = photo(99)): FilledSlot => ({ photo: asset, transform: { scale: 2, rotation: 90, offsetX: 10, offsetY: -20, flipX: false, grayscale: false } })
 
 test('total required count sums authoritative slots in Room frame order', () => {
   assert.equal(totalRoomSlotCount([template('one', 4), template('two', 4), template('three', 8)]), 16)
@@ -53,7 +53,7 @@ test('partial selections fill only the selected photo count without duplication'
     assert.equal(assigned.length, count)
     assert.equal(new Set(assigned.map((slot) => slot.photo.id)).size, count)
     assert.equal(templates.flatMap((item) => result[item.id]!).filter((slot) => !slot).length, 28 - count)
-    assert.ok(assigned.every((slot) => slot.transform.zoom === 1.5))
+    assert.ok(assigned.every((slot) => slot.transform.scale === 1 && slot.transform.offsetX === 0 && slot.transform.offsetY === 0), 'every new photo starts covering its slot, centred')
   }
 })
 
@@ -105,11 +105,9 @@ test('partial Auto Fill overwrites Room frames only at commit and leaves outside
 
 test('All B&W uses the existing slot creation semantics', () => {
   const result = assignPhotosAcrossRoom({}, [template('one', 2)], [photo(1), photo(2)], true, () => 0.5)
-  assert.deepEqual(result.one?.map((slot) => slot?.filter), ['grayscale', 'grayscale'])
-  assert.deepEqual(result.one?.map((slot) => slot?.fit), ['contain', 'contain'])
   assert.deepEqual(result.one?.map((slot) => slot?.transform), [
-    { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
-    { zoom: 1.5, rotation: 0, x: 0, y: 0, flipX: false, flipY: false },
+    { scale: 1, offsetX: 0, offsetY: 0, rotation: 0, flipX: false, grayscale: true },
+    { scale: 1, offsetX: 0, offsetY: 0, rotation: 0, flipX: false, grayscale: true },
   ])
 })
 

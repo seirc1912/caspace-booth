@@ -1,3 +1,4 @@
+import { readStoredSlotTransform } from '../photos/slotTransform'
 import type { FilledSlot, PhotoAsset } from '../../types/selfBooth'
 
 const databaseName = 'selfbooth-customer-drafts'
@@ -25,14 +26,18 @@ interface StoredPhoto {
   previewBlob?: Blob
   alt: string
   source: PhotoAsset['source']
+  width?: number
+  height?: number
   updatedAt: number
 }
 
 export interface StoredSlot {
   photoId: string
-  transform: FilledSlot['transform']
-  fit?: FilledSlot['fit']
-  filter?: FilledSlot['filter']
+  /** Current shape, or the pre-upgrade `{ zoom, x, y, rotation }` (migrated when loaded). */
+  transform: FilledSlot['transform'] | Record<string, unknown>
+  /** Pre-upgrade sessions only. */
+  fit?: string
+  filter?: string
 }
 
 export interface EditorDraftMetadata {
@@ -129,8 +134,6 @@ export function serializeFrameSlots(frameSlots: Record<string, Array<FilledSlot 
   return Object.fromEntries(Object.entries(frameSlots).map(([templateId, slots]) => [templateId, slots.map((slot) => slot ? {
     photoId: slot.photo.id,
     transform: { ...slot.transform },
-    fit: slot.fit,
-    filter: slot.filter,
   } : null)]))
 }
 
@@ -152,8 +155,9 @@ export function hydrateEditorDraft(metadata: EditorDraftMetadata, photos: PhotoA
   const frameSlots = Object.fromEntries(Object.entries(metadata.frameSlots ?? {}).map(([templateId, slots]) => [templateId, Array.isArray(slots) ? slots.map((slot) => {
     if (!slot || typeof slot.photoId !== 'string') return null
     const photo = byId.get(slot.photoId)
-    if (!photo || !slot.transform || !Number.isFinite(slot.transform.zoom) || !Number.isFinite(slot.transform.x) || !Number.isFinite(slot.transform.y) || !Number.isFinite(slot.transform.rotation)) return null
-    return { photo, transform: { ...slot.transform }, fit: slot.fit === 'cover' ? 'cover' : 'contain', filter: slot.filter === 'grayscale' ? 'grayscale' : 'none' } satisfies FilledSlot
+    const transform = photo ? readStoredSlotTransform(slot.transform, slot.fit, slot.filter) : null
+    if (!photo || !transform) return null
+    return { photo, transform } satisfies FilledSlot
   }) : []]))
   return {
     roomId: metadata.roomId,
@@ -189,7 +193,7 @@ export async function persistPhotoOnce(scopeKey: string, photo: PhotoAsset) {
     ])
     const transaction = database.transaction(photoStoreName, 'readwrite')
     const store = transaction.objectStore(photoStoreName)
-    if (!await requestResult(store.getKey(key))) store.put({ key, scopeKey, photoId: photo.id, blob, previewBlob, alt: photo.alt, source: photo.source, updatedAt: Date.now() } satisfies StoredPhoto)
+    if (!await requestResult(store.getKey(key))) store.put({ key, scopeKey, photoId: photo.id, blob, previewBlob, alt: photo.alt, source: photo.source, width: photo.width, height: photo.height, updatedAt: Date.now() } satisfies StoredPhoto)
     await transactionDone(transaction)
     return true
   })
@@ -224,6 +228,7 @@ export async function loadEditorDraft(identity: EditorDraftIdentity): Promise<Ed
       previewBlob: record.previewBlob,
       alt: record.alt,
       source: record.source,
+      ...(record.width && record.height ? { width: record.width, height: record.height } : {}),
     } satisfies PhotoAsset] : [])
     const hydrated = hydrateEditorDraft(metadata, photos)
     if (!hydrated) photos.forEach((photo) => { URL.revokeObjectURL(photo.src); if (photo.previewSrc) URL.revokeObjectURL(photo.previewSrc) })
