@@ -63,7 +63,7 @@ type DragItem = { kind: 'tray'; photo: BoothPhoto } | { kind: 'slot'; index: num
 interface PendingDrag { item: DragItem; pointerId: number; pointerType: string; startX: number; startY: number; timer: number | null; active: boolean; target: number | null; image: string | null }
 const LONG_PRESS_MS = 350
 
-type PoolRequest = { kind: 'slot'; target: DirectPhotoTarget } | { kind: 'frame'; target: FramePhotoTarget }
+type PoolRequest = { kind: 'slot'; target: DirectPhotoTarget } | { kind: 'frame'; target: FramePhotoTarget } | { kind: 'replace' }
 
 function OptionButton({ label, icon, onClick, disabled, pressed, detail }: { label: string; icon: IconName; onClick: () => void; disabled?: boolean; pressed?: boolean; detail?: string }) {
   return <button aria-pressed={pressed} className={`cs-press flex min-h-14 w-full items-center gap-3 rounded-[16px] px-4 text-left text-[15px] font-bold disabled:opacity-40 ${pressed ? 'cs-btn-primary' : 'cs-btn-chrome'}`} disabled={disabled} onClick={onClick} type="button"><Icon className="size-5 shrink-0" name={icon} /><span className="min-w-0 flex-1">{label}{detail ? <span className="block text-[12px] font-medium opacity-75">{detail}</span> : null}</span></button>
@@ -142,6 +142,9 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
   }
 
   const usedNames = new Set(slots.flatMap((slot) => slot ? [slot.photo.alt] : []))
+  /** Booth photo id → the slot (1-based) it is in, so the sheet shows it as already chosen. */
+  const usedBy: Record<string, number> = {}
+  for (const photo of boothPhotos) { const slotIndex = slots.findIndex((slot) => slot?.photo.alt === photo.name); if (slotIndex >= 0) usedBy[photo.id] = slotIndex + 1 }
   const unusedTray = boothPhotos.filter((photo) => !usedNames.has(photo.name))
   const emptySlots = emptySlotsInOrder(template, slots)
   const filledCount = slots.length - emptySlots.length
@@ -183,8 +186,9 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
 
   /** "Ảnh phòng chụp": pick large, sharp photos for the empty slots; a full frame (or no photos yet) just browses. */
   const openBoothPhotos = () => {
-    if (boothPhotos.length && emptySlots.length) setPoolRequest({ kind: 'frame', target: { ...createFramePhotoTarget(template.id, slots), emptySlotIndices: emptySlots } })
-    else setBrowseBooth(true)
+    if (!boothPhotos.length) setBrowseBooth(true)
+    else if (emptySlots.length) setPoolRequest({ kind: 'frame', target: { ...createFramePhotoTarget(template.id, slots), emptySlotIndices: emptySlots } })
+    else setPoolRequest({ kind: 'replace' })
   }
   /** "+ Thêm ảnh": the next unused tray photo; none left → the booth sheet or the phone. */
   const addToSlot = (slotIndex: number) => {
@@ -328,10 +332,11 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
           const used = usedNames.has(photo.name)
           return <li className="shrink-0" key={photo.id}><button aria-label={used ? `Ảnh ${index + 1}, đã dùng` : `Thêm ảnh ${index + 1} vào ô trống`} className={`relative block size-[46px] touch-pan-x select-none overflow-hidden rounded-[10px] bg-cs-graphite [-webkit-touch-callout:none] ${used ? 'opacity-55' : ''}`} disabled={busy} onClick={() => { if (!justDragged.current) placeFromTray(photo) }} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => startDrag({ kind: 'tray', photo }, boothPhotoThumb(photo), event)} title="Chạm để thêm · kéo vào ô" type="button"><img alt="" className="pointer-events-none h-full w-full object-cover" decoding="async" draggable={false} loading="lazy" src={boothPhotoThumb(photo)} />{used ? <span aria-hidden="true" className="cs-led absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full text-white"><Icon className="size-3" name="check" /></span> : null}</button></li>
         })}
-      </ul> : <button className="cs-btn-chrome cs-press flex min-h-[58px] items-center justify-center gap-2 rounded-[14px] px-3 text-[14px] font-bold" disabled={!emptySlots.length} onClick={openFramePhotoPicker} type="button"><Icon className="size-5 shrink-0" name="mobile" /><span className="leading-tight">Ảnh từ điện thoại</span></button>}
+      </ul> : <p className="flex min-h-[58px] items-center rounded-[14px] bg-cs-graphite/5 px-3 text-[13px] leading-snug text-cs-ink-2">Chưa có ảnh phòng chụp. Chọn ảnh từ máy để ghép.</p>}
       {/* Always visible (owner, 28/11/2026): customers look through the booth photos large and sharp, then pick. */}
       <button aria-label={boothPhotos.length ? `Ảnh phòng chụp, ${boothPhotos.length} ảnh: xem lớn và chọn` : 'Ảnh phòng chụp'} className="cs-btn-chrome cs-press flex min-h-[58px] w-[66px] flex-col items-center justify-center gap-0.5 rounded-[14px] px-1 text-[11px] font-bold leading-tight" onClick={openBoothPhotos} type="button"><Icon className="size-[18px]" name="camera" /><span>Ảnh phòng chụp{boothPhotos.length ? ` (${boothPhotos.length})` : ''}</span></button>
-      <button aria-busy={busy || undefined} className="cs-btn-chrome cs-press flex min-h-[58px] items-center gap-1.5 rounded-[14px] px-3 text-[15px] font-bold disabled:opacity-40" disabled={!emptySlots.length || busy} onClick={autoArrange} type="button">{busy ? <Spinner className="size-4" /> : <Icon className="size-[18px]" name="sparkles" />}Tự xếp</button>
+      {/* Owner (28/11/2026): "Tự xếp" moves to the ✦ options; this spot picks photos from the phone. */}
+      <button aria-label={emptySlots.length ? `Chọn ảnh từ máy cho ${emptySlots.length} ô trống` : 'Chọn từ máy: khung đã đủ ảnh'} className="cs-btn-chrome cs-press flex min-h-[58px] w-[66px] flex-col items-center justify-center gap-0.5 rounded-[14px] px-1 text-[11px] font-bold leading-tight disabled:opacity-40" disabled={!emptySlots.length || busy} onClick={openFramePhotoPicker} type="button"><Icon className="size-[18px]" name="mobile" /><span>Chọn từ máy</span></button>
     </div>
 
     {dragImage !== null ? <div aria-hidden="true" className="pointer-events-none fixed left-0 top-0 z-[75] size-[60px] overflow-hidden rounded-[12px] border-2 border-white bg-cs-graphite shadow-[0_10px_28px_rgba(0,0,0,.45)]" ref={ghost} style={{ transform: 'translate(-200px, -200px)' }}>{dragImage ? <img alt="" className="h-full w-full object-cover" src={dragImage} /> : null}</div> : null}
@@ -339,13 +344,18 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
     {viewerOpen ? <FrameViewer backgroundUrl={backgroundUrl} onClose={() => setViewerOpen(false)} slots={slots} template={template} /> : null}
     {optionsOpen ? <BottomSheet onClose={() => setOptionsOpen(false)} subtitle={printLabel} title={`Tuỳ chọn · ${frameName}`}>
       <div className="grid gap-2">
-        <OptionButton icon="mobile" label="Thêm ảnh từ điện thoại" onClick={() => { setOptionsOpen(false); openFramePhotoPicker() }} disabled={!emptySlots.length} detail={emptySlots.length ? `Vào ${emptySlots.length} ô trống` : 'Khung đã đủ ảnh'} />
+        <OptionButton icon="sparkles" label="Tự xếp khung này" onClick={() => { setOptionsOpen(false); autoArrange() }} disabled={!emptySlots.length || busy} detail={emptySlots.length ? `Ảnh chưa dùng vào ${emptySlots.length} ô trống, căn theo khuôn mặt` : 'Khung đã đủ ảnh'} />
         <OptionButton icon="sparkles" label="Tự xếp tất cả khung" onClick={() => { setOptionsOpen(false); setAutoFillDialogOpen(true) }} disabled={!onAutoFillPhotos || !autoFillPhotoCount || busy} detail="Chia ảnh vào mọi khung của phòng" />
         <OptionButton icon="contrast" label="Đen trắng tất cả" onClick={() => onToggleAllBw?.()} disabled={!onToggleAllBw || downloading} pressed={allBwEnabled} />
       </div>
     </BottomSheet> : null}
 
-    {poolRequest ? <BoothPoolSheet mode="pick" capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(ids) => {
+    {poolRequest?.kind === 'replace' ? <BoothPoolSheet mode="pick" onClose={() => setPoolRequest(null)} onReplace={(id, slotNumber) => {
+      setPoolRequest(null)
+      const photo = boothPhotos.find((item) => item.id === id)
+      if (photo) placeBoothPhoto(photo, slotNumber - 1)
+    }} photos={boothPhotos} replaceSlots={template.slots.map((_, index) => index + 1)} usedBy={usedBy} /> : null}
+    {poolRequest && poolRequest.kind !== 'replace' ? <BoothPoolSheet mode="pick" capacity={poolRequest.kind === 'slot' ? 1 : Math.max(1, poolRequest.target.emptySlotIndices.length)} slotNumbers={template.slots.length > 1 ? (poolRequest.kind === 'slot' ? [poolRequest.target.slotIndex + 1] : poolRequest.target.emptySlotIndices.map((slot) => slot + 1)) : []} onClose={() => setPoolRequest(null)} onConfirm={(ids) => {
       const request = poolRequest
       setPoolRequest(null)
       const chosen = ids.map((id) => boothPhotos.find((photo) => photo.id === id)).filter((photo): photo is BoothPhoto => Boolean(photo))
@@ -358,8 +368,8 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
       setPoolRequest(null)
       if (request.kind === 'slot') openPhotoPicker(request.target.slotIndex, true)
       else openFramePhotoPicker()
-    }} photos={boothPhotos} /> : null}
-    {browseBooth ? <BoothPoolSheet mode="browse" onClose={() => setBrowseBooth(false)} photos={boothPhotos} /> : null}
+    }} photos={boothPhotos} usedBy={usedBy} /> : null}
+    {browseBooth ? <BoothPoolSheet mode="browse" onClose={() => setBrowseBooth(false)} photos={boothPhotos} usedBy={usedBy} /> : null}
     {framesOpen && onSelectFrame ? <FrameSwitcherSheet currentIndex={frameIndex} frames={frames} onClose={() => setFramesOpen(false)} onSelect={(index) => { setFramesOpen(false); setEditIndex(null); if (index !== frameIndex) onSelectFrame(index) }} /> : null}
     {poolProgress ? <div className="cs-lcd pointer-events-none fixed inset-x-4 top-[max(16px,env(safe-area-inset-top))] z-[60] mx-auto flex max-w-xs items-center justify-center gap-2 rounded-full px-4 py-2.5 text-[13px] font-bold" role="status"><Spinner className="size-4" />{`Đang tải ảnh phòng chụp ${poolProgress.done}/${poolProgress.total}…`}</div> : null}
     {saveConfirmation ? <div className="fixed inset-x-4 top-[max(16px,env(safe-area-inset-top))] z-[70] mx-auto max-w-sm rounded-[16px] border border-cs-alert-success-border bg-cs-alert-success-bg px-4 py-3 text-center text-sm font-bold text-cs-alert-success-fg shadow-2xl" role="status">{saveConfirmation}</div> : null}
