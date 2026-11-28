@@ -121,11 +121,11 @@ test('customer editor has no Order action or Print Order execution while backend
   assert.match(backend, /PrintOrderRepository/)
 })
 
-test('Bố cục mode has no toolbar or drag: a filled slot opens Chỉnh ô, Tự xếp fills this frame, the room-wide fill stays in the options sheet', () => {
+test('Bố cục mode has no toolbar or photo pan/zoom: a filled slot opens Chỉnh ô, Tự xếp fills this frame, the room-wide fill stays in the options sheet', () => {
   const composer = readFileSync(new URL('../client/src/pages/ComposerPage.tsx', import.meta.url), 'utf8')
   const canvas = readFileSync(new URL('../client/src/components/editor/TemplateCanvas.tsx', import.meta.url), 'utf8')
   for (const removed of ['EditorToolbar', 'CropToolbar', 'PhotoFrame', 'lockedSlots']) assert.doesNotMatch(composer, new RegExp(removed))
-  assert.doesNotMatch(canvas, /onPointerMove|onWheel|touch-none/, 'no gestures in Bố cục')
+  assert.doesNotMatch(canvas, /onPointerMove|onWheel|SlotEditor/, 'no pan or zoom in Bố cục (only press-and-hold to drag a slot)')
   assert.match(canvas, /aria-label=\{`Ô \$\{number\}: chạm để chỉnh ảnh`\}/)
   assert.match(composer, /onOpenSlot=\{openEditor\}/)
   assert.match(composer, /disabled=\{!emptySlots\.length \|\| busy\} onClick=\{autoArrange\}/, 'Tự xếp only when this frame has empty slots')

@@ -255,6 +255,12 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? null : slot)))
   }, [setSlots])
 
+  /** Drag a slot onto another: the two photos (with their crop) trade places. */
+  const swapSlots = useCallback((from: number, to: number) => {
+    if (from === to) return
+    setSlots((current) => current.map((slot, slotIndex) => slotIndex === from ? current[to] ?? null : slotIndex === to ? current[from] ?? null : slot))
+  }, [setSlots])
+
   const randomFill = useCallback(() => {
     if (!uploadedPhotos.length) return
     const shuffled = [...uploadedPhotos]
@@ -600,6 +606,7 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     updateTransform,
     toggleAllBw,
     removeSlot,
+    swapSlots,
     clearAll: () => setSlots((current) => current.map(() => null)),
     randomFill,
     shuffleSlots,

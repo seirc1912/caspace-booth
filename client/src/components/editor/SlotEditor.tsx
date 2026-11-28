@@ -29,12 +29,14 @@ interface SlotEditorProps {
   onCancel: () => void
   /** "Thay ảnh": edits so far are saved, then the photo picker opens for this slot. */
   onReplace: (index: number, edits: Record<number, SlotTransform>) => void
+  /** "Xoá ảnh": edits to other slots are saved, this slot is emptied, back to Bố cục. */
+  onRemove: (index: number, edits: Record<number, SlotTransform>) => void
 }
 
 interface Gesture { pointers: Map<number, { x: number; y: number }>; origin: SlotTransform; startMid: { x: number; y: number }; startDistance: number; moved: boolean }
 
 function ToolButton({ label, icon, onClick, pressed, disabled, busy }: { label: string; icon: IconName; onClick: () => void; pressed?: boolean; disabled?: boolean; busy?: boolean }) {
-  return <button aria-pressed={pressed} className={`cs-press flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[14px] px-1 text-[11px] font-bold leading-tight disabled:opacity-40 ${pressed ? 'cs-led text-white' : 'bg-white/10 text-white'}`} disabled={disabled} onClick={onClick} type="button"><Icon className="size-[18px]" name={icon} /><span>{busy ? 'Đang tìm…' : label}</span></button>
+  return <button aria-pressed={pressed} className={`cs-press flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[14px] px-0.5 text-[10.5px] font-bold leading-tight disabled:opacity-40 ${pressed ? 'cs-led text-white' : 'bg-white/10 text-white'}`} disabled={disabled} onClick={onClick} type="button"><Icon className="size-[18px]" name={icon} /><span>{busy ? 'Đang tìm…' : label}</span></button>
 }
 
 const readHintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
@@ -48,7 +50,7 @@ const spread = (points: Array<{ x: number; y: number }>) => points.length > 1 ? 
  * covers the slot. Live movement writes CSS straight to the image inside requestAnimationFrame;
  * React state only changes when a gesture ends.
  */
-export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frameName, templateDpi, allBwEnabled, onDone, onCancel, onReplace }: SlotEditorProps) {
+export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frameName, templateDpi, allBwEnabled, onDone, onCancel, onReplace, onRemove }: SlotEditorProps) {
   const filledIndices = useMemo(() => slots.map((slot, index) => slot ? index : -1).filter((index) => index >= 0), [slots])
   const [index, setIndex] = useState(initialIndex)
   const [edits, setEdits] = useState<Record<number, { photoId: string; transform: SlotTransform }>>({})
@@ -301,12 +303,13 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
         <input aria-label="Mức phóng" aria-valuetext={`${percent}%`} className="h-11 min-w-0 flex-1 accent-[#FF2D55]" disabled={!photo} max={MAX_SLOT_SCALE * 100} min={MIN_SLOT_SCALE * 100} onChange={(event) => setScale(Number(event.currentTarget.value) / 100)} step={1} type="range" value={percent} />
         <button aria-label="Phóng to" className="grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-30" disabled={!photo || savedTransform.scale >= MAX_SLOT_SCALE} onClick={() => setScale(savedTransform.scale + SLOT_SCALE_STEP)} type="button"><Icon name="add" /></button>
       </div>
-      <div className="grid grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-6 gap-1">
         <ToolButton disabled={!photo || fitting} icon="crop" label="Vừa ô" onClick={() => void fitSlot()} busy={fitting} />
         <ToolButton disabled={!photo} icon="rotate" label="Xoay 90°" onClick={() => update({ rotation: normalizeQuarterTurn(savedTransform.rotation + 90) })} />
         <ToolButton disabled={!photo} icon="flip" label="Lật ngang" onClick={() => update({ flipX: !savedTransform.flipX })} pressed={savedTransform.flipX} />
         <ToolButton disabled={!photo || allBwEnabled} icon="contrast" label="Đen trắng" onClick={() => update({ grayscale: !savedTransform.grayscale })} pressed={savedTransform.grayscale} />
         <ToolButton disabled={!photo} icon="swap" label="Thay ảnh" onClick={() => onReplace(index, editsOut({ index, transform: live.current }))} />
+        <ToolButton icon="trash" label="Xoá ảnh" onClick={() => { const out = editsOut(); delete out[index]; onRemove(index, out) }} />
       </div>
       <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-3">
         <div aria-label="Xem trước cả khung: chạm ô khác để chuyển" className="overflow-hidden rounded-[6px]" role="group" style={{ height: previewHeight, width: previewWidth }}>

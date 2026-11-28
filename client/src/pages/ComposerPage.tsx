@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { ChangeEvent } from 'react'
+import type { ChangeEvent, PointerEvent as ReactPointerEvent } from 'react'
 import type { FilledSlot, PrintTemplate, SlotTransform } from '../types/selfBooth'
 import type { DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { createFramePhotoTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
@@ -30,6 +30,8 @@ interface ComposerPageProps {
   onBack: () => void
   onCurrentSlotChange: (index: number | null) => void
   onRemove: (index: number) => void
+  /** Drag a filled slot onto another slot: the photos trade places. */
+  onSwapSlots?: (from: number, to: number) => void
   onPickPhoto: (target: DirectPhotoTarget, file: File) => void
   onPickFramePhotos: (target: FramePhotoTarget, files: File[]) => void
   /** "Tự xếp tất cả khung" (options sheet): spreads photos over every frame of the room. */
@@ -57,6 +59,10 @@ interface ComposerPageProps {
   onOpenSendFrames?: () => void
 }
 
+type DragItem = { kind: 'tray'; photo: BoothPhoto } | { kind: 'slot'; index: number }
+interface PendingDrag { item: DragItem; pointerId: number; pointerType: string; startX: number; startY: number; timer: number | null; active: boolean; target: number | null; image: string | null }
+const LONG_PRESS_MS = 350
+
 type PoolRequest = { kind: 'slot'; target: DirectPhotoTarget } | { kind: 'frame'; target: FramePhotoTarget }
 
 function OptionButton({ label, icon, onClick, disabled, pressed, detail }: { label: string; icon: IconName; onClick: () => void; disabled?: boolean; pressed?: boolean; detail?: string }) {
@@ -71,7 +77,7 @@ const emptySlotsInOrder = (template: PrintTemplate, slots: Array<FilledSlot | nu
  * zoom here — tapping a filled slot opens Chỉnh ô (SlotEditor), an empty slot takes the next
  * unused tray photo. ⤢ shows the whole frame full screen.
  */
-export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack, onCurrentSlotChange, onRemove, onPickPhoto, onPickFramePhotos, onAutoFillPhotos, autoFillPhotoCount = null, autoFillPreparing = false, autoFillHasExistingPhotos = false, onTransform, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frames = [], onSelectFrame, onDownload, downloading = false, saveConfirmation, boothPhotos = [], loadBoothOriginal, onOpenSendFrames }: ComposerPageProps) {
+export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack, onCurrentSlotChange, onRemove, onSwapSlots, onPickPhoto, onPickFramePhotos, onAutoFillPhotos, autoFillPhotoCount = null, autoFillPreparing = false, autoFillHasExistingPhotos = false, onTransform, allBwEnabled = false, onToggleAllBw, photoError, onClearPhotoError, onPhotoError, frameIndex = 0, frames = [], onSelectFrame, onDownload, downloading = false, saveConfirmation, boothPhotos = [], loadBoothOriginal, onOpenSendFrames }: ComposerPageProps) {
   const photoInput = useRef<HTMLInputElement>(null)
   const framePhotoInput = useRef<HTMLInputElement>(null)
   const autoFillPhotoInput = useRef<HTMLInputElement>(null)
@@ -89,6 +95,8 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
   const [poolProgress, setPoolProgress] = useState<{ done: number; total: number } | null>(null)
   /** Slot → its photo before the request: centre on the face once a different photo arrives (Tự xếp, tray, + Thêm ảnh, Thay ảnh). */
   const pendingFocus = useRef(new Map<number, string | null>())
+  const latestSlots = useRef(slots)
+  useEffect(() => { latestSlots.current = slots }, [slots])
   const expectPhoto = (index: number) => pendingFocus.current.set(index, slots[index]?.photo.id ?? null)
 
   // Stage fills the rest of the screen; the frame scales to fit it (min of width/height ratios).
@@ -115,6 +123,9 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
       image.src = slot.photo.previewSrc ?? slot.photo.src
       void image.decode().then(async () => {
         const focus = await photoFocus(image)
+        // Face detection can take a few seconds the first time: skip if the customer already moved this photo.
+        const now = latestSlots.current[index]
+        if (now?.photo.id !== slot.photo.id || now.transform.scale !== 1 || now.transform.offsetX !== 0 || now.transform.offsetY !== 0) return
         onTransform(index, focusTransform(slot.transform, focus, { width: image.naturalWidth, height: image.naturalHeight }, { width: definition.width, height: definition.height }))
       }).catch(() => undefined)
     }
@@ -207,7 +218,73 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
     if (files.length) onAutoFillPhotos?.(files)
   }
 
-  const openEditor = (index: number) => { onCurrentSlotChange(index); setEditIndex(index) }
+  // Drag & drop: a tray photo onto a slot (place / replace), a filled slot onto another (swap).
+  // Touch: tray photos start on an upward swipe or a long press (sideways swipes scroll the tray);
+  // slots start on a long press so a tap still opens Chỉnh ô. Mouse: after a 6px move.
+  const [dropTarget, setDropTarget] = useState<number | null>(null)
+  const [dragImage, setDragImage] = useState<string | null>(null)
+  const ghost = useRef<HTMLDivElement>(null)
+  const pending = useRef<PendingDrag | null>(null)
+  const justDragged = useRef(false)
+  const slotAt = (x: number, y: number) => {
+    const element = document.elementFromPoint(x, y)?.closest('[data-slot-index]')
+    return element && stage.current?.contains(element) ? Number(element.getAttribute('data-slot-index')) : null
+  }
+  const moveGhost = (x: number, y: number) => { if (ghost.current) ghost.current.style.transform = `translate(${x - 30}px, ${y - 30}px)` }
+  const activate = (drag: PendingDrag, x: number, y: number) => {
+    drag.active = true
+    setDragImage(drag.image ?? '')
+    requestAnimationFrame(() => moveGhost(x, y))
+    try { navigator.vibrate?.(12) } catch { /* not supported */ }
+  }
+  const endDrag = (drop: boolean) => {
+    const drag = pending.current
+    pending.current = null
+    window.removeEventListener('pointermove', onWindowMove)
+    window.removeEventListener('pointerup', onWindowUp)
+    window.removeEventListener('pointercancel', onWindowCancel)
+    if (!drag) return
+    if (drag.timer !== null) clearTimeout(drag.timer)
+    if (!drag.active) return
+    justDragged.current = true
+    window.setTimeout(() => { justDragged.current = false }, 0)
+    setDragImage(null)
+    setDropTarget(null)
+    if (!drop || drag.target === null) return
+    if (drag.item.kind === 'tray') placeBoothPhoto(drag.item.photo, drag.target)
+    else if (drag.target !== drag.item.index) onSwapSlots?.(drag.item.index, drag.target)
+  }
+  function onWindowMove(event: PointerEvent) {
+    const drag = pending.current
+    if (!drag || event.pointerId !== drag.pointerId) return
+    const dx = event.clientX - drag.startX
+    const dy = event.clientY - drag.startY
+    if (!drag.active) {
+      const moved = Math.hypot(dx, dy)
+      if (drag.pointerType === 'mouse' ? moved > 6 : drag.item.kind === 'tray' && dy < -10 && Math.abs(dy) > Math.abs(dx)) activate(drag, event.clientX, event.clientY)
+      else if (drag.pointerType !== 'mouse' && moved > 10) { endDrag(false); return }
+      if (!drag.active) return
+    }
+    event.preventDefault()
+    moveGhost(event.clientX, event.clientY)
+    const target = slotAt(event.clientX, event.clientY)
+    if (target !== drag.target) { drag.target = target; setDropTarget(target) }
+  }
+  function onWindowUp(event: PointerEvent) { if (pending.current?.pointerId === event.pointerId) endDrag(true) }
+  function onWindowCancel(event: PointerEvent) { if (pending.current?.pointerId === event.pointerId) endDrag(false) }
+  const startDrag = (item: DragItem, image: string | null, event: ReactPointerEvent<HTMLElement>) => {
+    if (busy || (event.pointerType === 'mouse' && event.button !== 0)) return
+    if (pending.current) endDrag(false)
+    const drag: PendingDrag = { item, pointerId: event.pointerId, pointerType: event.pointerType, startX: event.clientX, startY: event.clientY, timer: null, active: false, target: null, image }
+    if (event.pointerType !== 'mouse') drag.timer = window.setTimeout(() => { drag.timer = null; if (pending.current === drag) activate(drag, drag.startX, drag.startY) }, LONG_PRESS_MS)
+    pending.current = drag
+    window.addEventListener('pointermove', onWindowMove, { passive: false })
+    window.addEventListener('pointerup', onWindowUp)
+    window.addEventListener('pointercancel', onWindowCancel)
+  }
+  useEffect(() => () => endDrag(false), []) // eslint-disable-line react-hooks/exhaustive-deps -- unmount cleanup only
+
+  const openEditor = (index: number) => { if (justDragged.current) return; onCurrentSlotChange(index); setEditIndex(index) }
   const saveEdits = (edits: Record<number, SlotTransform>) => { for (const [index, transform] of Object.entries(edits)) onTransform(Number(index), transform) }
 
   const frameName = frames.length ? frameCode(frameIndex) : template.name
@@ -231,7 +308,7 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
 
     <section aria-label="Khung in" className="cs-lcd relative mt-3 flex min-h-[300px] flex-1 items-center justify-center rounded-[28px]" ref={stage}>
       {frameScale > 0 ? <div style={{ width: template.canvas.width * frameScale }}>
-        <TemplateCanvas backgroundUrl={backgroundUrl} mode="layout" onAddSlot={addToSlot} onImageError={onPhotoError} onOpenSlot={openEditor} onRemove={onRemove} slots={slots} template={template} />
+        <TemplateCanvas backgroundUrl={backgroundUrl} dropTarget={dropTarget} mode="layout" onAddSlot={addToSlot} onImageError={onPhotoError} onOpenSlot={openEditor} onRemove={onRemove} onSlotPointerDown={onSwapSlots ? (index, event) => startDrag({ kind: 'slot', index }, slots[index]?.photo.previewSrc ?? slots[index]?.photo.src ?? null, event) : undefined} slots={slots} template={template} />
       </div> : null}
       <button aria-label="Tuỳ chọn khung" className="absolute left-2 top-2 grid size-11 place-items-center rounded-full bg-white/12 text-white" onClick={() => setOptionsOpen(true)} type="button"><Icon className="size-5" name="sparkles" /></button>
       <button aria-label="Xem cả khung toàn màn hình" className="absolute right-2 top-2 grid size-11 place-items-center rounded-full bg-white/12 text-white" onClick={() => setViewerOpen(true)} type="button"><Icon className="size-5" name="expand" /></button>
@@ -242,13 +319,14 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
       {boothPhotos.length ? <ul aria-label="Khay ảnh" className="flex min-w-0 gap-1.5 overflow-x-auto overscroll-x-contain rounded-[14px] bg-cs-graphite/5 p-1.5 [scrollbar-width:none]">
         {boothPhotos.map((photo, index) => {
           const used = usedNames.has(photo.name)
-          return <li className="shrink-0" key={photo.id}><button aria-label={used ? `Ảnh ${index + 1}, đã dùng` : `Thêm ảnh ${index + 1} vào ô trống`} className={`relative block size-[46px] overflow-hidden rounded-[10px] bg-cs-graphite ${used ? 'opacity-55' : ''}`} disabled={busy} onClick={() => placeFromTray(photo)} type="button">{photo.thumbUrl ? <img alt="" className="h-full w-full object-cover" decoding="async" loading="lazy" src={photo.thumbUrl} /> : null}{used ? <span aria-hidden="true" className="cs-led absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full text-white"><Icon className="size-3" name="check" /></span> : null}</button></li>
+          return <li className="shrink-0" key={photo.id}><button aria-label={used ? `Ảnh ${index + 1}, đã dùng` : `Thêm ảnh ${index + 1} vào ô trống`} className={`relative block size-[46px] touch-pan-x select-none overflow-hidden rounded-[10px] bg-cs-graphite [-webkit-touch-callout:none] ${used ? 'opacity-55' : ''}`} disabled={busy} onClick={() => { if (!justDragged.current) placeFromTray(photo) }} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => startDrag({ kind: 'tray', photo }, photo.thumbUrl, event)} title="Chạm để thêm · kéo vào ô" type="button">{photo.thumbUrl ? <img alt="" className="pointer-events-none h-full w-full object-cover" decoding="async" draggable={false} loading="lazy" src={photo.thumbUrl} /> : null}{used ? <span aria-hidden="true" className="cs-led absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full text-white"><Icon className="size-3" name="check" /></span> : null}</button></li>
         })}
       </ul> : <button className="cs-btn-chrome cs-press flex min-h-[58px] items-center justify-center gap-2 rounded-[14px] px-3 text-[14px] font-bold" onClick={() => emptySlots.length ? openFramePhotoPicker() : setBrowseBooth(true)} type="button"><Icon className="size-5" name="mobile" />{emptySlots.length ? 'Chọn ảnh từ điện thoại' : 'Ảnh phòng chụp'}</button>}
       <button aria-busy={busy || undefined} className="cs-btn-chrome cs-press flex min-h-[58px] items-center gap-1.5 rounded-[14px] px-4 text-[15px] font-bold disabled:opacity-40" disabled={!emptySlots.length || busy} onClick={autoArrange} type="button">{busy ? <Spinner className="size-4" /> : <Icon className="size-[18px]" name="sparkles" />}Tự xếp</button>
     </div>
 
-    {editIndex !== null && slots[editIndex] ? <SlotEditor allBwEnabled={allBwEnabled} backgroundUrl={backgroundUrl} frameName={frameName} initialIndex={editIndex} key={`${template.id}:${editIndex}`} onCancel={() => setEditIndex(null)} onDone={(edits) => { saveEdits(edits); setEditIndex(null) }} onReplace={(index, edits) => { saveEdits(edits); setEditIndex(null); openPhotoPicker(index) }} slots={slots} template={template} templateDpi={templateDpi(template.canvas, printSize)} /> : null}
+    {dragImage !== null ? <div aria-hidden="true" className="pointer-events-none fixed left-0 top-0 z-[75] size-[60px] overflow-hidden rounded-[12px] border-2 border-white bg-cs-graphite shadow-[0_10px_28px_rgba(0,0,0,.45)]" ref={ghost} style={{ transform: 'translate(-200px, -200px)' }}>{dragImage ? <img alt="" className="h-full w-full object-cover" src={dragImage} /> : null}</div> : null}
+    {editIndex !== null && slots[editIndex] ? <SlotEditor allBwEnabled={allBwEnabled} backgroundUrl={backgroundUrl} frameName={frameName} initialIndex={editIndex} key={`${template.id}:${editIndex}`} onCancel={() => setEditIndex(null)} onDone={(edits) => { saveEdits(edits); setEditIndex(null) }} onRemove={(index, edits) => { saveEdits(edits); setEditIndex(null); onRemove(index) }} onReplace={(index, edits) => { saveEdits(edits); setEditIndex(null); openPhotoPicker(index) }} slots={slots} template={template} templateDpi={templateDpi(template.canvas, printSize)} /> : null}
     {viewerOpen ? <FrameViewer backgroundUrl={backgroundUrl} onClose={() => setViewerOpen(false)} slots={slots} template={template} /> : null}
     {optionsOpen ? <BottomSheet onClose={() => setOptionsOpen(false)} subtitle={printLabel} title={`Tuỳ chọn · ${frameName}`}>
       <div className="grid gap-2">
