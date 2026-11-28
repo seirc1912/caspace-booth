@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { clampOffset, computeCover, createSlotTransform, effectivePrintDpi, focusTransform, offsetLimits, placePhoto, PRINT_WARNING_DPI, rubberBand, templateDpi, zoomAround } from '../client/src/features/photos/slotTransform'
+import { clampOffset, computeContain, computeCover, createSlotTransform, effectivePrintDpi, focusTransform, minSlotScale, offsetLimits, pinchTransform, placePhoto, PRINT_WARNING_DPI, rubberBand, snapRotation, templateDpi, zoomAround } from '../client/src/features/photos/slotTransform'
 import type { SlotTransform } from '../client/src/types/selfBooth'
 
 const landscape = { width: 3000, height: 2000 }
@@ -30,7 +30,7 @@ test('computeCover: the (rotated) photo just covers the slot', () => {
 })
 
 test('clampOffset: scale stays 1–3 and offsets never open a gap, for every rotation and flip', () => {
-  assert.equal(clampOffset(t({ scale: 0.4 }), landscape, slot).scale, 1)
+  close(clampOffset(t({ scale: 0.1 }), landscape, tall).scale, minSlotScale(landscape, tall, 0), 'zoom out stops when the whole photo fits')
   assert.equal(clampOffset(t({ scale: 9 }), landscape, slot).scale, 3)
   for (const rotation of [0, 90, 180, 270] as const) for (const flipX of [false, true]) for (const box of [slot, tall]) for (const scale of [1, 1.7, 3]) {
     const wild = clampOffset(t({ scale, rotation, flipX, offsetX: 400, offsetY: -400 }), landscape, box)
@@ -100,7 +100,7 @@ test('Chỉnh ô: Pointer Events + rAF, touch-action none, Safari pinch blocked,
   assert.match(editor, /addEventListener\('gesturestart', block\)/)
   assert.match(editor, /onClick=\{onCancel\} type="button">Huỷ/)
   assert.match(editor, /onClick=\{reset\} type="button">Đặt lại/)
-  assert.match(editor, /Kéo để di chuyển · Chụm 2 ngón để phóng · Chạm đúp: 2×/)
+  assert.match(editor, /Kéo để di chuyển · Chụm hoặc xoay 2 ngón · Chạm đúp: 2×/)
   assert.match(editor, /localStorage\.getItem\(HINT_KEY\)/)
   assert.match(editor, /Phóng lớn quá, ảnh in có thể bị mờ/)
   for (const label of ['Vừa ô', 'Xoay 90°', 'Lật ngang', 'Đen trắng', 'Thay ảnh']) assert.match(editor, new RegExp(`label="${label}"`))
@@ -136,4 +136,36 @@ test('Chỉnh ô has "Xoá ảnh"; face focus uses the browser detector, else Me
   assert.match(focus, /return PORTRAIT_FOCUS/)
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
   assert.match(composer, /now\.transform\.scale !== 1 \|\| now\.transform\.offsetX !== 0/, 'a slow detector never overwrites the customer\'s own framing')
+})
+
+test('free two-finger rotation (old editor): any angle covers the slot at 100%+, snaps straight near quarter turns', () => {
+  for (const rotation of [7, -23, 45, 133, -170]) for (const box of [slot, tall]) for (const scale of [1, 1.4, 3]) {
+    const wild = clampOffset(t({ scale, rotation, offsetX: 500, offsetY: -500 }), landscape, box)
+    assert.ok(coversSlot(wild, landscape, box), `gap at ${rotation}° scale ${scale}`)
+    assert.ok(coversSlot(clampOffset(t({ scale, rotation }), landscape, box), landscape, box))
+  }
+  assert.equal(snapRotation(87), 90); assert.equal(snapRotation(-2.5), 0); assert.equal(snapRotation(181), 180); assert.equal(snapRotation(30), 30)
+  close(computeCover(3000, 2000, 600, 400, 45), (600 * Math.SQRT1_2 + 400 * Math.SQRT1_2) / 2000)
+})
+
+test('zooming out below 100% fits the whole photo inside the slot (old "kéo nhỏ lại cả hình vào khung"), never outside it', () => {
+  const min = minSlotScale(landscape, tall, 0)
+  close(min, computeContain(3000, 2000, 400, 600) / computeCover(3000, 2000, 400, 600))
+  assert.ok(min < 1)
+  const small = clampOffset(t({ scale: min, offsetX: 80, offsetY: 80 }), landscape, tall)
+  const p = placePhoto(small, landscape, tall)
+  assert.ok(p.width <= tall.width + 1e-6 && p.height <= tall.height + 1e-6, 'the whole photo is visible')
+  assert.ok(p.centerX - p.width / 2 >= -1e-6 && p.centerX + p.width / 2 <= tall.width + 1e-6, 'and stays inside the slot')
+  assert.ok(p.centerY - p.height / 2 >= -1e-6 && p.centerY + p.height / 2 <= tall.height + 1e-6)
+})
+
+test('pinchTransform: twist and zoom keep the photo point under the fingers', () => {
+  const start = t({ scale: 1.5, offsetX: 4, offsetY: -6, rotation: 10 })
+  const from = { x: 50, y: -20 }; const to = { x: 70, y: 10 }
+  const next = pinchTransform(start, from, to, 1.3, 25, slot)
+  assert.equal(next.rotation, 35); close(next.scale, 1.95)
+  // The photo point under `from` (in the photo's own unrotated, unscaled frame) is under `to` afterwards.
+  const local = (tr: SlotTransform, point: { x: number; y: number }) => { const a = -tr.rotation * Math.PI / 180; const dx = point.x - tr.offsetX / 100 * slot.width; const dy = point.y - tr.offsetY / 100 * slot.height; return { x: (dx * Math.cos(a) - dy * Math.sin(a)) / tr.scale, y: (dx * Math.sin(a) + dy * Math.cos(a)) / tr.scale } }
+  const before = local(start, from); const after = local(next, to)
+  close(after.x, before.x); close(after.y, before.y)
 })

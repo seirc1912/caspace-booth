@@ -117,7 +117,7 @@ test('customer editor has no Order action or Print Order execution while backend
   const backend = readFileSync(new URL('../client/src/features/orders/services/orderServiceInstance.ts', import.meta.url), 'utf8')
   assert.doesNotMatch(app, /printOrderRepository|saveAndContinue|createOrderPhotoSnapshot|OrderPreviewPage|RoomSummaryPage|SuccessPage/)
   assert.doesNotMatch(composer, /nextLabel|Ordering|aria-label="Order"/)
-  assert.match(composer, /label=\{downloading \? 'Đang lưu…' : 'Lưu khung về máy'\} onClick=\{\(\) => \{ setOptionsOpen\(false\); onDownload\(\) \}\}/, 'per-frame Save Photo stays in the editor (options sheet)')
+  assert.match(composer, /onClick=\{onDownload\} type="button">.*'Lưu về máy'/, 'per-frame "Lưu về máy" stays visible in the bottom bar')
   assert.match(backend, /PrintOrderRepository/)
 })
 

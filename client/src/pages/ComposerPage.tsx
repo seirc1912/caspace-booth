@@ -297,8 +297,10 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
   const printLabel = [printSize && /^\s*\d+([.,]\d+)?\s*[x×]\s*\d+([.,]\d+)?\s*(cm|in)?\s*$/i.test(printSize) ? printSize.replace(/\s*[x×]\s*/i, '×') : null, `${template.slots.length} ô`].filter(Boolean).join(' · ')
   const busy = Boolean(poolProgress) || autoFillPreparing
 
-  return <PageShell bottomBar={<BottomBar><div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2.5">
+  return <PageShell bottomBar={<BottomBar><div className={`grid gap-2 ${onDownload ? 'grid-cols-[auto_auto_minmax(0,1fr)]' : 'grid-cols-[auto_minmax(0,1fr)]'}`}>
     <Button className="whitespace-nowrap" disabled={frames.length < 2 || !onSelectFrame} onClick={() => setFramesOpen(true)} variant="chrome">Khung khác</Button>
+    {/* Kept in sight as before (owner, 28/11/2026): save the finished frame to the phone. */}
+    {onDownload ? <button aria-busy={downloading || undefined} className="cs-btn-chrome cs-press flex min-h-14 min-w-[64px] flex-col items-center justify-center gap-0.5 rounded-[16px] px-2 text-[11px] font-bold leading-tight disabled:opacity-40" disabled={remainingSlotCount > 0 || downloading} onClick={onDownload} type="button">{downloading ? <Spinner className="size-[18px]" /> : <Icon className="size-[18px]" name="download" />}<span>{downloading ? 'Đang lưu…' : 'Lưu về máy'}</span></button> : null}
     <Button disabled={!canContinue} onClick={onOpenSendFrames} trailingIcon={canContinue ? <Icon name="arrowRight" /> : undefined}>{canContinue ? 'Lưu & tiếp tục' : `Còn ${remainingSlotCount} ô trống`}</Button>
   </div></BottomBar>} className="overflow-x-hidden" footer={false}>
     <input accept="image/*" aria-label="Chọn một ảnh từ điện thoại" className="sr-only" onChange={choosePhoto} ref={photoInput} type="file" />
@@ -340,7 +342,6 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
         <OptionButton icon="mobile" label="Thêm ảnh từ điện thoại" onClick={() => { setOptionsOpen(false); openFramePhotoPicker() }} disabled={!emptySlots.length} detail={emptySlots.length ? `Vào ${emptySlots.length} ô trống` : 'Khung đã đủ ảnh'} />
         <OptionButton icon="sparkles" label="Tự xếp tất cả khung" onClick={() => { setOptionsOpen(false); setAutoFillDialogOpen(true) }} disabled={!onAutoFillPhotos || !autoFillPhotoCount || busy} detail="Chia ảnh vào mọi khung của phòng" />
         <OptionButton icon="contrast" label="Đen trắng tất cả" onClick={() => onToggleAllBw?.()} disabled={!onToggleAllBw || downloading} pressed={allBwEnabled} />
-        {onDownload ? <OptionButton icon="download" label={downloading ? 'Đang lưu…' : 'Lưu khung về máy'} onClick={() => { setOptionsOpen(false); onDownload() }} disabled={remainingSlotCount > 0 || downloading} detail={remainingSlotCount > 0 ? `Còn ${remainingSlotCount} ô trống` : undefined} /> : null}
       </div>
     </BottomSheet> : null}
 

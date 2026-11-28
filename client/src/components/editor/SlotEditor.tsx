@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type { KeyboardEvent, PointerEvent, WheelEvent } from 'react'
 import type { FilledSlot, PrintTemplate, SlotTransform } from '../../types/selfBooth'
 import { photoFocus } from '../../features/photos/faceFocus'
-import { clampOffset, clampScale, createSlotTransform, effectivePrintDpi, focusTransform, MAX_SLOT_SCALE, MIN_SLOT_SCALE, normalizeQuarterTurn, PRINT_WARNING_DPI, rubberBand, SLOT_SCALE_STEP, zoomAround, type Size } from '../../features/photos/slotTransform'
+import { clampOffset, clampScale, createSlotTransform, effectivePrintDpi, focusTransform, MAX_SLOT_SCALE, minSlotScale, normalizeRotation, pinchTransform, PRINT_WARNING_DPI, rubberBand, SLOT_SCALE_STEP, snapRotation, zoomAround, type Size } from '../../features/photos/slotTransform'
+import { photoSlotBackingColor } from '../../features/photos/photoSlotBacking'
 import { Icon, type IconName } from '../ui/Icon'
 import { slotPhotoStyle } from '../../features/photos/slotPhotoStyle'
 import { SlotPhoto } from './SlotPhoto'
@@ -33,7 +34,7 @@ interface SlotEditorProps {
   onRemove: (index: number, edits: Record<number, SlotTransform>) => void
 }
 
-interface Gesture { pointers: Map<number, { x: number; y: number }>; origin: SlotTransform; startMid: { x: number; y: number }; startDistance: number; moved: boolean }
+interface Gesture { pointers: Map<number, { x: number; y: number }>; origin: SlotTransform; startMid: { x: number; y: number }; startDistance: number; startAngle: number; moved: boolean }
 
 function ToolButton({ label, icon, onClick, pressed, disabled, busy }: { label: string; icon: IconName; onClick: () => void; pressed?: boolean; disabled?: boolean; busy?: boolean }) {
   return <button aria-pressed={pressed} className={`cs-press flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[14px] px-0.5 text-[10.5px] font-bold leading-tight disabled:opacity-40 ${pressed ? 'cs-led text-white' : 'bg-white/10 text-white'}`} disabled={disabled} onClick={onClick} type="button"><Icon className="size-[18px]" name={icon} /><span>{busy ? 'Đang tìm…' : label}</span></button>
@@ -43,6 +44,7 @@ const readHintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1'
 const writeHintSeen = () => { try { localStorage.setItem(HINT_KEY, '1') } catch { /* private mode: the hint shows again next time */ } }
 const midpoint = (points: Array<{ x: number; y: number }>) => ({ x: points.reduce((sum, point) => sum + point.x, 0) / points.length, y: points.reduce((sum, point) => sum + point.y, 0) / points.length })
 const spread = (points: Array<{ x: number; y: number }>) => points.length > 1 ? Math.hypot(points[1]!.x - points[0]!.x, points[1]!.y - points[0]!.y) : 0
+const twist = (points: Array<{ x: number; y: number }>) => points.length > 1 ? Math.atan2(points[1]!.y - points[0]!.y, points[1]!.x - points[0]!.x) * 180 / Math.PI : 0
 
 /**
  * Chỉnh ô (NC-02): one slot as large as the screen allows. Drag, pinch (the photo point under the
@@ -136,13 +138,14 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
     current.origin = live.current
     current.startMid = midpoint(points)
     current.startDistance = spread(points)
+    current.startAngle = twist(points)
   }
 
   const pointerDown = (event: PointerEvent<HTMLDivElement>) => {
     if (!photo || !slot) return
     dismissHint()
     event.currentTarget.setPointerCapture(event.pointerId)
-    if (!gesture.current) gesture.current = { pointers: new Map(), origin: live.current, startMid: { x: 0, y: 0 }, startDistance: 0, moved: false }
+    if (!gesture.current) gesture.current = { pointers: new Map(), origin: live.current, startMid: { x: 0, y: 0 }, startDistance: 0, startAngle: 0, moved: false }
     gesture.current.pointers.set(event.pointerId, local(event))
     restartGesture()
     setDragging(true)
@@ -159,12 +162,12 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
     const box = windowSlot()
     const mid = midpoint(points)
     const origin = current.origin
-    const scale = points.length > 1 && current.startDistance > 0 ? clampScale(origin.scale * spread(points) / current.startDistance) : origin.scale
-    const ratio = scale / origin.scale
-    // The photo point that was under startMid is now under mid (pinch zoom + pan in one step).
-    const offsetX = mid.x - (current.startMid.x - origin.offsetX / 100 * box.width) * ratio
-    const offsetY = mid.y - (current.startMid.y - origin.offsetY / 100 * box.height) * ratio
-    schedule(rubberBand({ ...origin, scale, offsetX: offsetX / box.width * 100, offsetY: offsetY / box.height * 100 }, photo, box))
+    const pinching = points.length > 1 && current.startDistance > 0
+    // Two fingers twist the photo by any angle (snapping straight near 0/90/180/270°) and zoom from
+    // "whole photo inside the slot" up to 3×; the photo point under the fingers stays under them.
+    const rotation = pinching ? snapRotation(origin.rotation + normalizeRotation(twist(points) - current.startAngle)) : origin.rotation
+    const scale = pinching ? clampScale(origin.scale * spread(points) / current.startDistance, minSlotScale(photo, box, rotation)) : origin.scale
+    schedule(rubberBand(pinchTransform(origin, current.startMid, mid, scale / origin.scale, normalizeRotation(rotation - origin.rotation), box), photo, box))
   }
 
   const pointerUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -264,6 +267,7 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
   const dpi = original ? effectivePrintDpi(savedTransform, original, slotUnits, templateDpi) : null
   const lowQuality = dpi !== null && dpi < PRINT_WARNING_DPI
   const percent = Math.round(savedTransform.scale * 100)
+  const minimumScale = photo ? minSlotScale(photo, slotUnits, savedTransform.rotation) : 1
   const previewSlots = slots.map((item, slotIndex) => item && edits[slotIndex]?.photoId === item.photo.id ? { ...item, transform: edits[slotIndex]!.transform } : item)
   const previewHeight = 64
   const previewWidth = previewHeight * template.canvas.width / template.canvas.height
@@ -282,9 +286,9 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
       <button className="min-h-11 rounded-xl px-3 text-[15px] font-bold text-white/85" onClick={reset} type="button">Đặt lại</button>
     </header>
 
-    <div aria-label="Vùng chỉnh ảnh: kéo để di chuyển, chụm hai ngón hoặc lăn chuột để phóng, phím mũi tên để di chuyển, phím + và − để phóng" className="relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cs-led" onKeyDown={keyDown} onPointerCancel={pointerUp} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={wheel} ref={area} role="application" style={{ overscrollBehavior: 'none' }} tabIndex={0}>
-      {!hintSeen ? <p className="pointer-events-none absolute inset-x-3 top-2.5 z-20 mx-auto w-fit max-w-full rounded-full bg-white/90 px-3 py-1.5 text-center text-[12px] font-bold leading-snug text-cs-ink">Kéo để di chuyển · Chụm 2 ngón để phóng · Chạm đúp: 2×</p> : null}
-      {windowSize ? <div className="absolute left-1/2 top-1/2" style={{ width: windowSize.width, height: windowSize.height, transform: 'translate(-50%, -50%)' }}>
+    <div aria-label="Vùng chỉnh ảnh: kéo để di chuyển, chụm hai ngón hoặc lăn chuột để phóng, xoay hai ngón để xoay ảnh, phím mũi tên để di chuyển, phím + và − để phóng" className="relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cs-led" onKeyDown={keyDown} onPointerCancel={pointerUp} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={wheel} ref={area} role="application" style={{ overscrollBehavior: 'none' }} tabIndex={0}>
+      {!hintSeen ? <p className="pointer-events-none absolute inset-x-3 top-2.5 z-20 mx-auto w-fit max-w-full rounded-full bg-white/90 px-3 py-1.5 text-center text-[12px] font-bold leading-snug text-cs-ink">Kéo để di chuyển · Chụm hoặc xoay 2 ngón · Chạm đúp: 2×</p> : null}
+      {windowSize ? <div className="absolute left-1/2 top-1/2" style={{ width: windowSize.width, height: windowSize.height, transform: 'translate(-50%, -50%)', backgroundColor: photoSlotBackingColor }}>
         <SlotPhoto key={slot.photo.id} onSize={(size) => setPhotoSize({ photoId: slot.photo.id, size })} ref={image} slot={slot} slotSize={slotUnits} transform={savedTransform} />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 border-2 border-white" style={{ boxShadow: '0 0 0 2000px rgba(11,12,14,.62)', borderRadius: templateSlot.mask === 'circle' || templateSlot.mask === 'ellipse' ? '50%' : undefined }}>
           {['-left-[3px] -top-[3px] border-l-[3px] border-t-[3px]', '-right-[3px] -top-[3px] border-r-[3px] border-t-[3px]', '-bottom-[3px] -left-[3px] border-b-[3px] border-l-[3px]', '-bottom-[3px] -right-[3px] border-b-[3px] border-r-[3px]'].map((corner) => <span className={`absolute size-4 border-cs-led ${corner}`} key={corner} />)}
@@ -299,13 +303,13 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
 
     <div className="space-y-2 px-3 pb-[max(10px,env(safe-area-inset-bottom))] pt-2">
       <div className="flex items-center gap-2 rounded-[16px] bg-white/10 px-1.5">
-        <button aria-label="Thu nhỏ" className="grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-30" disabled={!photo || savedTransform.scale <= MIN_SLOT_SCALE} onClick={() => setScale(savedTransform.scale - SLOT_SCALE_STEP)} type="button"><Icon name="minus" /></button>
-        <input aria-label="Mức phóng" aria-valuetext={`${percent}%`} className="h-11 min-w-0 flex-1 accent-[#FF2D55]" disabled={!photo} max={MAX_SLOT_SCALE * 100} min={MIN_SLOT_SCALE * 100} onChange={(event) => setScale(Number(event.currentTarget.value) / 100)} step={1} type="range" value={percent} />
+        <button aria-label="Thu nhỏ" className="grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-30" disabled={!photo || savedTransform.scale <= minimumScale + 0.001} onClick={() => setScale(Math.max(minimumScale, savedTransform.scale - SLOT_SCALE_STEP))} type="button"><Icon name="minus" /></button>
+        <input aria-label="Mức phóng" aria-valuetext={`${percent}%`} className="h-11 min-w-0 flex-1 accent-[#FF2D55]" disabled={!photo} max={MAX_SLOT_SCALE * 100} min={Math.floor(minimumScale * 100)} onChange={(event) => setScale(Number(event.currentTarget.value) / 100)} step={1} type="range" value={percent} />
         <button aria-label="Phóng to" className="grid size-11 shrink-0 place-items-center rounded-full disabled:opacity-30" disabled={!photo || savedTransform.scale >= MAX_SLOT_SCALE} onClick={() => setScale(savedTransform.scale + SLOT_SCALE_STEP)} type="button"><Icon name="add" /></button>
       </div>
       <div className="grid grid-cols-6 gap-1">
         <ToolButton disabled={!photo || fitting} icon="crop" label="Vừa ô" onClick={() => void fitSlot()} busy={fitting} />
-        <ToolButton disabled={!photo} icon="rotate" label="Xoay 90°" onClick={() => update({ rotation: normalizeQuarterTurn(savedTransform.rotation + 90) })} />
+        <ToolButton disabled={!photo} icon="rotate" label="Xoay 90°" onClick={() => update({ rotation: snapRotation(savedTransform.rotation + 90) })} />
         <ToolButton disabled={!photo} icon="flip" label="Lật ngang" onClick={() => update({ flipX: !savedTransform.flipX })} pressed={savedTransform.flipX} />
         <ToolButton disabled={!photo || allBwEnabled} icon="contrast" label="Đen trắng" onClick={() => update({ grayscale: !savedTransform.grayscale })} pressed={savedTransform.grayscale} />
         <ToolButton disabled={!photo} icon="swap" label="Thay ảnh" onClick={() => onReplace(index, editsOut({ index, transform: live.current }))} />

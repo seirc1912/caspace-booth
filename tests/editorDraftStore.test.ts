@@ -113,9 +113,9 @@ test('a session saved before the editor upgrade ({ zoom, x, y } + fit/filter) is
   ] }
   const restored = hydrateEditorDraft(metadata, photos)
   assert.deepEqual(restored?.frameSlots.one?.map((item) => item?.transform), [
-    { scale: 2, offsetX: 10, offsetY: -5, rotation: 90, flipX: false, grayscale: true },
+    { scale: 2, offsetX: 10, offsetY: -5, rotation: 88, flipX: false, grayscale: true },
     { scale: 1, offsetX: 0, offsetY: 0, rotation: 180, flipX: false, grayscale: false },
-    { scale: 3, offsetX: 0, offsetY: 0, rotation: 270, flipX: false, grayscale: false },
+    { scale: 3, offsetX: 0, offsetY: 0, rotation: -91, flipX: false, grayscale: false },
   ])
 })
 

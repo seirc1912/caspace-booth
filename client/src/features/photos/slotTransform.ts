@@ -1,12 +1,13 @@
 import type { SlotTransform } from '../../types/selfBooth'
 
 export interface Size { width: number; height: number }
-export type QuarterTurn = SlotTransform['rotation']
 
-/** 1 = the photo just covers the slot ("cover"); customers can zoom up to 3×. */
+/** 1 = the photo just covers the slot ("cover"); customers can zoom up to 3×, and down until the whole photo fits ("contain"). */
 export const MIN_SLOT_SCALE = 1
 export const MAX_SLOT_SCALE = 3
 export const SLOT_SCALE_STEP = 0.25
+/** Two-finger twist: within this many degrees of 0/90/180/270 the photo snaps straight. */
+export const ROTATION_SNAP_DEGREES = 4
 /** Below this many original pixels per printed inch the editor warns "ảnh in có thể bị mờ" (waiting for the print counter to confirm). */
 export const PRINT_WARNING_DPI = 150
 /** Template canvases are designed at this resolution when the print size is unknown. */
@@ -19,51 +20,85 @@ export function createSlotTransform(grayscale = false): SlotTransform {
 }
 
 const validSize = (size: Size) => Number.isFinite(size.width) && Number.isFinite(size.height) && size.width > 0 && size.height > 0
+const radians = (degrees: number) => degrees * Math.PI / 180
+const trig = (degrees: number) => ({ cos: Math.abs(Math.cos(radians(degrees))), sin: Math.abs(Math.sin(radians(degrees))) })
 
-/** The photo's bounding size once rotated by a quarter turn. */
-export function rotatedSize(photo: Size, rotation: number): Size {
-  return Math.abs(rotation) % 180 === 90 ? { width: photo.height, height: photo.width } : photo
+/** Any angle → (-180, 180]; floating noise around quarter turns is removed. */
+export function normalizeRotation(degrees: number) {
+  if (!Number.isFinite(degrees)) return 0
+  let value = ((degrees % 360) + 360) % 360
+  if (value > 180) value -= 360
+  return Math.round(value * 1000) / 1000
 }
 
-/** Scale (slot px per photo px) at which the rotated photo just covers the slot. Shared by screen and print. */
+/** Two-finger twist ends near a quarter turn → exactly that quarter turn. */
+export function snapRotation(degrees: number, within = ROTATION_SNAP_DEGREES) {
+  const nearest = Math.round(degrees / 90) * 90
+  return Math.abs(degrees - nearest) <= within ? normalizeRotation(nearest) : normalizeRotation(degrees)
+}
+
+/** Scale (slot px per photo px) at which the photo, rotated by any angle, just covers the slot. Shared by screen and print. */
 export function computeCover(photoW: number, photoH: number, slotW: number, slotH: number, rotation: number = 0) {
   if (!validSize({ width: photoW, height: photoH }) || !validSize({ width: slotW, height: slotH })) throw new Error('Photo and slot dimensions must be positive finite numbers.')
-  const rotated = rotatedSize({ width: photoW, height: photoH }, rotation)
-  return Math.max(slotW / rotated.width, slotH / rotated.height)
+  const { cos, sin } = trig(rotation)
+  return Math.max((slotW * cos + slotH * sin) / photoW, (slotW * sin + slotH * cos) / photoH)
 }
 
-export function clampScale(scale: number) {
-  return Number.isFinite(scale) ? Math.min(MAX_SLOT_SCALE, Math.max(MIN_SLOT_SCALE, scale)) : MIN_SLOT_SCALE
+/** Scale at which the whole rotated photo fits inside the slot. */
+export function computeContain(photoW: number, photoH: number, slotW: number, slotH: number, rotation: number = 0) {
+  const { cos, sin } = trig(rotation)
+  return Math.min(slotW / (photoW * cos + photoH * sin), slotH / (photoW * sin + photoH * cos))
 }
 
-export const normalizeQuarterTurn = (degrees: number): QuarterTurn => ((((Math.round((Number.isFinite(degrees) ? degrees : 0) / 90) * 90) % 360) + 360) % 360) as QuarterTurn
-
-/** Largest |offset| (in % of the slot's width / height) that still leaves no gap. */
-export function offsetLimits(transform: Pick<SlotTransform, 'scale' | 'rotation'>, photo: Size, slot: Size) {
-  const cover = computeCover(photo.width, photo.height, slot.width, slot.height, transform.rotation)
-  const rotated = rotatedSize(photo, transform.rotation)
-  const scale = clampScale(transform.scale)
-  return {
-    x: Math.max(0, (rotated.width * cover * scale - slot.width) / 2 / slot.width * 100),
-    y: Math.max(0, (rotated.height * cover * scale - slot.height) / 2 / slot.height * 100),
-  }
+/** Smallest scale (relative to cover): the whole photo inside the slot, like the old "kéo nhỏ lại cả hình vào khung". */
+export function minSlotScale(photo: Size, slot: Size, rotation: number) {
+  return Math.min(MIN_SLOT_SCALE, computeContain(photo.width, photo.height, slot.width, slot.height, rotation) / computeCover(photo.width, photo.height, slot.width, slot.height, rotation))
 }
 
+export function clampScale(scale: number, minimum = MIN_SLOT_SCALE) {
+  return Number.isFinite(scale) ? Math.min(MAX_SLOT_SCALE, Math.max(minimum, scale)) : MIN_SLOT_SCALE
+}
+
+const clampFor = (transform: Pick<SlotTransform, 'scale' | 'rotation'>, photo: Size, slot: Size) => clampScale(transform.scale, minSlotScale(photo, slot, transform.rotation))
+
+/**
+ * How far the photo centre may move, measured along the photo's own (rotated) axes, in slot
+ * units. Photo larger than the slot: no gap may open (exact for any angle). Photo smaller
+ * (zoomed out): it stays inside the slot.
+ */
+function axisLimits(transform: Pick<SlotTransform, 'scale' | 'rotation'>, photo: Size, slot: Size) {
+  const scale = computeCover(photo.width, photo.height, slot.width, slot.height, transform.rotation) * clampFor(transform, photo, slot)
+  const { cos, sin } = trig(transform.rotation)
+  const slotAlongX = (slot.width * cos + slot.height * sin) / 2
+  const slotAlongY = (slot.width * sin + slot.height * cos) / 2
+  return { u: Math.abs(photo.width * scale / 2 - slotAlongX), v: Math.abs(photo.height * scale / 2 - slotAlongY) }
+}
+
+const toPhotoAxes = (dx: number, dy: number, degrees: number) => { const a = radians(degrees); return { u: dx * Math.cos(a) + dy * Math.sin(a), v: -dx * Math.sin(a) + dy * Math.cos(a) } }
+const toSlotAxes = (u: number, v: number, degrees: number) => { const a = radians(degrees); return { x: u * Math.cos(a) - v * Math.sin(a), y: u * Math.sin(a) + v * Math.cos(a) } }
 const clampTo = (value: number, limit: number) => Math.min(limit, Math.max(-limit, Number.isFinite(value) ? value : 0))
 
-/** Scale within 1–3× and offsets kept inside the photo: the slot never shows an empty edge. */
+/** Largest |offset| (in % of the slot's width / height) along each slot axis; exact for quarter turns. */
+export function offsetLimits(transform: Pick<SlotTransform, 'scale' | 'rotation'>, photo: Size, slot: Size) {
+  const { u, v } = axisLimits(transform, photo, slot)
+  const { cos, sin } = trig(transform.rotation)
+  return { x: (u * cos + v * sin) / slot.width * 100, y: (u * sin + v * cos) / slot.height * 100 }
+}
+
+/** Scale between contain and 3×, rotation normalised, offsets kept so the photo never leaves a gap (or, zoomed out, never leaves the slot). */
 export function clampOffset(transform: SlotTransform, photo: Size, slot: Size): SlotTransform {
-  const scale = clampScale(transform.scale)
-  const rotation = normalizeQuarterTurn(transform.rotation)
-  const limits = offsetLimits({ scale, rotation }, photo, slot)
-  return { ...transform, scale, rotation, offsetX: clampTo(transform.offsetX, limits.x), offsetY: clampTo(transform.offsetY, limits.y) }
+  const rotation = normalizeRotation(transform.rotation)
+  const scale = clampFor({ scale: transform.scale, rotation }, photo, slot)
+  const limits = axisLimits({ scale, rotation }, photo, slot)
+  const along = toPhotoAxes((Number.isFinite(transform.offsetX) ? transform.offsetX : 0) / 100 * slot.width, (Number.isFinite(transform.offsetY) ? transform.offsetY : 0) / 100 * slot.height, rotation)
+  const back = toSlotAxes(clampTo(along.u, limits.u), clampTo(along.v, limits.v), rotation)
+  return { ...transform, scale, rotation, offsetX: back.x / slot.width * 100, offsetY: back.y / slot.height * 100 }
 }
 
 /** Drag past the edge: the excess is damped (rubber band); `clampOffset` snaps it back on release. */
 export function rubberBand(transform: SlotTransform, photo: Size, slot: Size, resistance = 0.35): SlotTransform {
-  const limits = offsetLimits(transform, photo, slot)
-  const band = (value: number, limit: number) => Math.abs(value) <= limit ? value : Math.sign(value) * (limit + (Math.abs(value) - limit) * resistance)
-  return { ...transform, offsetX: band(transform.offsetX, limits.x), offsetY: band(transform.offsetY, limits.y) }
+  const clamped = clampOffset({ ...transform, scale: transform.scale }, photo, slot)
+  return { ...transform, scale: clamped.scale, offsetX: clamped.offsetX + (transform.offsetX - clamped.offsetX) * resistance, offsetY: clamped.offsetY + (transform.offsetY - clamped.offsetY) * resistance }
 }
 
 export interface PhotoPlacement {
@@ -73,7 +108,8 @@ export interface PhotoPlacement {
   /** Photo centre, from the slot's top-left corner, in slot units. */
   centerX: number
   centerY: number
-  rotation: QuarterTurn
+  /** Degrees, clockwise. */
+  rotation: number
   flipX: boolean
 }
 
@@ -92,12 +128,13 @@ export function placePhoto(transform: SlotTransform, photo: Size, slot: Size): P
 }
 
 /**
- * Zoom keeping the photo point under `anchor` still (pinch midpoint, double-tap point, wheel).
+ * Zoom keeping the photo point under `anchor` still (double-tap point, wheel, slider centre).
  * `anchor` is measured from the slot centre in slot units.
  */
 export function zoomAround(transform: SlotTransform, nextScale: number, anchor: { x: number; y: number }, photo: Size, slot: Size): SlotTransform {
-  const from = clampScale(transform.scale)
-  const to = clampScale(nextScale)
+  const minimum = minSlotScale(photo, slot, transform.rotation)
+  const from = clampScale(transform.scale, minimum)
+  const to = clampScale(nextScale, minimum)
   const ratio = to / from
   const offsetX = transform.offsetX / 100 * slot.width
   const offsetY = transform.offsetY / 100 * slot.height
@@ -109,20 +146,36 @@ export function zoomAround(transform: SlotTransform, nextScale: number, anchor: 
   }, photo, slot)
 }
 
+/**
+ * Pinch + twist from a gesture start: the photo point under the fingers' start midpoint follows
+ * the current midpoint, scaled by `ratio` and turned by `turn` degrees around it.
+ */
+export function pinchTransform(origin: SlotTransform, from: { x: number; y: number }, to: { x: number; y: number }, ratio: number, turn: number, slot: Size): SlotTransform {
+  const a = radians(turn)
+  const dx = origin.offsetX / 100 * slot.width - from.x
+  const dy = origin.offsetY / 100 * slot.height - from.y
+  return {
+    ...origin,
+    scale: origin.scale * ratio,
+    rotation: origin.rotation + turn,
+    offsetX: (to.x + (dx * Math.cos(a) - dy * Math.sin(a)) * ratio) / slot.width * 100,
+    offsetY: (to.y + (dx * Math.sin(a) + dy * Math.cos(a)) * ratio) / slot.height * 100,
+  }
+}
+
 /** Offsets that put `focus` (fractions of the unrotated photo, 0–1) at the slot centre, as far as the edges allow. */
 export function focusTransform(transform: SlotTransform, focus: { x: number; y: number }, photo: Size, slot: Size): SlotTransform {
   const placement = placePhoto({ ...transform, offsetX: 0, offsetY: 0 }, photo, slot)
-  let dx = (0.5 - focus.x) * placement.width
-  let dy = (0.5 - focus.y) * placement.height
-  if (transform.flipX) dx = -dx
-  const turns = placement.rotation / 90
-  for (let turn = 0; turn < turns; turn += 1) [dx, dy] = [-dy, dx]
-  return clampOffset({ ...transform, offsetX: dx / slot.width * 100, offsetY: dy / slot.height * 100 }, photo, slot)
+  let x = (focus.x - 0.5) * placement.width
+  const y = (focus.y - 0.5) * placement.height
+  if (transform.flipX) x = -x
+  const turned = toSlotAxes(x, y, placement.rotation)
+  return clampOffset({ ...transform, offsetX: -turned.x / slot.width * 100, offsetY: -turned.y / slot.height * 100 }, photo, slot)
 }
 
 /** Original pixels per printed inch inside the slot (lower = blurrier print). */
 export function effectivePrintDpi(transform: SlotTransform, original: Size, slot: Size, templateDpi: number) {
-  const scale = computeCover(original.width, original.height, slot.width, slot.height, transform.rotation) * clampScale(transform.scale)
+  const scale = computeCover(original.width, original.height, slot.width, slot.height, transform.rotation) * clampFor(transform, original, slot)
   return templateDpi / scale
 }
 
@@ -145,12 +198,12 @@ const finite = (value: unknown, fallback: number) => typeof value === 'number' &
  * Sessions saved before the editor upgrade stored `{ zoom, x, y, rotation, flipX, flipY }` plus
  * `fit` and `filter`. x/y were already fractions of the slot, so they become percentages; zoom
  * only carries over for "cover" photos (a "contain" zoom has no cover equivalent without the
- * photo size, so those start at cover). Rotation snaps to quarter turns; flipY = 180° + flipX.
+ * photo size, so those start at cover). Rotation is kept; flipY = 180° + flipX.
  */
 export function migrateLegacySlotTransform(legacy: LegacyTransform, fit?: unknown, filter?: unknown): SlotTransform {
-  let rotation = normalizeQuarterTurn(finite(legacy.rotation, 0))
+  let rotation = normalizeRotation(finite(legacy.rotation, 0))
   let flipX = legacy.flipX === true
-  if (legacy.flipY === true) { rotation = normalizeQuarterTurn(rotation + 180); flipX = !flipX }
+  if (legacy.flipY === true) { rotation = normalizeRotation(rotation + 180); flipX = !flipX }
   return {
     scale: fit === 'cover' ? clampScale(finite(legacy.zoom, 1)) : MIN_SLOT_SCALE,
     offsetX: finite(legacy.x, 0) * 100,
@@ -168,10 +221,10 @@ export function readStoredSlotTransform(stored: unknown, fit?: unknown, filter?:
   if ('zoom' in value) return Number.isFinite(value.zoom) ? migrateLegacySlotTransform(value, fit, filter) : null
   if (![value.scale, value.offsetX, value.offsetY].every((item) => typeof item === 'number' && Number.isFinite(item))) return null
   return {
-    scale: clampScale(value.scale as number),
+    scale: clampScale(value.scale as number, 0.05),
     offsetX: value.offsetX as number,
     offsetY: value.offsetY as number,
-    rotation: normalizeQuarterTurn(finite(value.rotation, 0)),
+    rotation: normalizeRotation(finite(value.rotation, 0)),
     flipX: value.flipX === true,
     grayscale: value.grayscale === true,
   }

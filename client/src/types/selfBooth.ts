@@ -153,13 +153,14 @@ export interface PhotoAsset {
  * and the print file draw the same crop. See features/photos/slotTransform.ts.
  */
 export interface SlotTransform {
-  /** 1 = the photo just covers the slot (cover); 1–3. */
+  /** 1 = the photo just covers the slot (cover); from "whole photo fits" (contain, < 1) up to 3. */
   scale: number
   /** Photo centre minus slot centre, in % of the slot width. */
   offsetX: number
   /** Photo centre minus slot centre, in % of the slot height. */
   offsetY: number
-  rotation: 0 | 90 | 180 | 270
+  /** Degrees clockwise, (-180, 180]; two-finger twist gives any angle, Xoay 90° adds a quarter turn. */
+  rotation: number
   flipX: boolean
   grayscale: boolean
 }
