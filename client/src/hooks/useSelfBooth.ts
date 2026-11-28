@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
-import type { AppView, FilledSlot, ImageTransform, PhotoAsset } from '../types/selfBooth'
+import type { AppView, FilledSlot, PhotoAsset, SlotTransform } from '../types/selfBooth'
 import { printTemplates } from '../data/templates'
 import { loadPublishedRooms, loadPublishedTemplateDetail, loadPublishedTemplateSummaries } from '../services/catalog/SupabaseCatalogService'
 import type { CustomerTemplate, CustomerTemplateSummary } from '../services/catalog/types'
@@ -9,7 +9,6 @@ import { applyAllBwFilter, clearAllBwFilter, createPhotoSlotForAllBw } from '../
 import { assignPhotoToTarget, type DirectPhotoTarget } from '../features/photos/directPhotoTarget'
 import { assignPhotosToFrameTarget, type FramePhotoTarget } from '../features/photos/framePhotoTarget'
 import { assignPhotosAcrossRoom, collectAutoFillPhotoResults, invalidateCompletedRoomFrames, resolveRoomTemplateDetails, roomHasAssignedPhotos, totalRoomSlotCount } from '../features/photos/autoFillAllFrames'
-import { withPhotoFilter, type PhotoFilter } from '../features/photos/photoFilter'
 import type { CustomerSession } from '../features/photos/customerSession'
 import { selectFrameAfterLoad } from '../features/templates/frameSelection'
 import {
@@ -233,21 +232,13 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     setSlots((current) => current.map((slot, slotIndex) => (slotIndex === index ? createPhotoSlotForAllBw(photo, allBwEnabled) : slot)))
   }, [allBwEnabled, setSlots])
 
-  const updateTransform = useCallback((index: number, transform: Partial<ImageTransform>) => {
-    setSlots((current) => current.map((slot, slotIndex) => (
-      slotIndex === index && slot
-        ? { ...slot, transform: { ...slot.transform, ...transform } }
-        : slot
-    )))
-  }, [setSlots])
-
-  const updateFit = useCallback((index: number, fit: 'contain' | 'cover') => {
-    setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? { ...slot, fit } : slot))
-  }, [setSlots])
-
-  const updateFilter = useCallback((index: number, filter: PhotoFilter) => {
-    if (allBwEnabled) return
-    setSlots((current) => current.map((slot, slotIndex) => slotIndex === index && slot ? withPhotoFilter(slot, filter) : slot))
+  /** Whole-slot edits (Chỉnh ô "Xong", Vừa ô, Tự xếp focus). Per-photo B&W is locked while "Đen trắng tất cả" is on. */
+  const updateTransform = useCallback((index: number, transform: Partial<SlotTransform>) => {
+    setSlots((current) => current.map((slot, slotIndex) => {
+      if (slotIndex !== index || !slot) return slot
+      const next = { ...slot.transform, ...transform }
+      return { ...slot, transform: allBwEnabled ? { ...next, grayscale: true } : next }
+    }))
   }, [allBwEnabled, setSlots])
 
   const toggleAllBw = useCallback(() => {
@@ -607,8 +598,6 @@ export function useSelfBooth(customerSession: CustomerSession | null) {
     fillEmpty,
     replaceSlot,
     updateTransform,
-    updateFit,
-    updateFilter,
     toggleAllBw,
     removeSlot,
     clearAll: () => setSlots((current) => current.map(() => null)),

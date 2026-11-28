@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 export type IconName =
   | 'add' | 'alert' | 'arrowRight' | 'back' | 'camera' | 'check' | 'chevronRight' | 'close' | 'contrast' | 'crop'
   | 'download' | 'expand' | 'facebook' | 'globe' | 'image' | 'instagram' | 'lock' | 'unlock' | 'mail' | 'minus' | 'mobile'
-  | 'moveX' | 'moveY' | 'phone' | 'pin' | 'send' | 'sparkles' | 'swap' | 'tiktok' | 'trash' | 'upload' | 'wifiOff'
+  | 'moveX' | 'moveY' | 'phone' | 'pin' | 'reset' | 'rotate' | 'flip' | 'send' | 'sparkles' | 'swap' | 'tiktok' | 'trash' | 'upload' | 'wifiOff'
   | 'zalo' | 'zoomIn'
 
 interface IconProps {
@@ -37,6 +37,9 @@ const paths: Record<IconName, ReactNode> = {
   moveY: <path d="M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4" />,
   phone: <path d="M5 4h3.5l1.8 4.5-2.3 1.4a11 11 0 0 0 6.1 6.1l1.4-2.3L20 15.5V19a1.8 1.8 0 0 1-2 1.8A15.8 15.8 0 0 1 3.2 6 1.8 1.8 0 0 1 5 4Z" />,
   pin: <><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" /><circle cx="12" cy="10" r="2.3" /></>,
+  reset: <><path d="M4 12a8 8 0 1 0 2.4-5.7" /><path d="M4 4v4.5h4.5" /></>,
+  rotate: <><path d="M20 12a8 8 0 1 1-2.4-5.7" /><path d="M20 4v4.5h-4.5" /><rect x="9" y="9" width="6" height="6" rx="1" /></>,
+  flip: <><path d="M12 3v18" strokeDasharray="2 2.5" /><path d="M9 7 4 17h5V7ZM15 7l5 10h-5V7Z" /></>,
   send: <path d="M21 3 10 14M21 3l-6.5 18-4.5-7-7-4.5L21 3Z" />,
   sparkles: <><path d="M10 3.5 11.6 8.4 16.5 10l-4.9 1.6L10 16.5l-1.6-4.9L3.5 10l4.9-1.6L10 3.5Z" /><path d="m18 14 .8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z" /></>,
   swap: <path d="M4 8h15m0 0-3.5-3.5M19 8l-3.5 3.5M20 16H5m0 0 3.5-3.5M5 16l3.5 3.5" />,

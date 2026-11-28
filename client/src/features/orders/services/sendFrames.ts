@@ -22,7 +22,7 @@ export function isFrameFilled(slots: Array<FilledSlot | null> | undefined) {
 
 /** What was sent, so an unchanged frame is not sent twice; any edit changes the signature. */
 export function frameSignature(slots: Array<FilledSlot | null>) {
-  return JSON.stringify(slots.map((slot) => slot && { photo: slot.photo.id, transform: slot.transform, fit: slot.fit ?? null, filter: slot.filter ?? null }))
+  return JSON.stringify(slots.map((slot) => slot && { photo: slot.photo.id, transform: slot.transform }))
 }
 
 export function renderFrameFile(input: { branding: BrandingConfig; assetCache?: RenderAssetCache }) {

@@ -1,67 +1,46 @@
-import type { FilledSlot, ImageTransform, PrintTemplate } from '../../types/selfBooth'
+import type { FilledSlot, PrintTemplate, TemplateSlot } from '../../types/selfBooth'
 import { photoSlotBackingColor } from '../../features/photos/photoSlotBacking'
 import { TemplateSurface } from '../template/TemplateSurface'
-import { PhotoFrame } from './PhotoFrame'
+import { Icon } from '../ui/Icon'
 import { EditorErrorBoundary } from './EditorErrorBoundary'
-import { CustomerPhotoLayer } from './CustomerPhotoLayer'
+import { SlotPhoto } from './SlotPhoto'
 
 interface TemplateCanvasProps {
   template: PrintTemplate
   backgroundUrl?: string | null
   slots: Array<FilledSlot | null>
-  activeSlot: number | null
-  cropSlot?: number | null
-  /** Slots the customer locked: no drag, pinch, double-tap reset or crop until unlocked. */
-  lockedSlots?: number[]
-  onActiveSlotChange: (index: number) => void
-  onAdd: (index: number) => void
-  onRemove: (index: number) => void
-  onReset?: (index: number) => void
-  onBeginCrop?: (index: number) => void
-  /** Lock / unlock a slot from the button on the photo. */
-  onToggleLock?: (index: number) => void
-  onDropPhoto?: (index: number, photoId: string) => void
+  /**
+   * layout: Bố cục — a filled slot opens Chỉnh ô, an empty slot adds the next tray photo. No drag/zoom here.
+   * preview: read-only (mini frame in Chỉnh ô, full-screen viewer); `onSlotTap` switches slots.
+   */
+  mode: 'layout' | 'preview'
+  onOpenSlot?: (index: number) => void
+  onAddSlot?: (index: number) => void
+  onSlotTap?: (index: number) => void
+  /** Red outline on the slot being edited (mini preview). */
+  highlightSlot?: number | null
+  onRemove?: (index: number) => void
   onImageError?: (message: string) => void
-  onTransform: (index: number, transform: Partial<ImageTransform>) => void
-  readonly?: boolean
+  className?: string
 }
 
-export function TemplateCanvas({ template, backgroundUrl, slots, activeSlot, cropSlot = null, lockedSlots = [], onActiveSlotChange, onAdd, onRemove, onReset = () => undefined, onBeginCrop = () => undefined, onToggleLock, onDropPhoto = () => undefined, onImageError = () => undefined, onTransform, readonly = false }: TemplateCanvasProps) {
-  return (
-    <TemplateSurface
-      className="rounded-[6px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.8)]"
-      renderSlot={(templateSlot, index) => {
-        const slot = slots[index] ?? null
-        const borderRadius = templateSlot.mask === 'circle' || templateSlot.mask === 'ellipse' ? '50%' : `${templateSlot.borderRadius / Math.min(templateSlot.width, templateSlot.height) * 100}%`
+const slotRadius = (slot: TemplateSlot) => slot.mask === 'circle' || slot.mask === 'ellipse' ? '50%' : `${slot.borderRadius / Math.min(slot.width, slot.height) * 100}%`
 
-        return (
-          <div className="h-full w-full overflow-hidden" style={{ backgroundColor: slot ? photoSlotBackingColor : undefined, borderRadius, border: templateSlot.borderWidth ? `${templateSlot.borderWidth}px solid ${templateSlot.borderColor ?? '#000000'}` : undefined, boxShadow: templateSlot.shadow?.blur ? `${templateSlot.shadow.offsetX}px ${templateSlot.shadow.offsetY}px ${templateSlot.shadow.blur}px ${templateSlot.shadow.color}` : undefined }}>
-            {readonly && slot ? (
-              <CustomerPhotoLayer slot={slot} />
-            ) : (
-              <EditorErrorBoundary fallback={<button className="grid h-full w-full place-items-center bg-cs-alert-error-bg p-2 text-xs font-bold text-cs-alert-error-fg" onClick={() => onRemove(index)} type="button">Ảnh lỗi · chạm để xoá</button>} onError={onImageError}><PhotoFrame
-                active={activeSlot === index}
-                cropMode={!lockedSlots.includes(index) && (cropSlot === index || activeSlot === index)}
-                locked={lockedSlots.includes(index)}
-                index={index}
-                slotLabel={template.slots.length > 1 ? `Hình ${index + 1}` : undefined}
-                onActivate={() => onActiveSlotChange(index)}
-                onAdd={() => onAdd(index)}
-                onBeginCrop={() => onBeginCrop(index)}
-                onDropPhoto={(photoId) => onDropPhoto(index, photoId)}
-                onImageError={onImageError}
-                onReset={() => onReset(index)}
-                onToggleLock={onToggleLock ? () => onToggleLock(index) : undefined}
-                onTransform={(transform) => onTransform(index, transform)}
-                rules={templateSlot.editableRules}
-                slot={slot}
-              /></EditorErrorBoundary>
-            )}
-          </div>
-        )
-      }}
-      backgroundUrl={backgroundUrl}
-      template={template}
-    />
-  )
+export function TemplateCanvas({ template, backgroundUrl, slots, mode, onOpenSlot, onAddSlot, onSlotTap, highlightSlot = null, onRemove = () => undefined, onImageError = () => undefined, className = 'rounded-[6px] shadow-[0_18px_40px_-12px_rgba(0,0,0,.8)]' }: TemplateCanvasProps) {
+  const many = template.slots.length > 1
+  return <TemplateSurface backgroundUrl={backgroundUrl} className={className} template={template} renderSlot={(templateSlot, index) => {
+    const slot = slots[index] ?? null
+    const size = { width: templateSlot.width, height: templateSlot.height }
+    const number = index + 1
+    return <div className="relative h-full w-full overflow-hidden" style={{ backgroundColor: slot ? photoSlotBackingColor : undefined, borderRadius: slotRadius(templateSlot), border: templateSlot.borderWidth ? `${templateSlot.borderWidth}px solid ${templateSlot.borderColor ?? '#000000'}` : undefined, boxShadow: templateSlot.shadow?.blur ? `${templateSlot.shadow.offsetX}px ${templateSlot.shadow.offsetY}px ${templateSlot.shadow.blur}px ${templateSlot.shadow.color}` : undefined }}>
+      <EditorErrorBoundary fallback={<button className="grid h-full w-full place-items-center bg-cs-alert-error-bg p-2 text-xs font-bold text-cs-alert-error-fg" onClick={() => onRemove(index)} type="button">Ảnh lỗi · chạm để xoá</button>} onError={onImageError}>
+        {slot ? <SlotPhoto loading={mode === 'layout' ? 'lazy' : 'eager'} onError={() => onImageError(`Không hiển thị được ảnh ở ô ${number}.`)} slot={slot} slotSize={size} /> : null}
+        {mode === 'layout' ? slot
+          ? <button aria-label={`Ô ${number}: chạm để chỉnh ảnh`} className="absolute inset-0 cursor-pointer" onClick={() => onOpenSlot?.(index)} type="button"><span aria-hidden="true" className="cs-mono absolute bottom-1.5 right-1.5 flex items-center gap-1 rounded-full bg-cs-ink/75 px-2 py-1 text-[10px] font-bold text-white"><Icon className="size-3" name="crop" />Chỉnh</span></button>
+          : <button aria-label={`Ô ${number}: thêm ảnh`} className="grid h-full w-full place-items-center bg-[#2A2D32] text-white transition-colors hover:bg-[#33363c]" onClick={() => onAddSlot?.(index)} type="button"><span className="grid place-items-center gap-1 text-center">{many ? <span className="cs-mono text-[10px] font-bold uppercase tracking-wider text-white/70">Ô {number}</span> : null}<span className="flex items-center gap-1 text-xs font-bold"><Icon className="size-4" name="add" />Thêm ảnh</span></span></button>
+          : onSlotTap && slot ? <button aria-label={`Chỉnh ô ${number}`} aria-current={highlightSlot === index || undefined} className="absolute inset-0" onClick={() => onSlotTap(index)} type="button" /> : !slot ? <div className="h-full w-full bg-[#2A2D32]" /> : null}
+        {highlightSlot === index ? <span aria-hidden="true" className="pointer-events-none absolute inset-0 border-2 border-cs-led" /> : null}
+      </EditorErrorBoundary>
+    </div>
+  }} />
 }

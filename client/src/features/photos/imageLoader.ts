@@ -41,11 +41,13 @@ export function loadPhotoFile(file: File): Promise<PhotoAsset> {
         if (!previewContext) throw new Error('Không tạo được bản xem trước của ảnh.')
         previewContext.drawImage(canvas, 0, 0, previewCanvas.width, previewCanvas.height)
         const previewBlob = await new Promise<Blob>((resolveBlob, rejectBlob) => previewCanvas.toBlob((blob) => blob ? resolveBlob(blob) : rejectBlob(new Error('Không tạo được bản xem trước của ảnh.')), preserveAlpha ? 'image/png' : 'image/jpeg', 0.9))
+        const exportWidth = canvas.width
+        const exportHeight = canvas.height
         context.clearRect(0, 0, canvas.width, canvas.height); canvas.width = 1; canvas.height = 1
         previewCanvas.width = 1; previewCanvas.height = 1
         releaseImage()
         URL.revokeObjectURL(src)
-        resolve({ id: `phone-${photoId()}`, src: exportSrc, previewSrc: URL.createObjectURL(previewBlob), blob: exportBlob, previewBlob, alt: file.name || 'Uploaded photo', source: 'phone' })
+        resolve({ id: `phone-${photoId()}`, src: exportSrc, previewSrc: URL.createObjectURL(previewBlob), blob: exportBlob, previewBlob, alt: file.name || 'Uploaded photo', source: 'phone', width: exportWidth, height: exportHeight })
       } catch (reason) {
         releaseImage()
         URL.revokeObjectURL(src)

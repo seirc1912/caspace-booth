@@ -1,6 +1,6 @@
 import type { BrandingConfig } from '../../../types/branding'
 import type { FilledSlot, PrintTemplate, TemplateElement, TemplateVariable } from '../../../types/selfBooth'
-import { basePhotoFitScale } from '../../photos/photoFit'
+import { placePhoto } from '../../photos/slotTransform'
 import { grayscaleRgbaPixels } from '../../photos/photoFilter'
 import { fillPhotoSlotBacking } from '../../photos/photoSlotBacking'
 
@@ -234,23 +234,17 @@ function grayscalePhotoSource(image: HTMLImageElement) {
   return canvas
 }
 
+/** Same placement as the editor (placePhoto), on the original photo at print resolution. */
 function drawPhoto(context: CanvasRenderingContext2D, image: HTMLImageElement, source: CanvasImageSource, slot: FilledSlot, x: number, y: number, width: number, height: number, mask: 'rectangle' | 'rounded' | 'circle' | 'ellipse', radius: number) {
-  const transform = slot.transform
-  const baseScale = basePhotoFitScale(
-    { width: image.naturalWidth, height: image.naturalHeight },
-    { width, height },
-    slot.fit ?? 'contain',
-  )
-  const drawWidth = image.naturalWidth * baseScale
-  const drawHeight = image.naturalHeight * baseScale
+  const placement = placePhoto(slot.transform, { width: image.naturalWidth, height: image.naturalHeight }, { width, height })
   context.save()
   framePath(context, x, y, width, height, mask, radius)
   context.clip()
   fillPhotoSlotBacking(context, x, y, width, height)
-  context.translate(x + width / 2 + transform.x * width, y + height / 2 + transform.y * height)
-  context.rotate(transform.rotation * Math.PI / 180)
-  context.scale(transform.flipX ? -transform.zoom : transform.zoom, transform.flipY ? -transform.zoom : transform.zoom)
-  context.drawImage(source, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
+  context.translate(x + placement.centerX, y + placement.centerY)
+  context.rotate(placement.rotation * Math.PI / 180)
+  context.scale(placement.flipX ? -1 : 1, 1)
+  context.drawImage(source, -placement.width / 2, -placement.height / 2, placement.width, placement.height)
   context.restore()
 }
 
@@ -333,7 +327,7 @@ export async function renderComposition(template: PrintTemplate, slots: Array<Fi
       if (slot && definition.visible !== false) {
         const image = await loadImage(slot.photo.src, 'customer-photo', options.assetCache)
         let source: CanvasImageSource = image
-        if (slot.filter === 'grayscale') {
+        if (slot.transform.grayscale) {
           let grayscale = grayscaleSources.get(slot.photo.src)
           if (!grayscale) { grayscale = grayscalePhotoSource(image); grayscaleSources.set(slot.photo.src, grayscale) }
           source = grayscale

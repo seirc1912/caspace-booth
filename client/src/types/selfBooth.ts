@@ -143,20 +143,28 @@ export interface PhotoAsset {
   previewBlob?: Blob
   alt: string
   source: 'selfbooth' | 'phone'
+  /** Size of `src` (the print source), for the print-quality warning. */
+  width?: number
+  height?: number
 }
 
-export interface ImageTransform {
-  zoom: number
-  rotation: number
-  x: number
-  y: number
-  flipX?: boolean
-  flipY?: boolean
+/**
+ * How a photo sits in its slot, relative to the slot (never screen pixels), so the screen
+ * and the print file draw the same crop. See features/photos/slotTransform.ts.
+ */
+export interface SlotTransform {
+  /** 1 = the photo just covers the slot (cover); 1–3. */
+  scale: number
+  /** Photo centre minus slot centre, in % of the slot width. */
+  offsetX: number
+  /** Photo centre minus slot centre, in % of the slot height. */
+  offsetY: number
+  rotation: 0 | 90 | 180 | 270
+  flipX: boolean
+  grayscale: boolean
 }
 
 export interface FilledSlot {
   photo: PhotoAsset
-  transform: ImageTransform
-  fit?: 'contain' | 'cover'
-  filter?: 'none' | 'grayscale'
+  transform: SlotTransform
 }

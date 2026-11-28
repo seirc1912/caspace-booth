@@ -71,8 +71,6 @@ export async function createOrderPhotoSnapshot(
         return {
           photo: { ...slot.photo, src, previewSrc: undefined, blob, previewBlob: undefined },
           transform: { ...slot.transform },
-          fit: slot.fit,
-          filter: slot.filter,
         }
       })),
     })))

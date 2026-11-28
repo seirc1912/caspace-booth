@@ -96,22 +96,23 @@ test('ticking a photo prefetches its original once; continuing reuses it', async
   assert.deepEqual(fetched, ['o/a'], 'downloaded once')
 })
 
-test('multi-photo frames label empty slots "Hình N" and the sheet says which photo goes where', () => {
-  assert.match(readFileSync('client/src/components/editor/TemplateCanvas.tsx', 'utf8'), /slotLabel=\{template\.slots\.length > 1 \? `Hình \$\{index \+ 1\}` : undefined\}/)
+test('multi-photo frames label empty slots "Ô N" and the sheet says which photo goes where', () => {
+  assert.match(readFileSync('client/src/components/editor/TemplateCanvas.tsx', 'utf8'), /\{many \? <span[^>]*>Ô \{number\}<\/span> : null\}/)
   const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
   assert.match(sheet, /`Hình \$\{target\}`/)
   assert.match(sheet, /Ảnh chọn trước vào hình trước/)
 })
 
-test('tapping an empty slot lets the customer pick several booth photos: tapped slot first, then the other empty slots', async () => {
-  const { assignPhotosToFrameTarget, createFramePhotoTarget } = await import('../client/src/features/photos/framePhotoTarget.ts')
+test('"+ Thêm ảnh" takes the next unused tray photo; the booth sheet opens only when the tray is used up', async () => {
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
-  assert.match(composer, /emptySlotIndices: \[slotIndex, \.\.\.frameTarget\.emptySlotIndices\.filter\(\(index\) => index !== slotIndex\)\]/)
+  assert.match(composer, /const unusedTray = boothPhotos\.filter\(\(photo\) => !usedNames\.has\(photo\.name\)\)/)
+  assert.match(composer, /const next = unusedTray\[0\]\n\s+if \(next\) placeBoothPhoto\(next, slotIndex\)\n\s+else openPhotoPicker\(slotIndex\)/)
+  const { assignPhotosToFrameTarget, createFramePhotoTarget } = await import('../client/src/features/photos/framePhotoTarget.ts')
   const target = createFramePhotoTarget('t', [null, null, null])
   const reordered = { ...target, emptySlotIndices: [1, 0, 2] }
   const photo = (id: string) => ({ id, src: `blob:${id}`, alt: id, source: 'selfbooth' as const })
   const next = assignPhotosToFrameTarget({}, reordered, [photo('a'), photo('b')])
-  assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'first pick → tapped Hình 2, second → Hình 1')
+  assert.deepEqual(next.t!.map((slot) => slot?.photo.id ?? null), ['b', 'a', null], 'photos fill the requested slot order')
 })
 
 test('photos the customer uploaded via /upload-anh are offered too; exported frames (caspace-…) are not', async () => {

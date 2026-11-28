@@ -2,21 +2,18 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assignPhotosToFrameTarget, createFramePhotoTarget } from '../client/src/features/photos/framePhotoTarget'
 import { assignPhotoToTarget } from '../client/src/features/photos/directPhotoTarget'
-import { initialPhotoTransform } from '../client/src/features/photos/initialPhotoSlot'
-import { basePhotoFitScale } from '../client/src/features/photos/photoFit'
+import { computeCover, createSlotTransform } from '../client/src/features/photos/slotTransform'
 import type { FilledSlot, PhotoAsset } from '../client/src/types/selfBooth'
 
 const photo = (index: number): PhotoAsset => ({ id: `photo-${index}`, src: `blob:photo-${index}`, alt: `Photo ${index}`, source: 'phone' })
-const existing = (index: number): FilledSlot => ({ photo: photo(index), transform: { ...initialPhotoTransform, x: 0.25 }, fit: 'contain', filter: 'grayscale' })
+const existing = (index: number): FilledSlot => ({ photo: photo(index), transform: { ...createSlotTransform(true), offsetX: 25 } })
 const emptySlots = (count: number) => Array.from({ length: count }, () => null)
 
 test('three selected photos fill a three-slot frame in order with the existing initial state', () => {
   const slots = emptySlots(3)
   const result = assignPhotosToFrameTarget({}, createFramePhotoTarget('frame', slots), [photo(1), photo(2), photo(3)])
   assert.deepEqual(result.frame?.map((slot) => slot?.photo.id), ['photo-1', 'photo-2', 'photo-3'])
-  assert.deepEqual(result.frame?.[0]?.transform, initialPhotoTransform)
-  assert.equal(result.frame?.[0]?.fit, 'contain')
-  assert.equal(result.frame?.[0]?.filter, 'none')
+  assert.deepEqual(result.frame?.[0]?.transform, createSlotTransform())
 })
 
 test('nine selected photos fill all nine slots deterministically', () => {
@@ -59,9 +56,8 @@ test('single and multi add initialize the same photo in the same slot identicall
   assert.deepEqual(multi.frame?.[0], single.frame?.[0])
 })
 
-test('each assigned photo computes its contain fit independently for its actual slot aspect ratio', () => {
-  const image = { width: 1200, height: 800 }
-  assert.equal(basePhotoFitScale(image, { width: 300, height: 600 }, 'contain'), 0.25)
-  assert.equal(basePhotoFitScale(image, { width: 600, height: 300 }, 'contain'), 0.375)
-  assert.equal(basePhotoFitScale(image, { width: 400, height: 400 }, 'contain'), 1 / 3)
+test('each assigned photo covers its own slot: cover scale follows the actual slot aspect ratio', () => {
+  assert.equal(computeCover(1200, 800, 300, 600), 0.75)
+  assert.equal(computeCover(1200, 800, 600, 300), 0.5)
+  assert.equal(computeCover(1200, 800, 400, 400), 0.5)
 })

@@ -54,7 +54,7 @@ test('editor offers "Gửi khung cho quán" and keeps the per-frame Save Photo',
   assert.match(app, /sendFrames\(\{ frames, phone: validPhone/)
   assert.match(app, /saveComposition\(/, 'Save Photo still saves to the phone')
   const composer = readFileSync('client/src/pages/ComposerPage.tsx', 'utf8')
-  assert.match(composer, /`Gửi in · \$\{sendableFrameCount\} khung`/)
+  assert.match(composer, /onClick=\{onOpenSendFrames\}.*\{canContinue \? 'Lưu & tiếp tục'/, '"Lưu & tiếp tục" opens the send step once this frame is full')
   assert.match(app, /navigate\('\/gui-in'\)/, 'opens the "Gửi in" step')
   const page = readFileSync('client/src/pages/SendFramesPage.tsx', 'utf8')
   assert.match(page, /`Gửi \$\{count\} khung cho quầy in`/)
