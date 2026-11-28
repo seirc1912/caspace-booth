@@ -181,6 +181,11 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
     if (files.length && target) { target.emptySlotIndices.slice(0, files.length).forEach((index) => expectPhoto(index)); onPickFramePhotos(target, files) }
   }
 
+  /** "Ảnh phòng chụp": pick large, sharp photos for the empty slots; a full frame (or no photos yet) just browses. */
+  const openBoothPhotos = () => {
+    if (boothPhotos.length && emptySlots.length) setPoolRequest({ kind: 'frame', target: { ...createFramePhotoTarget(template.id, slots), emptySlotIndices: emptySlots } })
+    else setBrowseBooth(true)
+  }
   /** "+ Thêm ảnh": the next unused tray photo; none left → the booth sheet or the phone. */
   const addToSlot = (slotIndex: number) => {
     const next = unusedTray[0]
@@ -315,14 +320,16 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
       {allBwEnabled ? <p className="cs-mono pointer-events-none absolute bottom-2 left-1/2 -translate-x-1/2 text-[10px] text-white/70">Đen trắng</p> : null}
     </section>
 
-    <div className="mt-2.5 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2">
+    <div className="mt-2.5 grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2">
       {boothPhotos.length ? <ul aria-label="Khay ảnh" className="flex min-w-0 gap-1.5 overflow-x-auto overscroll-x-contain rounded-[14px] bg-cs-graphite/5 p-1.5 [scrollbar-width:none]">
         {boothPhotos.map((photo, index) => {
           const used = usedNames.has(photo.name)
           return <li className="shrink-0" key={photo.id}><button aria-label={used ? `Ảnh ${index + 1}, đã dùng` : `Thêm ảnh ${index + 1} vào ô trống`} className={`relative block size-[46px] touch-pan-x select-none overflow-hidden rounded-[10px] bg-cs-graphite [-webkit-touch-callout:none] ${used ? 'opacity-55' : ''}`} disabled={busy} onClick={() => { if (!justDragged.current) placeFromTray(photo) }} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => startDrag({ kind: 'tray', photo }, photo.thumbUrl, event)} title="Chạm để thêm · kéo vào ô" type="button">{photo.thumbUrl ? <img alt="" className="pointer-events-none h-full w-full object-cover" decoding="async" draggable={false} loading="lazy" src={photo.thumbUrl} /> : null}{used ? <span aria-hidden="true" className="cs-led absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full text-white"><Icon className="size-3" name="check" /></span> : null}</button></li>
         })}
-      </ul> : <button className="cs-btn-chrome cs-press flex min-h-[58px] items-center justify-center gap-2 rounded-[14px] px-3 text-[14px] font-bold" onClick={() => emptySlots.length ? openFramePhotoPicker() : setBrowseBooth(true)} type="button"><Icon className="size-5" name="mobile" />{emptySlots.length ? 'Chọn ảnh từ điện thoại' : 'Ảnh phòng chụp'}</button>}
-      <button aria-busy={busy || undefined} className="cs-btn-chrome cs-press flex min-h-[58px] items-center gap-1.5 rounded-[14px] px-4 text-[15px] font-bold disabled:opacity-40" disabled={!emptySlots.length || busy} onClick={autoArrange} type="button">{busy ? <Spinner className="size-4" /> : <Icon className="size-[18px]" name="sparkles" />}Tự xếp</button>
+      </ul> : <button className="cs-btn-chrome cs-press flex min-h-[58px] items-center justify-center gap-2 rounded-[14px] px-3 text-[14px] font-bold" disabled={!emptySlots.length} onClick={openFramePhotoPicker} type="button"><Icon className="size-5 shrink-0" name="mobile" /><span className="leading-tight">Ảnh từ điện thoại</span></button>}
+      {/* Always visible (owner, 28/11/2026): customers look through the booth photos large and sharp, then pick. */}
+      <button aria-label={boothPhotos.length ? `Ảnh phòng chụp, ${boothPhotos.length} ảnh: xem lớn và chọn` : 'Ảnh phòng chụp'} className="cs-btn-chrome cs-press flex min-h-[58px] w-[66px] flex-col items-center justify-center gap-0.5 rounded-[14px] px-1 text-[11px] font-bold leading-tight" onClick={openBoothPhotos} type="button"><Icon className="size-[18px]" name="camera" /><span>Ảnh phòng chụp{boothPhotos.length ? ` (${boothPhotos.length})` : ''}</span></button>
+      <button aria-busy={busy || undefined} className="cs-btn-chrome cs-press flex min-h-[58px] items-center gap-1.5 rounded-[14px] px-3 text-[15px] font-bold disabled:opacity-40" disabled={!emptySlots.length || busy} onClick={autoArrange} type="button">{busy ? <Spinner className="size-4" /> : <Icon className="size-[18px]" name="sparkles" />}Tự xếp</button>
     </div>
 
     {dragImage !== null ? <div aria-hidden="true" className="pointer-events-none fixed left-0 top-0 z-[75] size-[60px] overflow-hidden rounded-[12px] border-2 border-white bg-cs-graphite shadow-[0_10px_28px_rgba(0,0,0,.45)]" ref={ghost} style={{ transform: 'translate(-200px, -200px)' }}>{dragImage ? <img alt="" className="h-full w-full object-cover" src={dragImage} /> : null}</div> : null}
@@ -330,7 +337,6 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
     {viewerOpen ? <FrameViewer backgroundUrl={backgroundUrl} onClose={() => setViewerOpen(false)} slots={slots} template={template} /> : null}
     {optionsOpen ? <BottomSheet onClose={() => setOptionsOpen(false)} subtitle={printLabel} title={`Tuỳ chọn · ${frameName}`}>
       <div className="grid gap-2">
-        <OptionButton icon="camera" label={boothPhotos.length ? `Ảnh phòng chụp (${boothPhotos.length})` : 'Ảnh phòng chụp'} onClick={() => { setOptionsOpen(false); setBrowseBooth(true) }} />
         <OptionButton icon="mobile" label="Thêm ảnh từ điện thoại" onClick={() => { setOptionsOpen(false); openFramePhotoPicker() }} disabled={!emptySlots.length} detail={emptySlots.length ? `Vào ${emptySlots.length} ô trống` : 'Khung đã đủ ảnh'} />
         <OptionButton icon="sparkles" label="Tự xếp tất cả khung" onClick={() => { setOptionsOpen(false); setAutoFillDialogOpen(true) }} disabled={!onAutoFillPhotos || !autoFillPhotoCount || busy} detail="Chia ảnh vào mọi khung của phòng" />
         <OptionButton icon="contrast" label="Đen trắng tất cả" onClick={() => onToggleAllBw?.()} disabled={!onToggleAllBw || downloading} pressed={allBwEnabled} />
