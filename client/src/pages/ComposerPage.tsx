@@ -305,7 +305,7 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
     <Button className="whitespace-nowrap" disabled={frames.length < 2 || !onSelectFrame} onClick={() => setFramesOpen(true)} variant="chrome">Khung khác</Button>
     {/* Kept in sight as before (owner, 28/11/2026): save the finished frame to the phone. */}
     {onDownload ? <button aria-busy={downloading || undefined} className="cs-btn-chrome cs-press flex min-h-14 min-w-[64px] flex-col items-center justify-center gap-0.5 rounded-[16px] px-2 text-[11px] font-bold leading-tight disabled:opacity-40" disabled={remainingSlotCount > 0 || downloading} onClick={onDownload} type="button">{downloading ? <Spinner className="size-[18px]" /> : <Icon className="size-[18px]" name="download" />}<span>{downloading ? 'Đang lưu…' : 'Lưu về máy'}</span></button> : null}
-    <Button disabled={!canContinue} onClick={onOpenSendFrames} trailingIcon={canContinue ? <Icon name="arrowRight" /> : undefined}>{canContinue ? 'Lưu & tiếp tục' : `Còn ${remainingSlotCount} ô trống`}</Button>
+    <Button disabled={!canContinue} onClick={onOpenSendFrames} trailingIcon={canContinue ? <Icon name="arrowRight" /> : undefined}>{canContinue ? 'Tiếp tục' : `Còn ${remainingSlotCount} ô`}</Button>
   </div></BottomBar>} className="overflow-x-hidden" footer={false}>
     <input accept="image/*" aria-label="Chọn một ảnh từ điện thoại" className="sr-only" onChange={choosePhoto} ref={photoInput} type="file" />
     <input accept="image/*" aria-label="Chọn nhiều ảnh từ điện thoại" className="sr-only" multiple onChange={chooseFramePhotos} ref={framePhotoInput} type="file" />

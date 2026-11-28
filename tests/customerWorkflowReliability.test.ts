@@ -131,5 +131,5 @@ test('Bố cục mode has no toolbar or photo pan/zoom: a filled slot opens Ch�
   assert.match(composer, /label="Tự xếp khung này" onClick=\{\(\) => \{ setOptionsOpen\(false\); autoArrange\(\) \}\} disabled=\{!emptySlots\.length \|\| busy\}/, 'Tự xếp (this frame) lives in the ✦ options (owner, 28/11/2026)')
   assert.match(composer, /<span>Chọn từ máy<\/span>/, 'the tray row picks photos from the phone instead')
   assert.match(composer, /label="Tự xếp tất cả khung"/)
-  assert.match(composer, /\{canContinue \? 'Lưu & tiếp tục' : `Còn \$\{remainingSlotCount\} ô trống`\}/)
+  assert.match(composer, /\{canContinue \? 'Tiếp tục' : `Còn \$\{remainingSlotCount\} ô`\}/)
 })
