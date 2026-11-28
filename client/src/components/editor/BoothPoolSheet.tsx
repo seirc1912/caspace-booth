@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { BoothPhotoViewer } from '../booth/BoothPhotoViewer'
-import type { BoothPhoto } from '../../features/boothPhotos/boothPhotosClient'
+import { boothPhotoThumb, type BoothPhoto } from '../../features/boothPhotos/boothPhotosClient'
 import { BottomSheet } from '../chrome/BottomSheet'
 import { Button } from '../chrome/Button'
 import { Icon } from '../ui/Icon'
@@ -64,7 +64,7 @@ export function BoothPoolSheet({ photos, mode, capacity = 1, slotNumbers = [], o
       const full = !isSelected && limit > 1 && selected.length >= limit
       return <li className="relative" key={photo.id}>
         <button aria-label={browse ? `Xem lớn ảnh ${index + 1}` : `Ảnh ${index + 1}${target ? `, vào hình ${target}` : ''}`} aria-pressed={browse ? undefined : isSelected} className={`relative block aspect-[2/3] w-full overflow-hidden rounded-[14px] bg-cs-graphite transition-opacity ${full ? 'opacity-55' : ''}`} onClick={() => browse ? setViewerIndex(index) : toggle(photo.id)} type="button">
-          {photo.thumbUrl ? <img alt="" className="h-full w-full object-cover" decoding="async" loading="lazy" src={photo.thumbUrl} /> : <span className="grid h-full place-items-center text-xs text-white/70">Ảnh {index + 1}</span>}
+          {boothPhotoThumb(photo) ? <img alt="" className="h-full w-full object-cover" decoding="async" loading="lazy" src={boothPhotoThumb(photo)} /> : <span className="grid h-full place-items-center text-xs text-white/70">Ảnh {index + 1}</span>}
           {isSelected ? <span aria-hidden="true" className="absolute inset-0 rounded-[14px] border-[3px] border-cs-led" /> : null}
           {browse ? null : <span aria-hidden="true" className={`absolute right-1.5 top-1.5 grid size-6 place-items-center rounded-full text-xs font-black ${isSelected ? 'cs-led text-white' : 'border-2 border-white bg-black/20'}`}>{isSelected ? order + 1 : null}</span>}
           {target ? <span className="cs-mono absolute inset-x-1.5 bottom-1.5 rounded-lg bg-cs-ink/85 px-1 py-1 text-center text-[10px] text-white">{`Hình ${target}`}</span> : null}

@@ -19,7 +19,7 @@ import { Button, Spinner } from '../components/chrome/Button'
 import { Stepper } from '../components/chrome/Stepper'
 import { stepCounter } from '../components/chrome/flowSteps'
 import { Icon, type IconName } from '../components/ui/Icon'
-import { loadBoothOriginals, MAX_BOOTH_SELECTION, type BoothPhoto } from '../features/boothPhotos/boothPhotosClient'
+import { boothPhotoThumb, loadBoothOriginals, MAX_BOOTH_SELECTION, type BoothPhoto } from '../features/boothPhotos/boothPhotosClient'
 
 interface ComposerPageProps {
   template: PrintTemplate
@@ -324,7 +324,7 @@ export function ComposerPage({ template, backgroundUrl, printSize, slots, onBack
       {boothPhotos.length ? <ul aria-label="Khay ảnh" className="flex min-w-0 gap-1.5 overflow-x-auto overscroll-x-contain rounded-[14px] bg-cs-graphite/5 p-1.5 [scrollbar-width:none]">
         {boothPhotos.map((photo, index) => {
           const used = usedNames.has(photo.name)
-          return <li className="shrink-0" key={photo.id}><button aria-label={used ? `Ảnh ${index + 1}, đã dùng` : `Thêm ảnh ${index + 1} vào ô trống`} className={`relative block size-[46px] touch-pan-x select-none overflow-hidden rounded-[10px] bg-cs-graphite [-webkit-touch-callout:none] ${used ? 'opacity-55' : ''}`} disabled={busy} onClick={() => { if (!justDragged.current) placeFromTray(photo) }} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => startDrag({ kind: 'tray', photo }, photo.thumbUrl, event)} title="Chạm để thêm · kéo vào ô" type="button">{photo.thumbUrl ? <img alt="" className="pointer-events-none h-full w-full object-cover" decoding="async" draggable={false} loading="lazy" src={photo.thumbUrl} /> : null}{used ? <span aria-hidden="true" className="cs-led absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full text-white"><Icon className="size-3" name="check" /></span> : null}</button></li>
+          return <li className="shrink-0" key={photo.id}><button aria-label={used ? `Ảnh ${index + 1}, đã dùng` : `Thêm ảnh ${index + 1} vào ô trống`} className={`relative block size-[46px] touch-pan-x select-none overflow-hidden rounded-[10px] bg-cs-graphite [-webkit-touch-callout:none] ${used ? 'opacity-55' : ''}`} disabled={busy} onClick={() => { if (!justDragged.current) placeFromTray(photo) }} onContextMenu={(event) => event.preventDefault()} onPointerDown={(event) => startDrag({ kind: 'tray', photo }, boothPhotoThumb(photo), event)} title="Chạm để thêm · kéo vào ô" type="button"><img alt="" className="pointer-events-none h-full w-full object-cover" decoding="async" draggable={false} loading="lazy" src={boothPhotoThumb(photo)} />{used ? <span aria-hidden="true" className="cs-led absolute right-0.5 top-0.5 grid size-4 place-items-center rounded-full text-white"><Icon className="size-3" name="check" /></span> : null}</button></li>
         })}
       </ul> : <button className="cs-btn-chrome cs-press flex min-h-[58px] items-center justify-center gap-2 rounded-[14px] px-3 text-[14px] font-bold" disabled={!emptySlots.length} onClick={openFramePhotoPicker} type="button"><Icon className="size-5 shrink-0" name="mobile" /><span className="leading-tight">Ảnh từ điện thoại</span></button>}
       {/* Always visible (owner, 28/11/2026): customers look through the booth photos large and sharp, then pick. */}

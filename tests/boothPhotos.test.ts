@@ -71,7 +71,7 @@ test('entering a room goes straight to the editor; booth photos live in its "Ả
   assert.match(composer, /if \(boothPhotos\.length && emptySlots\.length\) setPoolRequest\(\{ kind: 'frame'/, 'pick large photos for the empty slots; otherwise browse')
   assert.doesNotMatch(composer, /\{boothPhotos\.length \? <button[^>]*setBrowseBooth/, 'the button is always shown, even with no photos')
   const sheet = readFileSync('client/src/components/editor/BoothPoolSheet.tsx', 'utf8')
-  assert.match(sheet, /loading="lazy" src=\{photo\.thumbUrl\}/, 'sheet grid loads thumbnails only')
+  assert.match(sheet, /loading="lazy" src=\{boothPhotoThumb\(photo\)\}/, 'sheet grid loads thumbnails (preview only when a thumbnail is missing)')
   assert.doesNotMatch(sheet, /src=\{photo\.originalUrl\}/)
 })
 test('one browser session may look up at most 3 different phone numbers per 10 minutes', async () => {

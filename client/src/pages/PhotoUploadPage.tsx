@@ -113,6 +113,7 @@ export function PhotoUploadPage() {
     const batchStartedAt = performance.now()
     const pending = photos.map((photo, index) => ({ index, photo })).filter(({ photo }) => photo.state !== 'uploaded')
     let okCount = 0
+    const thumbnails: Array<Promise<void>> = []
     attemptRef.current += 1
     const totalBytes = pending.reduce((sum, { photo }) => sum + photo.file.size, 0)
     activeBatchRef.current = { runId, startedAt: batchStartedAt, fileCount: pending.length, totalBytes, okCount: 0, attempt: attemptRef.current }
@@ -134,7 +135,9 @@ export function PhotoUploadPage() {
           const thumbnailRequestId = `${submissionIdRef.current}-${index}`
           // Upload the JPEG made at pick time as the thumbnail, plus a 1600px copy for the large viewer,
           // then free the in-memory copy.
-          void queueThumbnailUpload({ file: photo.file, thumbnail: photoThumbnail(photo.file), phone: normalizedPhone, requestId: thumbnailRequestId, preview: true }).finally(() => releasePreload(photo.file))
+          const job = queueThumbnailUpload({ file: photo.file, thumbnail: photoThumbnail(photo.file), phone: normalizedPhone, requestId: thumbnailRequestId, preview: true })
+          thumbnails.push(job.thumbnail)
+          void job.done.finally(() => releasePreload(photo.file))
           if (activeBatchRef.current?.runId === runId) activeBatchRef.current.okCount = okCount
           setPhotos((current) => current.map((item) => item.id === photo.id ? { ...item, state: 'uploaded', progress: 100, uploadedBytes: item.file.size } : item))
         } catch (reason) {
@@ -142,6 +145,8 @@ export function PhotoUploadPage() {
           throw reason
         }
       })
+      // "Đã gửi" only once every small thumbnail is stored too, so the photo list never shows black tiles.
+      await Promise.allSettled(thumbnails)
       if (failures.length) {
         // Other photos were still sent; only the failed ones need a retry.
         const first = failures[0]!.reason
