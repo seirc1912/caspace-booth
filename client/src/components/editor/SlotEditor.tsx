@@ -34,7 +34,7 @@ interface SlotEditorProps {
 interface Gesture { pointers: Map<number, { x: number; y: number }>; origin: SlotTransform; startMid: { x: number; y: number }; startDistance: number; moved: boolean }
 
 function ToolButton({ label, icon, onClick, pressed, disabled, busy }: { label: string; icon: IconName; onClick: () => void; pressed?: boolean; disabled?: boolean; busy?: boolean }) {
-  return <button aria-pressed={pressed} className={`cs-press flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[14px] px-1 text-[11px] font-bold leading-tight disabled:opacity-40 ${pressed ? 'cs-btn-primary' : 'bg-white/10 text-white'}`} disabled={disabled} onClick={onClick} type="button"><Icon className="size-[18px]" name={icon} /><span>{busy ? 'Đang tìm…' : label}</span></button>
+  return <button aria-pressed={pressed} className={`cs-press flex min-h-[52px] min-w-0 flex-col items-center justify-center gap-1 rounded-[14px] px-1 text-[11px] font-bold leading-tight disabled:opacity-40 ${pressed ? 'cs-led text-white' : 'bg-white/10 text-white'}`} disabled={disabled} onClick={onClick} type="button"><Icon className="size-[18px]" name={icon} /><span>{busy ? 'Đang tìm…' : label}</span></button>
 }
 
 const readHintSeen = () => { try { return localStorage.getItem(HINT_KEY) === '1' } catch { return false } }
@@ -81,7 +81,7 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
     const measure = () => {
       const ratio = slotUnits.width / slotUnits.height
       const availableWidth = Math.max(80, element.clientWidth - 32)
-      const availableHeight = Math.max(80, element.clientHeight - 88)
+      const availableHeight = Math.max(80, element.clientHeight - 96)
       const width = Math.min(availableWidth, availableHeight * ratio)
       setWindowSize({ width, height: width / ratio })
     }
@@ -123,7 +123,7 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
   // Pointer positions relative to the window centre, in window pixels (= slot units for the maths).
   const local = (event: { clientX: number; clientY: number }) => {
     const rect = area.current!.getBoundingClientRect()
-    return { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 + 28 }
+    return { x: event.clientX - rect.left - rect.width / 2, y: event.clientY - rect.top - rect.height / 2 }
   }
   const windowSlot = () => windowSize ?? slotUnits
 
@@ -281,8 +281,8 @@ export function SlotEditor({ template, backgroundUrl, slots, initialIndex, frame
     </header>
 
     <div aria-label="Vùng chỉnh ảnh: kéo để di chuyển, chụm hai ngón hoặc lăn chuột để phóng, phím mũi tên để di chuyển, phím + và − để phóng" className="relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cs-led" onKeyDown={keyDown} onPointerCancel={pointerUp} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onWheel={wheel} ref={area} role="application" style={{ overscrollBehavior: 'none' }} tabIndex={0}>
-      {!hintSeen ? <p className="cs-mono pointer-events-none absolute inset-x-0 top-3 z-20 mx-auto w-fit rounded-full bg-white/90 px-3 py-1.5 text-[11px] font-bold text-cs-ink">Kéo để di chuyển · Chụm 2 ngón để phóng · Chạm đúp: 2×</p> : null}
-      {windowSize ? <div className="absolute left-1/2 top-[calc(50%-28px)]" style={{ width: windowSize.width, height: windowSize.height, transform: 'translate(-50%, -50%)' }}>
+      {!hintSeen ? <p className="pointer-events-none absolute inset-x-3 top-2.5 z-20 mx-auto w-fit max-w-full rounded-full bg-white/90 px-3 py-1.5 text-center text-[12px] font-bold leading-snug text-cs-ink">Kéo để di chuyển · Chụm 2 ngón để phóng · Chạm đúp: 2×</p> : null}
+      {windowSize ? <div className="absolute left-1/2 top-1/2" style={{ width: windowSize.width, height: windowSize.height, transform: 'translate(-50%, -50%)' }}>
         <SlotPhoto key={slot.photo.id} onSize={(size) => setPhotoSize({ photoId: slot.photo.id, size })} ref={image} slot={slot} slotSize={slotUnits} transform={savedTransform} />
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 border-2 border-white" style={{ boxShadow: '0 0 0 2000px rgba(11,12,14,.62)', borderRadius: templateSlot.mask === 'circle' || templateSlot.mask === 'ellipse' ? '50%' : undefined }}>
           {['-left-[3px] -top-[3px] border-l-[3px] border-t-[3px]', '-right-[3px] -top-[3px] border-r-[3px] border-t-[3px]', '-bottom-[3px] -left-[3px] border-b-[3px] border-l-[3px]', '-bottom-[3px] -right-[3px] border-b-[3px] border-r-[3px]'].map((corner) => <span className={`absolute size-4 border-cs-led ${corner}`} key={corner} />)}
